@@ -311,9 +311,11 @@ test("tool: marks.ran_before is a code fact, so a rerun note waits for the secon
 
 test("stop: blocks once per entry per turn, at most MAX_STOP_BLOCKS times, and resets on the next request", async () => {
   const id = newSession();
+  // A private, empty project: in a shared /tmp, other processes' writes count as this turn's edits.
+  const cwd = mkdtempSync(join(tmpdir(), "jevis-stop-"));
   reset({ "verification/unseen": 0.95, "verification/second": 0.9, "verification/third": 0.9 });
-  await onPrompt({ session_id: id, cwd: "/tmp", prompt: "fix the button", model: "gpt-6-sol" });
-  const stop = { session_id: id, cwd: "/tmp", model: "gpt-6-sol", last_assistant_message: "Fixed and verified in the browser." };
+  await onPrompt({ session_id: id, cwd, prompt: "fix the button", model: "gpt-6-sol" });
+  const stop = { session_id: id, cwd, model: "gpt-6-sol", last_assistant_message: "Fixed and verified in the browser." };
   const first = await onStop(stop);
   assert.equal(first.decision, "block");
   // The facts gate: no transcript means no edits, so the unseen-claim entry cannot fire; the other two can.
@@ -324,7 +326,7 @@ test("stop: blocks once per entry per turn, at most MAX_STOP_BLOCKS times, and r
   assert.equal(MAX_STOP_BLOCKS, 2);
   // Two entries blocked already: the turn is released.
   assert.equal(await onStop(stop), null);
-  await onPrompt({ session_id: id, cwd: "/tmp", prompt: "now the header", model: "gpt-6-sol" });
+  await onPrompt({ session_id: id, cwd, prompt: "now the header", model: "gpt-6-sol" });
   assert.ok(await onStop(stop));
 });
 
