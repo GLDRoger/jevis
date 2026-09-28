@@ -18,6 +18,7 @@ The decision model is TypeSafe's hosted [Jev](https://typesafe.ai), or any serve
 - [The wiki, and making it yours](#the-wiki-and-making-it-yours)
 - [Evaluating it yourself](#evaluating-it-yourself)
 - [Privacy](#privacy)
+- [Contributing](#contributing)
 
 ## What it does
 
@@ -373,6 +374,10 @@ The last confirmation round passed every gate except time.
   Variable names stay (`DB_PASSWORD=[redacted]`), so the model can still read the command.
 - **What leaves your machine.** The masked state (your message, the command or the lines an edit adds, the agent's final message, and file names) goes to the decision model. Screenshots, frames, and the request go to the critic (the Claude or Codex CLI you already use).
 - **What stays on your machine.** Sessions, logs, and the call record live in `~/.jevis`, readable only by you.
+
+## Contributing
+
+Lessons with evidence, new design telltales, benchmark runs, and harness adapters are all welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers setup, what a lesson needs to be merged, and how to keep private session details out of the repo.
 
 ## History and license
 
