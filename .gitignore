@@ -1,0 +1,8 @@
+node_modules/
+.DS_Store
+*.log
+eval/out/
+eval/prompts.jsonl
+docs/.*/
+eval/candidates/
+.jevis/

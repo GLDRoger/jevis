@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Design sessions, side by side</title>
+<style>
+  :root {
+    --bg: #e9e8e4;
+    --panel: #f7f6f2;
+    --ink: #1c1c1a;
+    --muted: #6b6a64;
+    --line: #cfcdc5;
+    --on: #1c1c1a;
+    --on-ink: #f7f6f2;
+    --win: #1f6b3a;
+    --loss: #9a2f1f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    display: grid;
+    grid-template-rows: auto 1fr;
+    overflow: hidden;
+  }
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    padding: 10px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  .group { display: flex; align-items: center; gap: 6px; }
+  .label { color: var(--muted); font-size: 12px; }
+  button, select {
+    font: inherit;
+    color: var(--ink);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 5px 10px;
+    cursor: pointer;
+  }
+  button:hover, select:hover { border-color: var(--ink); }
+  button:focus-visible, select:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  button[aria-pressed="true"] { background: var(--on); color: var(--on-ink); border-color: var(--on); }
+  select { min-width: 250px; }
+  .keys { margin-left: auto; color: var(--muted); font-size: 12px; }
+  kbd { font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; background: #fff; }
+
+  main { display: grid; grid-template-columns: 1fr 300px; min-height: 0; }
+  .stage { display: flex; gap: 16px; padding: 16px; min-height: 0; min-width: 0; }
+  .frame { position: relative; overflow: hidden; background: #fff; border: 1px solid var(--line); border-radius: 8px; min-height: 0; }
+  .frame iframe { position: absolute; top: 0; left: 0; border: 0; transform-origin: 0 0; background: #fff; display: none; }
+  .frame iframe.current { display: block; }
+  .desk { flex: 1; min-width: 0; }
+  .phone { flex: none; }
+  .frame .size { position: absolute; right: 8px; bottom: 6px; font-size: 11px; color: var(--muted); background: rgba(247,246,242,.9); padding: 1px 6px; border-radius: 4px; z-index: 1; }
+  body[data-view="desktop"] .phone, body[data-view="phone"] .desk { display: none; }
+
+  aside { border-left: 1px solid var(--line); background: var(--panel); padding: 16px; overflow-y: auto; }
+  aside h2 { font-size: 15px; margin: 0 0 4px; }
+  aside h3 { font-size: 12px; color: var(--muted); font-weight: 600; margin: 18px 0 6px; }
+  aside p, aside li { margin: 0 0 8px; }
+  aside ol { padding-left: 18px; margin: 0; }
+  .facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 8px 0 0; }
+  .facts dt { color: var(--muted); }
+  .facts dd { margin: 0; }
+  .won { color: var(--win); font-weight: 600; }
+  .lost { color: var(--loss); font-weight: 600; }
+  .hidden-note { color: var(--muted); }
+  .quiet { color: var(--muted); font-size: 12px; }
+  @media (max-width: 1000px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+    aside { max-height: 36vh; border-left: 0; border-top: 1px solid var(--line); }
+    .keys { display: none; }
+  }
+</style>
+</head>
+<body data-view="both">
+<header>
+  <div class="group">
+    <button id="prevSet" type="button">Previous task</button>
+    <select id="set" aria-label="Task and seed"></select>
+    <button id="nextSet" type="button">Next task</button>
+  </div>
+  <div class="group" id="variants" role="group" aria-label="Which result"></div>
+  <div class="group" role="group" aria-label="View">
+    <button type="button" data-view="both">Both</button>
+    <button type="button" data-view="desktop">Desktop</button>
+    <button type="button" data-view="phone">Phone</button>
+  </div>
+  <div class="group">
+    <button id="blind" type="button" aria-pressed="false">Blind</button>
+    <button id="reveal" type="button" hidden>Reveal</button>
+  </div>
+  <div class="keys"><kbd>←</kbd><kbd>→</kbd> result <kbd>↑</kbd><kbd>↓</kbd> task <kbd>1</kbd>-<kbd>4</kbd> jump <kbd>V</kbd> view <kbd>B</kbd> blind <kbd>R</kbd> reveal</div>
+</header>
+<main>
+  <div class="stage">
+    <div class="frame desk" id="desk"><span class="size">1440 wide, scaled</span></div>
+    <div class="frame phone" id="phone"><span class="size">390 wide</span></div>
+  </div>
+  <aside id="info"></aside>
+</main>
+<script>
+const SETS = /*DATA*/null;
+const state = { set: 0, variant: 0, view: "both", blind: false, revealed: false };
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+// Blind order: a fixed shuffle per task, so the same page keeps its number while you compare.
+function order(set) {
+  const idx = set.variants.map((_, i) => i);
+  if (!state.blind) return idx;
+  let h = 0;
+  for (const c of set.key) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  for (let i = idx.length - 1; i > 0; i--) {
+    h = (h * 1103515245 + 12345) >>> 0;
+    const j = h % (i + 1);
+    [idx[i], idx[j]] = [idx[j], idx[i]];
+  }
+  return idx;
+}
+const hide = () => state.blind && !state.revealed;
+const nameOf = (set, pos) => (hide() ? `Page ${pos + 1}` : set.variants[order(set)[pos]].label);
+
+function mountFrames() {
+  const set = SETS[state.set];
+  for (const host of [$("desk"), $("phone")]) host.querySelectorAll("iframe").forEach((f) => f.remove());
+  for (const v of set.variants) {
+    for (const [host, width] of [[$("desk"), 1440], [$("phone"), 390]]) {
+      const f = document.createElement("iframe");
+      f.src = `pages/${v.id}/index.html`;
+      f.title = v.label;
+      f.dataset.id = v.id;
+      f.dataset.width = width;
+      f.loading = "eager";
+      host.appendChild(f);
+    }
+  }
+}
+
+function fit() {
+  const desk = $("desk");
+  const phone = $("phone");
+  const h = desk.parentElement.clientHeight - 32;
+  const phoneScale = Math.min(1, h / 844, state.view === "phone" ? 1 : 0.9);
+  phone.style.width = `${390 * phoneScale}px`;
+  for (const [host, scale] of [[desk, desk.clientWidth / 1440], [phone, phoneScale]]) {
+    host.style.height = `${h}px`;
+    host.querySelectorAll("iframe").forEach((f) => {
+      f.style.width = `${f.dataset.width}px`;
+      f.style.height = `${h / scale}px`;
+      f.style.transform = `scale(${scale})`;
+    });
+  }
+}
+
+function verdictLine(v) {
+  if (!v.pair) return "";
+  const other = v.arm === "jevis" ? "the same harness without Jevis" : "the same harness with Jevis";
+  if (v.pair.tie) return `<p>Judge: tie against ${other}.</p>`;
+  return `<p>Judge: <span class="${v.pair.won ? "won" : "lost"}">${v.pair.won ? "won" : "lost"}</span> (${esc(v.pair.margin)}) against ${other}. ${esc(v.pair.why)}</p>`;
+}
+
+function render() {
+  const set = SETS[state.set];
+  const ord = order(set);
+  const v = set.variants[ord[state.variant]];
+  $("set").value = String(state.set);
+  $("variants").innerHTML = ord.map((_, pos) => `<button type="button" data-pos="${pos}" aria-pressed="${pos === state.variant}">${esc(nameOf(set, pos))}</button>`).join("");
+  document.querySelectorAll("[data-view]").forEach((b) => b.tagName === "BUTTON" && b.setAttribute("aria-pressed", String(b.dataset.view === state.view)));
+  document.body.dataset.view = state.view;
+  $("blind").setAttribute("aria-pressed", String(state.blind));
+  $("reveal").hidden = !hide();
+  document.querySelectorAll(".frame iframe").forEach((f) => f.classList.toggle("current", f.dataset.id === v.id));
+  const cross = set.cross.length && !hide()
+    ? `<h3>Against Claude Code bare, same task and seed</h3>${set.cross.map((c) => `<p>${esc(c.label)}: ${c.winner === "a" ? `<span class="won">${esc(c.label.split(" vs ")[0])} won</span>` : c.winner === "b" ? `<span class="lost">Claude Code bare won</span>` : "tie"} (${esc(c.margin)}). ${esc(c.why)}</p>`).join("")}`
+    : "";
+  $("info").innerHTML = `
+    <h2>${esc(nameOf(set, state.variant))}</h2>
+    <p class="quiet">${esc(set.name)}, seed ${set.seed}, ${esc(set.round)} round. ${state.variant + 1} of ${set.variants.length}.</p>
+    <h3>First request</h3><p>${esc(set.prompt)}</p>
+    <h3>Follow-ups the simulated user sent to this one</h3>
+    ${v.followups.length ? `<ol start="2">${v.followups.map((f) => `<li>${esc(f)}</li>`).join("")}</ol>` : "<p>None: satisfied after the first answer.</p>"}
+    ${hide()
+      ? `<p class="hidden-note">Labels, time and verdicts are hidden. Press R to reveal.</p>`
+      : `<h3>Session</h3><dl class="facts"><dt>Agent time</dt><dd>${v.minutes} min</dd><dt>Turns</dt><dd>${v.turns}</dd><dt>User satisfied</dt><dd>${v.satisfied ? "yes" : "no"}</dd></dl>${verdictLine(v)}${cross}`}
+    ${hide() ? "" : `<p class="quiet">In the judge's notes, A and B are its own blind labels for the two pages it compared.</p>`}
+    <p class="quiet"><a href="pages/${esc(v.id)}/index.html" target="_blank" rel="noopener">Open this page on its own</a></p>`;
+  fit();
+}
+
+function go({ set = state.set, variant = state.variant } = {}) {
+  const changedSet = set !== state.set;
+  state.set = (set + SETS.length) % SETS.length;
+  const n = SETS[state.set].variants.length;
+  state.variant = ((variant % n) + n) % n;
+  if (changedSet) {
+    state.revealed = false;
+    mountFrames();
+  }
+  render();
+}
+
+$("set").innerHTML = SETS.map((s, i) => `<option value="${i}">${esc(s.name)}, seed ${s.seed} (${esc(s.round)})</option>`).join("");
+$("set").addEventListener("change", (e) => go({ set: Number(e.target.value), variant: 0 }));
+$("prevSet").addEventListener("click", () => go({ set: state.set - 1, variant: 0 }));
+$("nextSet").addEventListener("click", () => go({ set: state.set + 1, variant: 0 }));
+$("variants").addEventListener("click", (e) => e.target.dataset.pos && go({ variant: Number(e.target.dataset.pos) }));
+document.querySelectorAll("button[data-view]").forEach((b) => b.addEventListener("click", () => ((state.view = b.dataset.view), render())));
+$("blind").addEventListener("click", () => ((state.blind = !state.blind), (state.revealed = false), (state.variant = 0), render()));
+$("reveal").addEventListener("click", () => ((state.revealed = true), render()));
+addEventListener("resize", fit);
+// A click inside a page moves focus into its frame, where the arrow keys would stop reaching the viewer: take it back.
+addEventListener("blur", () => setTimeout(() => document.activeElement?.tagName === "IFRAME" && window.focus(), 0));
+addEventListener("keydown", (e) => {
+  if (e.target.tagName === "SELECT" || e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === "arrowright") go({ variant: state.variant + 1 });
+  else if (k === "arrowleft") go({ variant: state.variant - 1 });
+  else if (k === "arrowdown" || k === "j") go({ set: state.set + 1, variant: 0 });
+  else if (k === "arrowup" || k === "k") go({ set: state.set - 1, variant: 0 });
+  else if (/^[1-4]$/.test(k)) go({ variant: Number(k) - 1 });
+  else if (k === "v") ((state.view = { both: "desktop", desktop: "phone", phone: "both" }[state.view]), render());
+  else if (k === "b") ((state.blind = !state.blind), (state.revealed = false), (state.variant = 0), render());
+  else if (k === "r" && hide()) ((state.revealed = true), render());
+  else return;
+  e.preventDefault();
+});
+mountFrames();
+render();
+</script>
+</body>
+</html>

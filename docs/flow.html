@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jevis · What it does at each step</title>
+<meta name="description" content="A flowchart of Jevis: what it reads at each moment of an agent's session, what it asks, and what the agent gets back.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Ccircle cx=%228%22 cy=%228%22 r=%226%22 fill=%22%23F2C94C%22 stroke=%22%231D3A4A%22 stroke-width=%222%22/%3E%3C/svg%3E">
+<style>
+/* Tanker (Indian Type Foundry, via Fontshare) is self-hosted: the page opens from disk, and the Google-font rotation reads as generated. Body text is system-ui. */
+@font-face { font-family: "Tanker"; src: url("fonts/Tanker-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+:root {
+  --ground: #E9EEF0;
+  --ink: #1D3A4A;
+  --accent: #F2C94C;
+  --support: #6E8FA3;
+  --plate: #DCE4E8;
+  --paper: #F6F8F9;
+  --rule: rgba(29, 58, 74, 0.22);
+  --muted: #4A6475;
+  --add: #2F5F7A;
+  --add-tint: #D7E5EE;
+  --refuse: #B3261E;
+  --refuse-tint: #F6DEDC;
+  --back: #8A6A00;
+  --back-tint: #FBEFC6;
+  --quiet: #5B6B75;
+  --display: "Tanker", "Arial Narrow", Impact, sans-serif;
+  --text: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --code: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #17191A; --ink: #E6ECEF; --plate: #212426; --paper: #1C1F20;
+    --rule: rgba(230, 236, 239, 0.2); --muted: #A9BAC4; --support: #7E9DB0;
+    --add: #9CC7E0; --add-tint: #1E2C35; --refuse: #FF8A80; --refuse-tint: #3A2020;
+    --back: #F2C94C; --back-tint: #342C12; --quiet: #9AA8B0;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 400 16px/1.6 var(--text); }
+a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+code { font-family: var(--code); font-size: 0.86em; background: var(--plate); padding: 0 0.3em; border-radius: 3px; }
+.wrap { max-width: 1320px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 48px); }
+
+/* Masthead: the same maker plate as the manual, one size down. */
+header.top { padding: 28px 0 8px; display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.maker { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+.dot { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 2px solid #1D3A4A; flex: none; }
+nav.pages { display: flex; gap: 4px; flex-wrap: wrap; }
+nav.pages a { padding: 8px 12px; border-radius: 8px; text-decoration: none; font-weight: 500; transition: background-color 120ms; }
+nav.pages a:hover { background: var(--plate); }
+nav.pages a[aria-current="page"] { background: var(--ink); color: var(--ground); }
+nav.pages a:focus-visible, summary:focus-visible, .filter button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+h1 { font: 400 clamp(34px, 4.4vw, 64px)/1 var(--display); margin: 28px 0 12px; }
+.lede { font-size: clamp(18px, 2vw, 21px); max-width: 60ch; margin: 0 0 12px; }
+.lede + p { color: var(--muted); max-width: 64ch; margin: 0; }
+
+/* The four things that can come back, as a key. */
+.key { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 20px 0 0; padding: 0; list-style: none; font-size: 15px; }
+.key li { display: flex; align-items: center; gap: 8px; }
+.key span { color: var(--muted); }
+.swatch { width: 14px; height: 14px; border-radius: 3px; flex: none; }
+.s-add { background: var(--add); } .s-refuse { background: var(--refuse); } .s-back { background: var(--back); }
+.s-quiet { border: 2px dashed var(--quiet); }
+
+.filter { display: flex; gap: 8px; align-items: center; margin: 24px 0 8px; flex-wrap: wrap; }
+.filter p { margin: 0 8px 0 0; font-weight: 700; }
+.filter button { font: inherit; font-size: 15px; color: inherit; background: transparent; border: 1px solid var(--rule); border-radius: 999px; padding: 6px 14px; cursor: pointer; transition: background-color 120ms, border-color 120ms; }
+.filter button:hover { border-color: var(--ink); }
+.filter button:active { transform: scale(0.97); }
+.filter button[aria-pressed="true"] { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+
+/* One lane per moment: what happens, what Jevis reads and asks, the decision, what comes back. */
+.lanes { margin: 16px 0 64px; display: grid; gap: 20px; }
+.lane { display: grid; grid-template-columns: minmax(0, 1fr) 36px minmax(0, 1.15fr) 36px minmax(0, 0.8fr) 36px minmax(0, 1.7fr); align-items: start; background: var(--paper); border: 1px solid var(--rule); border-radius: 16px; padding: 20px; }
+.lane[hidden] { display: none; }
+.node { border-radius: 12px; padding: 14px 16px; min-width: 0; }
+.trigger { background: var(--ink); color: var(--ground); display: flex; flex-direction: column; gap: 6px; }
+.trigger h2 { font: 800 21px/1.2 var(--text); margin: 0; }
+.trigger .hook { font-family: var(--code); font-size: 13px; opacity: 0.8; }
+.trigger p { margin: 0; font-size: 15px; opacity: 0.92; }
+.ask { background: var(--ground); border: 1px solid var(--rule); }
+.ask h3, .decide h3 { font-size: 13px; font-weight: 700; color: var(--muted); margin: 0 0 4px; }
+.ask p { margin: 0 0 10px; font-size: 15px; }
+.ask p:last-child { margin-bottom: 0; }
+.all { margin: 8px 0 0; padding-left: 18px; font-size: 14px; }
+.all li { margin: 2px 0; }
+/* The decision: a question in a lozenge, sitting level with the first outcome. */
+.decide { text-align: center; border: 2px solid var(--ink); border-radius: 16px; padding: 14px 16px; font-weight: 700; font-size: 15px; line-height: 1.35; }
+.decide h3 { font-weight: 500; }
+.arrow { display: flex; align-items: center; justify-content: center; color: var(--support); height: 56px; }
+.arrow svg { width: 28px; height: 16px; }
+.outs { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.out { border-radius: 12px; padding: 12px 14px; border: 1px solid transparent; min-width: 0; }
+.out header { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.out .when { font-size: 13px; color: var(--muted); }
+.out header b { font-size: 16px; }
+.out p { margin: 6px 0 0; font-size: 15px; }
+.out.add { background: var(--add-tint); border-color: var(--add); } .out.add header b { color: var(--add); }
+.out.refuse { background: var(--refuse-tint); border-color: var(--refuse); } .out.refuse header b { color: var(--refuse); }
+.out.back { background: var(--back-tint); border-color: var(--back); } .out.back header b { color: var(--back); }
+.out.quiet { border: 1.5px dashed var(--quiet); } .out.quiet header b { color: var(--quiet); }
+.limit { margin-top: 8px; font-size: 14px; color: var(--muted); }
+details { margin-top: 8px; }
+summary { cursor: pointer; font-weight: 700; font-size: 14px; width: fit-content; border-radius: 4px; }
+summary:hover { text-decoration: underline; }
+/* Featured steering: the literal text, with its Now / Instead labels set in bold so the shape reads at a glance. */
+.steer { margin: 0 0 40px; }
+.steer h2 { font: 400 clamp(26px, 3vw, 36px)/1.05 var(--display); margin: 0 0 8px; }
+.steer > p { margin: 0 0 16px; max-width: 70ch; color: var(--muted); }
+.steer-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.steer figure { margin: 0; background: var(--paper); border: 1px solid var(--rule); border-radius: 16px; padding: 16px; min-width: 0; }
+.steer figcaption { display: flex; align-items: center; gap: 8px; font-weight: 700; margin-bottom: 10px; }
+details pre b { font-weight: 800; }
+details pre .lead { color: var(--muted); }
+.rows { display: grid; grid-template-columns: 5.5em minmax(0, 1fr); gap: 10px 14px; margin: 0; }
+.rows dt { font-weight: 800; font-size: 14px; padding-top: 1px; }
+.rows dd { margin: 0; font-size: 15px; }
+.rows dd code { white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .rows { grid-template-columns: 1fr; gap: 2px; } .rows dd { margin-bottom: 10px; } }
+@media (max-width: 900px) { .steer-grid { grid-template-columns: 1fr; } }
+details pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.6 var(--text); background: var(--ground); border: 1px solid var(--rule); border-radius: 8px; padding: 12px; margin: 8px 0 0; max-height: 360px; overflow: auto; }
+
+/* The two rules that hold everywhere. */
+.always { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 0 0 24px; }
+.always section { border: 1px solid var(--rule); border-radius: 16px; padding: 20px; background: var(--paper); }
+.always h2 { font-size: 20px; margin: 0 0 6px; }
+.always p { margin: 0; }
+
+.why { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 48px; margin: 0 0 80px; }
+.why h2 { font: 400 clamp(30px, 4vw, 44px)/1 var(--display); grid-column: 1 / -1; margin: 24px 0 8px; }
+.why h3 { margin: 0 0 4px; font-size: 18px; }
+.why p { margin: 0; color: var(--ink); }
+footer { border-top: 1px solid var(--rule); padding: 24px 0 48px; color: var(--muted); font-size: 14px; }
+
+@media (max-width: 1100px) {
+  .lane { grid-template-columns: minmax(0, 1fr) 36px minmax(0, 1.2fr); row-gap: 0; }
+  .lane .decide { grid-column: 1; }
+  .lane .a3 { grid-column: 2; }
+  .lane .outs { grid-column: 3; }
+  .lane .a2 { grid-column: 1 / -1; height: 36px; }
+  .lane .a2 svg { transform: rotate(90deg); }
+  .lane .decide { align-self: start; }
+}
+@media (max-width: 720px) {
+  .always, .why { grid-template-columns: 1fr; }
+  .lane { grid-template-columns: minmax(0, 1fr); padding: 14px; }
+  .lane > * { grid-column: 1 !important; }
+  .arrow { height: 32px; }
+  .arrow svg { transform: rotate(90deg); }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <span class="maker"><span class="dot" aria-hidden="true"></span>Jevis</span>
+    <nav class="pages" aria-label="Pages">
+      <a href="index.html">How data moves</a>
+      <a href="flow.html" aria-current="page">What it does at each step</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>What Jevis does at each step</h1>
+    <p class="lede">Jevis watches a coding agent at six moments. At each one it reads what is happening, asks Jev (a fast yes-or-no model) a set of questions, and either stays quiet or steers: it names what the agent is doing wrong and what to do instead.</p>
+
+    <ul class="key" aria-label="What can come back">
+      <li><span class="swatch s-add" aria-hidden="true"></span><b>Adds a note</b><span>nothing is stopped</span></li>
+      <li><span class="swatch s-refuse" aria-hidden="true"></span><b>Refuses the call</b><span>the command or edit does not run</span></li>
+      <li><span class="swatch s-back" aria-hidden="true"></span><b>Sends it back</b><span>the agent cannot finish yet</span></li>
+      <li><span class="swatch s-quiet" aria-hidden="true"></span><b>Stays quiet</b><span>the usual result</span></li>
+    </ul>
+
+    <div class="filter" role="group" aria-label="Show lanes">
+      <p>Show</p>
+      <button type="button" aria-pressed="true" data-show="all">Every moment</button>
+      <button type="button" aria-pressed="false" data-show="stops">Where it can stop the agent</button>
+      <button type="button" aria-pressed="false" data-show="design">Design work</button>
+    </div>
+
+    <div class="lanes" id="lanes"></div>
+
+    <section class="steer" aria-labelledby="steer-h">
+      <h2 id="steer-h">What steering reads like</h2>
+      <p>Two of Jevis's messages from Sep 27 2026, each cut to one finding. The refused edit is from the test battery. The review is from a live simulated session in which Codex built a page for this brief and Jevis sent it back twice.</p>
+      <div class="steer-grid">
+        <figure>
+          <figcaption><span class="swatch s-refuse" aria-hidden="true"></span>An edit it refused</figcaption>
+          <dl class="rows">
+            <dt>The agent</dt><dd>wrote a headline as <code>&lt;h1 style="background:linear-gradient(90deg,#8b5cf6,#ec4899);-webkit-background-clip:text"&gt;Supercharge your invoicing&lt;/h1&gt;</code></dd>
+            <dt>Now</dt><dd>Gradient-filled headline text is the most recognizable mark of a generated landing page. It lowers contrast, blurs the letterforms, and says nothing about the product.</dd>
+            <dt>Instead</dt><dd>Set the text in one solid color from the palette and create emphasis with size, weight, a typeface change, or placement.</dd>
+          </dl>
+          <details><summary>Full message</summary><pre id="steer-edit"></pre></details>
+        </figure>
+        <figure>
+          <figcaption><span class="swatch s-back" aria-hidden="true"></span>A page it sent back</figcaption>
+          <dl class="rows">
+            <dt>The agent</dt><dd>Codex (GPT-6 Sol) said its landing page for Kiln &amp; Co, a pottery studio in Leeds, was done.</dd>
+            <dt>Now</dt><dd>The copy says 'escape from screens' five times. It says almost nothing a prospective student needs to know. The 'Good to know' list reads 'What: Pottery wheel classes / Where: Leeds, UK', which just restates the brief.</dd>
+            <dt>Instead</dt><dd>Make the details list the real decision table: which evenings and times, session length, experience level, class size, price, what's included, and the studio address. Where the facts aren't known, put clearly marked placeholders. Don't invent them.</dd>
+          </dl>
+          <details><summary>Full message</summary><pre id="steer-review"></pre></details>
+        </figure>
+      </div>
+    </section>
+
+    <div class="always">
+      <section>
+        <h2>Secrets never leave the machine</h2>
+        <p>Before Jev or the critic sees anything, Jevis masks private keys (SSH, PEM, PGP), card numbers that pass the Luhn check and their security codes, passwords in assignments, JSON, flags, URLs and headers, and provider tokens (OpenAI, Anthropic, Stripe, GitHub, AWS, Google, Slack and more). The name stays, so <code>DB_PASSWORD=[redacted]</code> still reads as a database login. The same mask applies to everything Jevis writes to disk.</p>
+      </section>
+      <section>
+        <h2>When Jevis is unsure, it gets out of the way</h2>
+        <p>No key, Jev down, a slow answer, a crash, or a critic that fails: every one of these ends in "stays quiet". Jevis sends a second request after 700 ms and takes whichever answers first, so a slow reply rarely costs a check. The worst case is the agent working as if Jevis were not there.</p>
+      </section>
+    </div>
+
+    <section class="why" aria-labelledby="why">
+      <h2 id="why">Why the limits exist</h2>
+      <div><h3>Four notes per message</h3><p>A message can match a dozen lessons. Past four, the agent skims them all, and your own words get buried under Jevis's. So a message gets at most four notes and 3,000 characters, strongest first, and each note once per session. After the context is compacted, the agent has forgotten them, so they can come back.</p></div>
+      <div><h3>Two send-backs per turn</h3><p>The hook system Jevis replaces once held a session for hours over one wrong block. Jevis sends a turn back at most twice for its checks and twice for design review, and never for the same lesson twice in a turn. After that, the agent finishes and you decide.</p></div>
+      <div><h3>"Did you ask for exactly this?"</h3><p>Every refusal has a second question: did your message ask for exactly this? A force push you asked for goes through. A purple gradient your brand uses goes through. The rule catches defaults, not your decisions.</p></div>
+      <div><h3>"Subagents spend the user's limits"</h3><p>One lesson, not a setting. Astra, one of Codex's GPT-6 models, kept spinning up subagents for small jobs, and every one drew on your plan's usage. When you had not asked for delegation, that lesson reminds it that parallel agents cost you, so it works alone unless the job needs them.</p></div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Counts are from the wiki as of Sep 27 2026: 34 lessons for messages, 10 rules for commands (plus 4 optional destructive ones), 31 design-slop refusals for edits, 15 checks for turn endings. Every example is the exact text Jevis sends; the lesson given for the pottery page came from a live Codex session, and the other triggers are test inputs from that day.</p>
+  </footer>
+</div>
+
+<script>
+const ARROW = '<svg viewBox="0 0 28 16" aria-hidden="true"><path d="M0 8h22" stroke="currentColor" stroke-width="2"/><path d="M20 2l7 6-7 6" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+
+const LANES = [
+  {
+    id: "prompt", tags: ["design"],
+    trigger: "You send a message", hook: "UserPromptSubmit",
+    detail: "Before the agent reads it.",
+    reads: "Your message, the one before it, attachment names, and the folder (is it a git repo, is it empty).",
+    asks: "Ten questions that profile the message: does it want a change, is it open-ended, visual, code, new, risky, a correction, a delegation, dependent on current facts, mostly writing. Then one question per lesson: 34 of them.",
+    decide: "Does a lesson match this message, and has the agent not had it yet this session?",
+    outs: [
+      { kind: "add", label: "Adds a note", when: "up to four lessons",
+        text: "The lessons that match, strongest first, each ending in what to do instead.",
+        limit: "At most 4 notes and 3,000 characters per message.",
+        example: "Jevis: lessons from past sessions where requests like this went wrong. Use what fits; where the user's instructions differ, theirs win.\n\n**The two default pages.** An open brief pulls one of two first drafts. One is the SaaS page: centered hero on a soft gradient, three feature cards, a logo strip, and pricing, in Inter on near-white with a purple or blue accent. The other is warm editorial: an oat or cream ground with terracotta, sage, or espresso, a big serif headline with one italic word, a rotating stamp, and a marquee of values. The user has rejected both.\n\nInstead: pick one concept from the subject's own world, or borrow a structure from outside its category (a timetable, a specimen drawer, a record sleeve). Let it decide layout, type, palette roles, and motion before writing markup. Then build every state a person meets: hover, focus, empty, loading, error, and a 390px phone.",
+        exampleNote: "Given to Codex for \"make me a landing page for my pottery studio Kiln & Co in leeds\", with three more lessons." },
+      { kind: "quiet", label: "Stays quiet", when: "most messages",
+        text: "92 of 220 of your real messages matched no lesson. Questions and small fixes usually don't." },
+    ],
+  },
+  {
+    id: "command", tags: ["stops"],
+    trigger: "The agent runs a command", hook: "PreToolUse · Bash",
+    detail: "Before the command runs.",
+    reads: "The command, your current request, and the folder.",
+    asks: "Could it destroy something that can't be recovered? Does it send something off the machine? Then 10 rules that are on by default: visible windows, sound, and security dialogs; rerunning the full suite after every edit; weakened tests; unasked commits; borrowed credentials. Four destructive rules (force pushes, machine-wide Docker deletes, browser security flags, wide deletes) are optional, because the harness already guards them.",
+    decide: "Does a refusal rule match, and did you not ask for exactly this?",
+    outs: [
+      { kind: "refuse", label: "Refuses the call", when: "a refusal rule matches",
+        text: "The command never runs. The agent reads why and what to do instead.",
+        example: "Jevis stopped this call. Visible windows and sound: The user works on this Mac while agents run. A headed browser or a raised app steals window focus, and sound interrupts them. Run browsers headless with audio muted (Chrome: --headless=new --mute-audio), or use the hidden in-app browser. Skip chromedriver and other drivers or downloaded binaries: macOS can stop them with a security dialog on the user's screen. Use Playwright (playwright-core with channel \"chrome\") or Chrome's own --headless=new --screenshot instead.\nRedo the call without this. If the user explicitly asked for exactly this, tell them why it was stopped and let them run it.",
+        exampleNote: "For /opt/homebrew/bin/chromedriver --port=9517, which a simulated Codex session ran to screenshot its page: macOS put an \"Apple could not verify\" dialog on the user's screen." },
+      { kind: "add", label: "Adds a note", when: "a habit is starting",
+        text: "The command runs, with a one-time note beside it.",
+        example: "Jevis, before this call:\n\n**Focused checks, one full pass.** Every small edit gets the whole gate: typecheck, lint, all tests, a production build, sometimes in each subagent too. On an expensive model this burns the user's weekly quota and hours of wall time, while the real risk (the screens) goes unchecked.\n\nInstead: after each edit, run the narrowest check that covers it. Run the full suite once, at the end or before a requested commit.",
+        exampleNote: "For a full typecheck, lint, test and build after a one-line edit." },
+      { kind: "quiet", label: "Stays quiet", when: "almost every command",
+        text: "Reads, searches, builds, and tests go straight through. The check takes under half a second." },
+    ],
+  },
+  {
+    id: "edit", tags: ["stops", "design"],
+    trigger: "The agent writes or edits a file", hook: "PreToolUse · Edit, Write, apply_patch",
+    detail: "Before the edit lands.",
+    reads: "Only the lines the edit adds, not the ones it removes or keeps. Up to 4,000 characters.",
+    asks: "One question per design telltale: 31 of them, such as gradient text, emoji icons, and invented testimonials.",
+    all: ["Colored accent-edge bars","The pastel candy gradient","The fake countdown","Hand-drawn SVG ornaments","The default Google-font rotation","Em dashes in interface copy","Emoji as icons","The announcement pill","Invented social proof","Fake window mockups","The three-card feature row","Frosted-glass cards","Glow blobs and neon shadows","Glowy pill buttons","Gradient-filled text","Graph-paper backgrounds","Hand-rolled icons","Content hidden behind an entrance animation","Hover lift and the button boop","Hype copy","Icons in colored tiles","The marquee ribbon","Numbered mono labels","The dot under the active nav item","The purple gradient","The section-scrolling sidebar","The sun-and-moon theme toggle","Template sections","The rotating text stamp","Growing-underline hovers","The warm-editorial palette"],
+    decide: "Does the edit add a telltale, and did you not ask for it?",
+    outs: [
+      { kind: "refuse", label: "Refuses the edit", when: "slop is being added",
+        text: "The edit does not land. Every pattern it added is named in one reason, so the agent fixes them in one retry.",
+        example: "Jevis stopped this call:\n- Gradient-filled text: Gradient-filled headline text is the most recognizable mark of a generated landing page. It lowers contrast, blurs the letterforms, and says nothing about the product.\n\nInstead: set the text in one solid color from the palette and create emphasis with size, weight, a typeface change, or placement.\n- The purple gradient: Purple-to-blue or purple-to-pink gradients are the default fill of generated SaaS pages and dashboards. ...\n- Hype copy: Hype verbs ('Unlock', 'Elevate', 'Supercharge') and adjectives ('seamless', 'effortless') are the vocabulary of generated copy. ...\n\nInstead: say literally what it does, for whom, and with what result.\nRedo the call without this. If the user explicitly asked for exactly this, tell them why it was stopped and let them run it.",
+        exampleNote: "For a headline written as <h1 style=\"background:linear-gradient(90deg,#8b5cf6,#ec4899);-webkit-background-clip:text\">Supercharge your invoicing</h1>." },
+      { kind: "quiet", label: "Stays quiet", when: "clean edits, and what you asked for",
+        text: "In a test of 43 edits, all 43 were judged right: slop refused, and look-alikes allowed. Allowed examples: your brand's purple gradient, a testimonial you supplied, a Lucide icon, a data sparkline, a docs page that names the patterns.",
+        limit: "Up to 3 refusals are combined into one reason." },
+    ],
+  },
+  {
+    id: "stop", tags: ["stops"],
+    trigger: "The agent says it's done", hook: "Stop",
+    detail: "As the agent tries to end its turn.",
+    reads: "Its final message, and what the session log shows it did this turn: files changed, and every command and check after the last edit.",
+    asks: "Did you ask for work? Does it claim done? Does it claim it verified? Is the work visual, or a film? Then 15 checks: claims nobody looked at, no checks after the last edit, a deploy called done on green tests, admitted gaps, announcing the next step instead of doing it, asking permission for work you asked for.",
+    decide: "Does the final message claim something the turn doesn't back up, or leave requested work undone?",
+    outs: [
+      { kind: "back", label: "Sends it back", when: "a check fires",
+        text: "The agent keeps working. If the check doesn't apply, it must give its full answer again and say why in one line.",
+        limit: "At most 2 check-based send-backs per turn, each lesson once.",
+        example: "Jevis, before you finish:\n- A visual change nobody looked at: The final message says the visual work is ready, but nothing rendered it after the last change. Sol and Astra finish UI work on unit tests and a build, and the user opens it to find a broken login, a clipped logo, or a missing panel.\n\nOpen it in a headless or in-app browser, never a window that takes focus. Drive the changed flow the way a user would.\nFix this. If it does not apply to what the user asked, give your complete final answer again and add one line on why this check does not apply: your last message is what the user or the calling agent reads.",
+        exampleNote: "For \"Fixed; it works in the browser.\" when no browser ran after the last edit. Sol and Astra are Codex's GPT-6 models." },
+      { kind: "quiet", label: "Lets it finish", when: "the claims hold",
+        text: "On 312 real turn endings from 60 sessions, 4 were sent back (1.3%). In two of them, your next message was a production error." },
+    ],
+  },
+  {
+    id: "review", tags: ["stops", "design"],
+    trigger: "Visual work is done", hook: "Stop · after the checks pass",
+    detail: "Only when you asked for work, it is visual, and the turn changed interface files.",
+    reads: "It renders what the agent made in a headless, muted browser: the page the agent served (or a dev server running from the project, or the changed HTML file) at 1440 and 390 pixels, plus dark mode when the page has one. For a film, 8 frames across its runtime.",
+    asks: "Claude, as a design director who didn't make it, gets your request, the screenshots, what rendering showed (errors, sideways scrolling, frozen stretches), the 31 telltales, and the lessons this session already gave.",
+    decide: "Would a demanding designer ship it?",
+    outs: [
+      { kind: "back", label: "Sends it back", when: "not ready", open: true,
+        text: "Up to five changes, most important first, each written as what is there now and what to do instead.",
+        limit: "At most 2 review rounds per turn. A round takes about 30 seconds.",
+        example: "Jevis design review, round 1 of 2. Claude looked at renders of index.html at 1440 and 390 px and would not ship it yet:\n1. Now: The page never says what or where the studio is. The words 'Kiln & Co', 'Leeds', 'wheel classes' and 'weekday evenings' appear nowhere on screen. The hero headline is 'Unlock your creative potential'. Both are generic hype that could sit on any site.\n   Instead: Lead with the name and the offer. Show 'Kiln & Co' as the masthead. Write a headline about the actual thing, e.g. 'Wheel classes in Leeds, weekday evenings'. Replace 'Get started' with 'Book a class'.\n2. Now: The hero is a purple-to-violet gradient (#667eea to #764ba2) with a blurred pink glow blob, gradient-clipped headline text, and a purple-to-pink button. Nothing about it says clay, a workshop, or Leeds.\n   Instead: Build a palette from the studio itself, such as raw stoneware grey, a glaze colour, or kiln-brick. Use one ground, one ink, and one accent reserved for the booking action. A real photograph of hands on a wheel should carry the hero.\n3. Now: Three identical frosted-glass cards with emoji icons. On the phone, repeat(3,300px) overflows sideways.\n   Instead: One class-details section built around the actual offer: schedule, what a session covers, group size, where the studio is, reflowing to one column on phones.\nKeep: The single centred call to action. It should become 'Book a class'.\nMake these changes, render it again, and look at the result yourself before you finish.",
+        exampleNote: "A real review, shortened, of a test page built from every telltale." },
+      { kind: "quiet", label: "Lets it finish", when: "ready to ship",
+        text: "The critic is told not to invent problems. On the second round it asks only for what is still clearly wrong." },
+    ],
+  },
+  {
+    id: "compact", tags: [],
+    trigger: "The conversation is compacted", hook: "SessionStart · PostCompact",
+    detail: "When the context is summarized or cleared.",
+    reads: "Only which lessons this session has already been given.",
+    asks: "Nothing. No call to Jev.",
+    decide: "Was the context compacted or cleared?",
+    outs: [
+      { kind: "quiet", label: "Returns nothing", when: "always",
+        text: "It forgets which notes the agent has had, because the agent has forgotten them too. Lessons that apply again can come back once." },
+    ],
+  },
+];
+
+/** An example's text, escaped, with its labels in bold: Now, Instead, Keep, and each lesson's title. */
+const fmt = (t) => esc(t)
+  .replace(/^(Jevis[^\n]*?:)/, '<span class="lead">$1</span>')
+  .replace(/(^|\n)(\s*)(\d+\. )?(Now:|Instead:|Keep:)/g, "$1$2$3<b>$4</b>")
+  .replace(/(^|\n)(- )([^:\n]{3,48}:)/g, "$1$2<b>$3</b>")
+  .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+  .replace(/(^|\n\n)(Instead:)/g, "$1<b>$2</b>");
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+function out(o) {
+  return `<div class="out ${o.kind}">
+    <header><b>${esc(o.label)}</b><span class="when">${esc(o.when)}</span></header>
+    <p>${esc(o.text)}</p>
+    ${o.limit ? `<p class="limit">${esc(o.limit)}</p>` : ""}
+    ${o.example ? `<details${o.open ? " open" : ""}><summary>What the agent reads</summary><pre>${fmt(o.example)}</pre>${o.exampleNote ? `<p class="limit">${esc(o.exampleNote)}</p>` : ""}</details>` : ""}
+  </div>`;
+}
+document.getElementById("lanes").innerHTML = LANES.map((l) => `
+  <article class="lane" data-tags="${l.tags.join(" ")}" aria-labelledby="t-${l.id}">
+    <div class="node trigger"><span class="hook">${esc(l.hook)}</span><h2 id="t-${l.id}">${esc(l.trigger)}</h2><p>${esc(l.detail)}</p></div>
+    <div class="arrow a1">${ARROW}</div>
+    <div class="node ask"><h3>Reads</h3><p>${esc(l.reads)}</p><h3>Asks</h3><p>${esc(l.asks)}</p>${l.all ? `<details><summary>All ${l.all.length}</summary><ul class="all">${l.all.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details>` : ""}</div>
+    <div class="arrow a2">${ARROW}</div>
+    <div class="node decide"><h3>Decides</h3>${esc(l.decide)}</div>
+    <div class="arrow a3">${ARROW}</div>
+    <div class="outs">${l.outs.map(out).join("")}</div>
+  </article>`).join("");
+
+const LIVE_REVIEW = "Jevis design review, round 1 of 2. Claude looked at renders of index.html at 1440 and 390 px and would not ship it yet:\n1. Now: The blue full-bleed panel ('After the workday / LESS SCREEN. MORE SPIN.') in both page screenshots. It has a hand-drawn SVG cartoon cup tilted inside two concentric rings, and the cartoon clashes with the real hero photo. The headline says 'Clock off. Clay on.' again in new words. The panel also brings in a fourth background colour (ink, paper, blue, clay), so every section sits on a different ground and the palette has no clear roles.\n   Instead: Delete the panel and its SVG. Replace it with a section that shows one evening at the wheel, set on paper or ink: wedge the clay, centre it, open and pull a cylinder, trim, then your pieces are fired and glazed and you collect them later. Use the hero photo (a crop of it, or a second real photo slot) rather than an illustration. Limit the palette to ink, paper and lime. Keep clay only if it has one job, such as the enquiry band.\n2. Now: The copy says 'escape from screens' five times: the hero, the signal bar, 'Make room for making', the blue panel and 'Make a little mess'. It says almost nothing a prospective student needs to know. The 'Good to know' list reads 'What: Pottery wheel classes / Where: Leeds, UK', which just restates the brief. The experience rows ('Slow down / Try it out / Come back') could sit on any hobby site.\n   Instead: Make the details list the real decision table: which evenings and times, session length, experience level (beginners?), class size, price, what's included (clay, firing, glazing), and the studio address with the nearest landmark or tram and bus stop. Where the facts aren't known, put clearly marked placeholders with an HTML comment asking the owner to fill them. Don't invent them. Rewrite the three experience rows as concrete things that happen in the class, not moods.\n3. Now: Raw Unicode '\u2197' arrows on the nav CTA, every button, and the footer 'Say hello' link, plus a '\u2733' glyph in the lime signal bar under the hero (1440 page). These render as emoji or in a fallback font on some platforms. The signal bar itself is a filler strip repeating 'MAKE SPACE FOR SOMETHING DIFFERENT / WHEEL CLASSES / WEEKDAY EVENINGS / LEEDS'.\n   Instead: Remove the signal bar entirely, since the eyebrow already carries 'Evening wheel classes \u00b7 Leeds'. Drop the arrows from buttons, or use one consistent inline SVG icon at a fixed size and stroke. The footer link needs no glyph.\n4. Now: Tracked uppercase labels in five different styles: the hero eyebrow with a lime rule, the section kickers in clay, the uppercase 'HANDS BUSY. HEAD QUIET. / LEEDS, UK' caption on the photo, the vertical rotated 'KILN & CO \u00b7 AFTER HOURS' on the photo edge, and the all-caps signal bar. On top of that, 'MAKING.' is set as hollow outlined text, an accent-word trick that turns thin and hard to read on the 390 screenshot.\n   Instead: Keep one kind of label: the section kickers. Delete the vertical rotated text and the photo caption overlay, and let the photo stand alone. Set 'MAKING.' in solid ink like the rest of the headline.\n5. Now: Both hero CTAs ('Explore the class', 'How it works') only scroll down the page. The one real action, emailing to ask about a place, appears only at the very bottom and in the header outline button. On the phone the header CTA is the only way to act before scrolling about 4,000px.\n   Instead: Make the hero primary button the enquiry ('Ask about a place', mailto, same as the contact button). Keep 'How it works' as the secondary text link pointing to the details table. After the details table, add a single inline enquiry link so readers can act as soon as they have the facts.\nKeep: The hero: 'CLOCK OFF. CLAY ON.' in heavy condensed type on ink, next to the dark, warm photo of hands on the wheel. It speaks straight to the weekday-evening, after-work audience the brief describes. The ink and lime pairing is distinctive, and the page avoids invented prices, testimonials and social proof.\nMake these changes, render it again, and look at the result yourself before you finish.";
+const find = (lane, kind) => LANES.find((l) => l.id === lane).outs.find((o) => o.kind === kind);
+document.getElementById("steer-edit").innerHTML = fmt(find("edit", "refuse").example);
+document.getElementById("steer-review").innerHTML = fmt(LIVE_REVIEW);
+
+const buttons = [...document.querySelectorAll(".filter button")];
+for (const b of buttons) {
+  b.addEventListener("click", () => {
+    for (const x of buttons) x.setAttribute("aria-pressed", String(x === b));
+    const show = b.dataset.show;
+    for (const lane of document.querySelectorAll(".lane")) lane.hidden = show !== "all" && !lane.dataset.tags.split(" ").includes(show);
+  });
+}
+</script>
+</body>
+</html>

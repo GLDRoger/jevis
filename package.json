@@ -1,0 +1,34 @@
+{
+  "name": "jevis",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hooks that give Codex, Claude Code, and other coding agents a second pair of eyes: lessons at the right moment, refusals before mistakes, and a design review before done.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GLDRoger/jevis.git"
+  },
+  "keywords": [
+    "codex",
+    "claude-code",
+    "coding-agents",
+    "hooks",
+    "typesafe",
+    "jev",
+    "laya"
+  ],
+  "type": "module",
+  "bin": {
+    "jevis": "bin/jevis.mjs"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "lint": "node bin/jevis.mjs lint"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "playwright-core": "1.63.0"
+  }
+}
