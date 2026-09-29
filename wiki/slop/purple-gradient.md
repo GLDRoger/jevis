@@ -1,6 +1,7 @@
 ---
 event: tool
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+when: { marks.plain_read: false }
 ask: Does `input` write user-interface code that adds a purple, violet, indigo, or fuchsia gradient (alone or blending into blue or pink) to a hero, page background, button, or card?
 yes: linear-gradient or radial-gradient, or Tailwind from-/via-/to- classes, with purple, violet, indigo, or fuchsia stops (for example #667eea to #764ba2, from-purple-500 to-pink-500, from-indigo-600 to-violet-600)
 no: Gradients in other hues, a solid purple that is the brand color, or no gradient at all. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

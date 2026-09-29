@@ -1,6 +1,7 @@
 ---
 event: tool
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+when: { marks.plain_read: false }
 ask: Does `input` write a fake app or code window drawn in HTML or CSS: a rounded panel with red, yellow, and green traffic-light dots, a filename tab, or a mock interface inside?
 yes: Three small colored circles in a title bar, a fake editor window with a quickstart.ts tab and a made-up SDK call, or a CSS mockup of a desktop app filled with placeholder kanban cards or avatars
 no: The real product's working interface built as live UI, a real screenshot of the product, or a code block showing real code from the project's docs. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

@@ -1,6 +1,7 @@
 ---
 event: tool
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+when: { marks.plain_read: false }
 ask: Does `input` write user-interface markup that places a small rounded pill or badge above a hero headline to announce something (for example 'New', 'Introducing', 'Now in beta', 'Backed by', or a version)?
 yes: A rounded-full bordered chip or badge with a short announcement sitting right above the main headline
 no: Status badges inside an app's data (order status, tags), or no pill above the headline. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

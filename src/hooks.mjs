@@ -3,6 +3,8 @@ import { evaluate } from "./engine.mjs";
 import { redact } from "./redact.mjs";
 import { criticBackend, designLaw, formatReview, review, roundsFor } from "./review.mjs";
 import { freshSession, loadSession, log, saveSession } from "./state.mjs";
+import { wikiFor } from "./wiki.mjs";
+import { insideFolder, splitFolders } from "./paths.mjs";
 
 /**
  * The four hooks. Every one fails open: no Jev, no key, a timeout, or a bug
@@ -27,12 +29,16 @@ export const TIMEOUTS = { prompt: 3000, tool: 1500, stop: 3000 };
 const timeout = (event) => Number(process.env.JEVIS_TIMEOUT_MS) || TIMEOUTS[event];
 const shadow = () => process.env.JEVIS_MODE === "shadow";
 
-/** JEVIS_DISABLE silences every hook; JEVIS_SCOPE (colon-separated path prefixes) limits them to those folders. */
-export function inScope(cwd) {
+/** JEVIS_DISABLE silences every hook; JEVIS_SCOPE (platform-separated folders) limits them to those folders and everything inside them. */
+export function inScope(cwd, { platform = process.platform, delimiter = platform === "win32" ? ";" : ":" } = {}) {
   if (process.env.JEVIS_DISABLE) return false;
   const scope = process.env.JEVIS_SCOPE;
   if (!scope) return true;
-  return scope.split(":").filter(Boolean).some((p) => cwd?.startsWith(p) || cwd?.startsWith(`/private${p}`));
+  if (!cwd) return false;
+  // A folder, not a string prefix: /projects/app does not cover /projects/application. macOS reports /tmp as /private/tmp.
+  if (platform === "win32") return splitFolders(scope, delimiter).some((p) => insideFolder(cwd, p, platform));
+  const within = (dir) => dir === "" || insideFolder(cwd, dir, platform);
+  return splitFolders(scope, delimiter).map((p) => p.replace(/\/+$/, "")).some((p) => within(p) || within(`/private${p}`));
 }
 
 const summary = (r) => ({ ms: r.ms, error: r.error ?? undefined, skipped: r.skipped ?? undefined, pool: r.pool, profile: r.profile, fired: r.fired.map((e) => ({ id: e.id, p: r.scores[e.id] })) });
@@ -84,9 +90,9 @@ export async function onPrompt(input) {
     // Whether this user keeps a design law file (see designLaw in review.mjs).
     user: { design_law: designLaw() !== null },
   };
-  const result = await evaluate({ event: "prompt", state, model: session.model, harness, sessionId, timeoutMs: timeout("prompt") });
+  const result = await evaluate({ event: "prompt", state, model: session.model, harness, sessionId, timeoutMs: timeout("prompt"), wiki: wikiFor(cwd) });
   const notes = pickNotes(result.fired, session);
-  log({ event: "prompt", sessionId, harness, model: session.model, turn: session.turn, cwd, request: clip(session.request, 200), ...summary(result), acted: notes.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
+  log({ event: "prompt", sessionId, harness, model: session.model, origin: state.agent.origin, turn: session.turn, cwd, request: clip(session.request, 200), ...summary(result), acted: notes.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
   if (!notes.length || shadow()) return null;
   const now = loadSession(sessionId);
   for (const e of notes) now.shown[e.id] = session.turn;
@@ -116,13 +122,17 @@ export async function onTool(input) {
   const shown = toolInput(tool, input.tool_input);
   const key = tool === "Bash" ? commandKey(shown) : null;
   const commands = session.commands ?? [];
-  const state = { request: session.request ?? "", tool, input: shown, marks: inputMarks(shown, { ranBefore: key !== null && commands.includes(key) }), workspace: workspaceOf(cwd) };
+  const state = { request: session.request ?? "", tool, input: shown, marks: inputMarks(shown, { tool, ranBefore: key !== null && commands.includes(key) }), workspace: workspaceOf(cwd) };
   if (key && !commands.includes(key)) {
     session.commands = [...commands, key].slice(-COMMAND_MEMORY);
     saveSession(sessionId, session);
   }
-  const result = await evaluate({ event: "tool", state, tool, model: session.model, harness, sessionId, timeoutMs: timeout("tool") });
-  if (result.skipped) return null;
+  const result = await evaluate({ event: "tool", state, tool, model: session.model, harness, sessionId, timeoutMs: timeout("tool"), wiki: wikiFor(cwd) });
+  if (result.skipped) {
+    // Logged without the input: a skipped call is counted by `jevis stats`, not judged.
+    log({ event: "tool", sessionId, harness, turn: session.turn, tool, skipped: result.skipped, plain_read: state.marks.plain_read || undefined });
+    return null;
+  }
   // Every matching deny goes back at once: an edit with three slop patterns should be fixed in one retry, not three.
   const denies = result.fired.filter((e) => e.action === "deny").slice(0, MAX_DENIES);
   const notes = denies.length ? [] : pickNotes(result.fired, session, 2);
@@ -132,8 +142,10 @@ export async function onTool(input) {
     return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: denyReason(denies) } };
   }
   if (!notes.length) return null;
-  for (const e of notes) session.shown[e.id] = session.turn;
-  saveSession(sessionId, session);
+  // Re-read before writing: other hooks of this session (parallel tool calls, subagents) may have saved while Jev answered.
+  const now = loadSession(sessionId);
+  for (const e of notes) now.shown[e.id] = session.turn;
+  saveSession(sessionId, now);
   return { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: formatNotes(notes, "Jevis, before this call:") } };
 }
 
@@ -154,7 +166,7 @@ export async function onStop(input) {
   const { harness } = harnessOf(input, { withModel: false });
   const since = session.turnStartedAt ?? lastUserMessageAt(items);
   const state = { request: session.request ?? "", final_message: clip(final, 3000), evidence: withTouched(turnEvidence(items ?? [], { since, cwd }), cwd, session.turnStartedAt) };
-  const result = await evaluate({ event: "stop", state, model: session.model, harness, sessionId, timeoutMs: timeout("stop") });
+  const result = await evaluate({ event: "stop", state, model: session.model, harness, sessionId, timeoutMs: timeout("stop"), wiki: wikiFor(cwd) });
   const blocks = wikiSpent ? [] : result.fired.filter((e) => e.action === "block" && !session.stop.blocked.includes(e.id)).slice(0, 2);
   log({ event: "stop", sessionId, harness, turn: session.turn, final: clip(final, 200), evidence: { edited: state.evidence.edited, files: state.evidence.files_changed_count, ui_files: state.evidence.ui_files_changed.length, after: state.evidence.actions_after_last_edit.length }, ...summary(result), acted: blocks.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
   if (!blocks.length) return reviewTurn({ input, session, sessionId, cwd, harness, state, profile: result.profile, items, since, final });
@@ -173,9 +185,18 @@ export async function onStop(input) {
 
 /**
  * The design and film review: after the wiki passes a turn of visual work that
- * changed interface files, render it and let the critic judge it. Its "now A,
- * instead X" list goes back as a block, at most roundsFor(session) times a turn.
+ * changed interface files and says the work is done, render it and let the
+ * critic judge it. Its "now A, instead X" list goes back as a block, at most
+ * roundsFor(session) times a turn.
+ *
+ * A progress report is not reviewed. An agent orchestrating background workers
+ * ends many turns with "still building": in the maintainer's log (Sep 28 2026),
+ * every reviewed turn of finished work scored claims_done 0.75 to 0.97, and
+ * every progress report 0.03 to 0.21. Two progress reports were reviewed
+ * anyway: the critic judged a half-built film by its blank frames and sent the
+ * orchestrator 7 fixes for work its workers had not finished.
  */
+export const REVIEW_CLAIMS_DONE = 0.5;
 async function reviewTurn({ input, session, sessionId, cwd, harness, state, profile, items, since, final }) {
   const film = (profile.film ?? 0) >= 0.6;
   const rounds = roundsFor(session);
@@ -183,6 +204,7 @@ async function reviewTurn({ input, session, sessionId, cwd, harness, state, prof
     session.stop.reviews < rounds &&
     criticBackend() !== "off" &&
     (profile.work_requested ?? 0) >= 0.6 &&
+    (profile.claims_done ?? 0) >= REVIEW_CLAIMS_DONE &&
     ((profile.visual ?? 0) >= 0.6 || film) &&
     (film ? state.evidence.files_changed_count > 0 : state.evidence.ui_files_changed.length > 0);
   if (!due) return null;

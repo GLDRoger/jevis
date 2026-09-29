@@ -30,13 +30,19 @@ Then find the row:
 | design to the user's own rules | the design law file | `~/.jevis/design-law.md` |
 | soften, retarget, or rewrite a shipped lesson | a copy with the same id | `~/.jevis/wiki/<same id>.md` |
 | drop a shipped lesson | a file whose frontmatter is only `off: true` | `~/.jevis/wiki/<same id>.md` |
-| turn on the shipped optional safety entries | configuration | `JEVIS_ENABLE` (README, Configuration) |
-| use another decision model, act only in some folders, go quiet, change the reviewer | configuration | README, Configuration |
+| give everyone working in one repository a lesson | an entry in the repository's lessons; the user then runs `jevis trust <repo>` | `<repo>/.jevis/wiki/<area>/<name>.md` |
+| make a lesson fire more or less often | its `ask`, `yes`, and `no` wording first, `min` second | the entry; measure with `jevis stats --near` |
+| turn on the shipped optional safety entries | configuration | `JEVIS_ENABLE` in `~/.jevis/config.json` (README, Configuration) |
+| use another decision model, act only in some folders, go quiet, change the reviewer | configuration | `~/.jevis/config.json` (README, Configuration) |
 | judge a fact the state doesn't carry, such as a count or an exact character | code: compute it as a fact | `src/context.mjs` or `src/hooks.mjs`, then WIKI.md, "The state Jev reads" |
 | gate many entries on one new shared question | code: a new axis | `src/axes.mjs`, then WIKI.md, "Axes" |
 | change how pages or films are reviewed when a turn ends | code | `src/review.mjs` (`criticPrompt`, `REVIEW_ROUNDS`) |
 
 `~/.jevis/wiki/` is the user's own wiki. It loads after the shipped `wiki/`, survives `git pull`, and wins on a shared id. Edit the repo's `wiki/` only when the change is meant for every Jevis user, as a contribution.
+
+A repository's `.jevis/wiki/` loads last, only inside that repository, and only after the user runs `jevis trust <repo>`. Trusting is the user's decision, since it lets the repository's text into every session there: write the entry, lint it from inside the repository, and ask the user to run `trust` once they have read it. A repository's lessons can't turn off or replace a `safety/` entry; that change belongs in `~/.jevis/wiki/`.
+
+**When the user asks for lessons from their own history** rather than one specific change, run `jevis mine` (add `--since 14d` or `--limit 60` for more). It lists the turns where they corrected the agent: what they asked, what the agent answered, what they said next. Look for a habit that repeats across sessions, name it in one sentence as above, and confirm it with the user before writing anything. One annoyed message is not a lesson.
 
 ## 2. Write the entry
 
@@ -45,7 +51,7 @@ Read `WIKI.md` in full first. It defines every field, the state each moment sees
 1. **Check what exists.** List `wiki/*/` and `~/.jevis/wiki/*/` and read any entry near the new behavior. If one covers it, replace that entry by id instead of adding a second that fires alongside it.
 2. **Choose the moment by where the evidence is.** A `prompt` entry sees the request. A `tool` entry sees the command, or only the lines an edit adds. A `stop` entry sees the final message and facts about what the turn did (`evidence.*`).
 3. **Ask one literal question.** Name the state field in backticks. Describe the pattern the way code or a command would spell it (`background-clip: text`, `git push --force`), because the model answers the words, not the intent. Put boundary cases in `yes:` and `no:`. Leave arithmetic to code, as a fact.
-4. **Gate with `when`,** using axes (`visual: ">=0.6"`) or facts (`"evidence.edited": true`), instead of folding those conditions into the question.
+4. **Gate with `when`,** using axes (`visual: ">=0.6"`) or facts (`"evidence.edited": true`), instead of folding those conditions into the question. A `tool` entry that applies to `Bash` and is about what a command writes, runs, or opens takes `marks.plain_read: false`, so `ls`, `rg`, and `git log` skip it without a call.
 5. **Refusals need extra care.** `deny` and `block` take `min: 0.85` or higher, and an `unless` that asks whether the user asked for exactly this. A wrong refusal costs more than a missed note. When the harm isn't concrete, use `context`.
 6. **Write the body for a capable colleague.** Name the failure in a sentence or two, then write `Instead:` and the concrete alternative. Give the reason, because agents rightly distrust unexplained instructions injected mid-session. Keep it under 900 characters.
 7. **Cite the source:** the user's own words, the date, the session or incident. An entry without evidence is an opinion.
@@ -56,6 +62,7 @@ A design telltale, in the shape every shipped `slop/` entry uses:
 ---
 event: tool
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+when: { marks.plain_read: false }
 ask: Does `input` write user-interface code that <the pattern, as code spells it>?
 yes: <what counts>
 no: <look-alikes that must pass>. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.
@@ -93,10 +100,11 @@ The change is live on the next hook call. Nothing needs reinstalling.
 
    For an entry with a `family:`, add a model from that family, such as `--model gpt-6-sol` or `--model claude-opus-5-5`. Without `--model`, entries of both families are asked, as they are for Gemini, Grok, and other models. The output shows each firing entry's probability and the closest ones that did not fire. The hit should clear `min` with room to spare, and each look-alike should sit well below it, ideally under 0.5. When a case lands near the line, rewrite `ask`, `yes`, and `no` rather than moving `min`.
 3. Replay real history when the user has it: `jevis replay <session file or id>` on a session where the failure happened and on one where it didn't.
+   When you change an existing lesson, `jevis stats --near` shows it against every recorded answer to its current question: how often it would fire today, how often it landed within 0.1 of `min`, and how often `unless` or `when` stood it down. A reworded `ask` starts from zero there, since the old answers were to a different question.
 4. For code changes, add a test beside the existing ones and run `npm test`. Document any new fact or axis in `WIKI.md`.
 5. For a contribution to the shipped `slop/` area, add a telltale case and its look-alikes to `eval/slop-cases.mjs`, then run `node eval/slop.mjs`. Every case must stay right.
 
-`jevis ask` calls the configured decision model, so it needs a TypeSafe key or a running self-hosted server. If it reports an error, say the change is untested rather than implying it works. For a new `deny` or `block`, suggest the user run Jevis in shadow mode (`JEVIS_MODE=shadow`) for a few days and read `jevis stats`.
+`jevis ask` calls the configured decision model, so it needs a TypeSafe key or a running self-hosted server. If it reports an error, say the change is untested rather than implying it works. If Jevis itself seems not to run, `jevis doctor` checks the installation end to end. For a new `deny` or `block`, suggest the user run Jevis in shadow mode (`node bin/install.mjs --shadow`, then `--live`) for a few days and read `jevis stats`.
 
 ## 4. Report back
 

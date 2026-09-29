@@ -1,18 +1,22 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync, opendirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, posix, relative, resolve, sep, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AXES } from "./axes.mjs";
-import { jevisHome } from "./state.mjs";
+import { ensureDir, jevisHome } from "./state.mjs";
+import { insideFolder, isQualifiedPath, samePath, splitFolders } from "./paths.mjs";
 
 /**
  * The wiki: one Markdown file per lesson, `wiki/<area>/<name>.md`. The path is
  * the entry's id. WIKI.md is the authoring guide; this file is its parser and
  * its enforcement, so a malformed entry fails `jevis lint` instead of misfiring.
  *
- * Two wikis load by default: the shipped one, then the user's own
- * (~/.jevis/wiki), which survives updates to the repo. A user entry with a
- * shipped entry's id replaces it, and one whose frontmatter is only `off: true`
- * turns it off.
+ * Wikis load in order, later ones winning: the shipped one, the user's own
+ * (~/.jevis/wiki), which survives updates to the repo, and a project's
+ * (<repo>/.jevis/wiki) once the user trusts it. An entry with an earlier
+ * entry's id replaces it, and one whose frontmatter is only `off: true` turns
+ * it off.
  */
 
 export const WIKI_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "wiki");
@@ -80,7 +84,7 @@ function splitTop(text) {
 }
 
 export function parseEntry(text, id) {
-  const m = String(text).match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  const m = String(text).replaceAll("\r\n", "\n").match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!m) throw new Error(`${id}: no frontmatter`);
   const entry = { id };
   const lines = m[1].split("\n");
@@ -135,18 +139,45 @@ export function validateEntry(e) {
   return errors;
 }
 
-function walk(dir) {
+/** Past this, a file is not a lesson: a project's lessons are read on every hook, so a huge one would stall them all. */
+const MAX_LESSON_BYTES = 256 * 1024;
+const MAX_PROJECT_ENTRIES = 1000;
+const MAX_PROJECT_DEPTH = 8;
+
+/**
+ * Every .md file under `dir`. `strict` (a project's lessons, which arrive
+ * with a cloned repository) takes only regular files of lesson size: no
+ * symlink out to /dev/zero or a secret, no FIFO that blocks the read.
+ */
+function walk(dir, { strict = false, budget = { entries: MAX_PROJECT_ENTRIES }, depth = 0 } = {}) {
   let out = [];
-  let entries = [];
+  if (strict && (budget.entries <= 0 || depth > MAX_PROJECT_DEPTH)) return out;
+  let entries;
   try {
-    entries = readdirSync(dir, { withFileTypes: true });
+    // A directory stream bounds the work even when one folder has millions of non-lesson entries.
+    entries = strict ? opendirSync(dir, { bufferSize: 1 }) : readdirSync(dir, { withFileTypes: true });
   } catch {
     return out;
   }
-  for (const d of entries) {
-    const p = join(dir, d.name);
-    if (d.isDirectory()) out = out.concat(walk(p));
-    else if (d.name.endsWith(".md")) out.push(p);
+  try {
+    for (let i = 0; !strict || budget.entries > 0; i += 1) {
+      const d = strict ? entries.readSync() : entries[i];
+      if (!d) break;
+      if (strict) budget.entries -= 1;
+      const p = join(dir, d.name);
+      if (d.isDirectory()) out = out.concat(walk(p, { strict, budget, depth: depth + 1 }));
+      else if (!d.name.endsWith(".md")) continue;
+      else if (!strict) out.push(p);
+      else if (d.isFile()) {
+        try {
+          if (statSync(p).size <= MAX_LESSON_BYTES) out.push(p);
+        } catch {
+          /* gone or unreadable: not a lesson */
+        }
+      }
+    }
+  } finally {
+    if (strict) entries.closeSync();
   }
   return out.sort();
 }
@@ -154,24 +185,150 @@ function walk(dir) {
 /** The user's own wiki: entries here add to the shipped wiki, or replace or turn off a shipped entry with the same id. */
 export const userWiki = () => join(jevisHome(), "wiki");
 
-/** Later roots win. JEVIS_WIKI (colon-separated) replaces the default pair. */
-export const wikiRoots = () => (process.env.JEVIS_WIKI ? process.env.JEVIS_WIKI.split(":").filter(Boolean) : [WIKI_ROOT, userWiki()]);
+/** Canonical realpaths keep their exact case: Windows can enable case-sensitive folders. */
+export const projectContains = (real, parent, separator = sep) => real.startsWith(`${parent}${separator}`);
+
+/**
+ * Project lessons: the nearest <folder>/.jevis/wiki at or above `cwd`, below
+ * the home folder (whose .jevis is Jevis's own home). A project's lessons
+ * are text the agent reads and can turn off shipped refusals, and a cloned
+ * repository could ship either, so they load only once the user trusts them
+ * with `jevis trust`. Trust is pinned to the files' contents: any change (a
+ * pull, an edit) needs trusting again, as with direnv's `allow`.
+ */
+export function projectWiki(cwd) {
+  if (!cwd) return null;
+  const home = homedir();
+  const own = resolve(userWiki());
+  for (let d = resolve(cwd); d !== dirname(d) && !samePath(d, home); d = dirname(d)) {
+    const dir = join(d, ".jevis", "wiki");
+    if (!existsSync(dir)) continue;
+    try {
+      // The real path: a hook's cwd and a terminal's can name one folder two ways (/var and /private/var on macOS), and trust is keyed by path.
+      const real = realpathSync(dir);
+      if (samePath(real, own) || samePath(dir, own)) continue;
+      // A link out of the repository (.jevis -> /) is not the repository's lessons.
+      const parent = realpathSync(d);
+      return projectContains(real, parent) && statSync(real).isDirectory() ? real : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/** Trust stays byte-exact: even a CRLF/LF-only edit needs trusting again, although both parse alike. */
+function digestFiles(dir, files) {
+  const h = createHash("sha256");
+  for (const file of files) h.update(`${relative(dir, file)}\0${readFileSync(file)}\0`);
+  return h.digest("hex").slice(0, 16);
+}
+export const wikiDigest = (dir) => digestFiles(dir, walk(dir, { strict: true }));
+
+const trustFile = () => join(jevisHome(), "trusted.json");
+const readTrust = () => {
+  try {
+    const all = JSON.parse(readFileSync(trustFile(), "utf8"));
+    return all && typeof all === "object" && !Array.isArray(all) ? all : {};
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * The project wiki for `cwd`, if any: where it is, and whether it is trusted
+ * as it is now. A folder never trusted is not read at all, so an untrusted
+ * repository costs a hook only the walk up to find it.
+ */
+function projectState(cwd) {
+  const path = projectWiki(cwd);
+  if (!path) return null;
+  const record = readTrust()[path];
+  if (typeof record?.hash !== "string") return { status: { path, hash: null, trusted: false, changed: false }, files: [] };
+  const files = walk(path, { strict: true });
+  const hash = digestFiles(path, files);
+  return { status: { path, hash, trusted: record.hash === hash, changed: record.hash !== hash }, files };
+}
+export const projectStatus = (cwd) => projectState(cwd)?.status ?? null;
+
+/** Trust a project wiki as it is now, or (`remove`) forget it. The record is private to this user. */
+export function setTrust(path, { remove = false } = {}) {
+  const all = readTrust();
+  if (remove) delete all[path];
+  else all[path] = { hash: wikiDigest(path), at: new Date().toISOString() };
+  ensureDir();
+  writeFileSync(trustFile(), `${JSON.stringify(all, null, 2)}\n`, { mode: 0o600 });
+  return all[path] ?? null;
+}
+
+/**
+ * Later roots win. JEVIS_WIKI (platform-separated absolute folders) replaces the
+ * defaults; a relative one is ignored, since it would name a different
+ * folder, perhaps an untrusted project's, in every directory a hook runs in.
+ * A trusted project wiki for `cwd` comes last.
+ */
+function resolveRoots(cwd, { platform = process.platform, env = process.env } = {}) {
+  if (env.JEVIS_WIKI) return { roots: splitFolders(env.JEVIS_WIKI, platform === "win32" ? win32.delimiter : posix.delimiter).filter((r) => isQualifiedPath(r, platform)), project: null };
+  let checked = null;
+  try {
+    checked = cwd ? projectState(cwd) : null;
+  } catch {
+    /* an unreadable project folder loads the defaults */
+  }
+  const project = checked?.status.trusted ? checked.status.path : null;
+  return { roots: [WIKI_ROOT, userWiki(), ...(project ? [project] : [])], project, files: project ? { [project]: checked.files } : {} };
+}
+export const wikiRoots = (cwd = null, options = {}) => resolveRoots(cwd, options).roots;
+
+/**
+ * What a project wiki changes on top of the defaults, for `jevis trust` and
+ * `jevis lint` to show before anyone relies on it: entries it adds, defaults
+ * it replaces or turns off, and entries that are broken or refused.
+ */
+export function projectLessons(path) {
+  const base = new Set(loadWiki([WIKI_ROOT, userWiki()]).entries.map((e) => e.id));
+  const own = loadWiki([path], { guarded: [path] });
+  const broken = loadWiki([WIKI_ROOT, userWiki(), path], { guarded: [path] }).broken.filter((b) => insideFolder(b.file, path));
+  const bad = new Set(broken.map((b) => b.id));
+  return {
+    added: own.entries.filter((e) => !base.has(e.id)),
+    replaced: own.entries.filter((e) => base.has(e.id) && !bad.has(e.id)),
+    off: own.off.filter((id) => base.has(id) && !bad.has(id)),
+    broken,
+  };
+}
+
+/** The lessons that apply in `cwd`: the defaults, and the project's once trusted, guarded as loadWiki describes. */
+export function wikiFor(cwd) {
+  const { roots, project, files } = resolveRoots(cwd);
+  // Reuse the files just hashed, rather than selecting a second bounded slice of a changing tree.
+  return loadWiki(roots, { guarded: project ? [project] : [], files });
+}
 
 /**
  * All sound entries, plus what `jevis lint` reports: broken entries, ids a later
  * root replaced, and ids it turned off. A broken replacement leaves the earlier
  * entry in force until it is fixed.
+ *
+ * A `guarded` root (a project's lessons) can add entries and change any
+ * lesson but a safety one: turning off or replacing the check that stops a
+ * force push or a machine-wide delete is the user's call, in ~/.jevis/wiki,
+ * not something a cloned repository brings along.
  */
-export function loadWiki(roots = wikiRoots()) {
+export function loadWiki(roots = wikiRoots(), { guarded = [], files = {} } = {}) {
   const byId = new Map();
   const broken = [];
   const replaced = [];
   const off = [];
   for (const root of roots) {
-    for (const file of walk(root)) {
-      const id = relative(root, file).replace(/\.md$/, "");
+    for (const file of Object.hasOwn(files, root) ? files[root] : walk(root, { strict: guarded.includes(root) })) {
+      const id = relative(root, file).split(process.platform === "win32" ? "\\" : "/").join("/").replace(/\.md$/, "");
       try {
         const e = parseEntry(readFileSync(file, "utf8"), id);
+        if (guarded.includes(root) && id.startsWith("safety/") && byId.has(id)) {
+          broken.push({ id, file, errors: ["a project's lessons cannot turn off or replace a safety entry; do that in ~/.jevis/wiki"] });
+          continue;
+        }
         if (e.off === true) {
           byId.delete(id);
           off.push(id);
@@ -203,18 +360,27 @@ export function enabled(e, list = process.env.JEVIS_ENABLE) {
   return on.includes("all") || on.includes(e.id) || on.includes(e.id.split("/")[0]);
 }
 
-/** Entries that can apply to this event, before Jev is asked: event, tool name, model family. */
-export function candidates(entries, { event, tool = null, model = null }) {
+/** An entry can apply to this event, before Jev is asked: event, tool name, model family. */
+export function applies(e, { event, tool = null, model = null }) {
+  if (e.event !== event) return false;
+  if (e.tools && !(tool && e.tools.some((t) => glob(t).test(tool)))) return false;
   const family = familyOf(model);
-  return entries.filter((e) => {
-    if (e.event !== event || !enabled(e)) return false;
-    if (e.tools && !(tool && e.tools.some((t) => glob(t).test(tool)))) return false;
-    if (e.family && family && e.family !== family) return false;
-    return true;
-  });
+  return !(e.family && family && e.family !== family);
 }
 
+/** The entries to ask about this event: those that apply and are turned on. */
+export const candidates = (entries, opts) => entries.filter((e) => enabled(e) && applies(e, opts));
+
 const lookup = (obj, path) => path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
+
+/**
+ * The facts in `when`, leaving out the axes, hold for this state. Facts are
+ * known before Jev is asked, so an entry they rule out is never asked.
+ */
+export function factsHold(when, { event, state }) {
+  const facts = Object.entries(when ?? {}).filter(([key]) => !AXES[event]?.[key]);
+  return conditionsHold(Object.fromEntries(facts), { profile: {}, state });
+}
 
 /** `when` holds: axes against the profile, facts against the state. */
 export function conditionsHold(when, { profile, state }) {

@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { EDIT_CLIP, clip, inputMarks, harnessWritten, requestText, toolInput, turnEvidence } from "./context.mjs";
 import { evaluate } from "./engine.mjs";
 import { commandText, readSession } from "./transcript.mjs";
-import { loadWiki } from "./wiki.mjs";
+import { wikiFor } from "./wiki.mjs";
 
 /**
  * Dry-run a recorded session through Jevis: every user turn as a prompt event,
@@ -42,7 +42,7 @@ function toolEvent(it, harness) {
     // Shown as the live hook shows apply_patch: the file header and only the lines the edit adds.
     const [path, change] = Object.entries(it.changes ?? {})[0] ?? [];
     if (!path) return null;
-    const added = change?.content ?? (change?.unified_diff ?? "").split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).map((l) => l.slice(1)).join("\n");
+    const added = change?.content ?? (change?.unified_diff ?? "").split(/\r?\n/).filter((l) => l.startsWith("+") && !l.startsWith("+++")).map((l) => l.slice(1)).join("\n");
     return { tool: "apply_patch", input: clip(`*** ${change?.type === "add" ? "Add" : "Update"} File: ${path}\n${added}`, EDIT_CLIP) };
   }
   if (it.tool && it.input) return { tool: it.tool, input: toolInput(it.tool, it.input) };
@@ -63,8 +63,8 @@ async function pool(tasks, width = 6) {
 }
 
 export async function replay(path, { events = ["prompt", "tool", "stop"], limit = Infinity, record = false, width = 6 } = {}) {
-  const wiki = loadWiki();
   const { turns, model, harness, cwd } = sessionTurns(path);
+  const wiki = wikiFor(cwd);
   const picked = turns.slice(0, limit);
   const tasks = [];
   const results = picked.map((t, i) => ({ turn: i + 1, request: clip(t.request, 160), prompt: null, tools: [], stop: null }));
@@ -80,7 +80,7 @@ export async function replay(path, { events = ["prompt", "tool", "stop"], limit 
       for (const { it } of t.items) {
         const ev = toolEvent(it, harness);
         if (!ev) continue;
-        const state = { request: clip(t.request, 2000), tool: ev.tool, input: ev.input, marks: inputMarks(ev.input), workspace };
+        const state = { request: clip(t.request, 2000), tool: ev.tool, input: ev.input, marks: inputMarks(ev.input, { tool: ev.tool }), workspace };
         tasks.push(async () => {
           const r = await evaluate({ event: "tool", state, tool: ev.tool, model, harness, record, wiki });
           if (r.fired.length || r.error) results[i].tools.push({ tool: ev.tool, input: ev.input, ...r });

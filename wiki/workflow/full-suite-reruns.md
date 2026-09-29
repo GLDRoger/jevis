@@ -4,7 +4,7 @@ ask: Does `input` run a whole-project check (the full test suite, a full typeche
 yes: pnpm test, npm run build, tsc --noEmit over the project, playwright test with no file filter, a combined typecheck-lint-test-build chain
 no: A single test file or pattern, a typecheck of one package touched by the change, a one-off script, or the one final full pass before a commit the user asked for
 min: 0.8
-when: { marks.ran_before: true }
+when: { marks.ran_before: true, marks.plain_read: false }
 tools: [Bash]
 action: context
 title: Focused checks, one full pass

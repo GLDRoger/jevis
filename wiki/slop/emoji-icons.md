@@ -1,6 +1,7 @@
 ---
 event: tool
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+when: { marks.plain_read: false }
 ask: Does `input` write user-interface markup or copy that uses emoji as icons, bullets, section markers, or decoration in headings, buttons, lists, or feature blocks?
 yes: Emoji such as 🚀 ✨ ⚡ 💡 🎯 ✅ 🔥 📈 🛡️ placed as icons or ornaments in a page, app, or component
 no: Emoji the user supplied in their content, emoji inside a chat or messaging product's user messages, or no emoji. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

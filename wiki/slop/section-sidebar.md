@@ -1,6 +1,7 @@
 ---
 event: tool
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+when: { marks.plain_read: false }
 ask: Does `input` write a sidebar or side rail that is badly built for navigation, meaning its links jump to sections of the same page (href="#section" anchors, scrollIntoView), or it is a narrow fixed rail of icons without visible labels, or it has no control to expand and collapse it?
 yes: A <nav>, <aside>, or sidebar component whose items are same-page anchors, or an icon-only rail with a fixed narrow width, no text labels, and no collapse or expand toggle, where text like "Sign out" wraps onto two lines
 no: A sidebar whose links go to different pages or routes with visible labels and a collapse control (for example shadcn/ui Sidebar with SidebarTrigger), a table of contents inside long documentation, or no sidebar. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

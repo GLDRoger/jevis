@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 
 // A private home, a scripted Jev, a stub renderer, and a scripted critic: no network, no browser, no CLI.
@@ -19,7 +19,7 @@ const { loadSession, readLog } = await import("../src/state.mjs");
 
 let script = {};
 setJevTransport(async (body) => ({ answers: Object.fromEntries(Object.keys(body.questions).map((k) => [k, { type: "noul", noul: script[k] ?? 0.05 }])) }));
-const VISUAL = { "axis.work_requested": 0.95, "axis.visual": 0.95, "axis.film": 0.05 };
+const VISUAL = { "axis.work_requested": 0.95, "axis.visual": 0.95, "axis.film": 0.05, "axis.claims_done": 0.95 };
 
 let rendered = [];
 setCapture(async (targets, { dir, film }) => {
@@ -138,6 +138,10 @@ test("review: skipped for non-visual work, for turns that changed no interface f
   assert.equal(await onStop((await visualTurn("add retries to the sender")).stop), null);
   script = VISUAL;
   assert.equal(await onStop((await visualTurn("make me a page", "notes.py")).stop), null);
+  // A progress report ("workers are still building the page") is not finished work.
+  script = { ...VISUAL, "axis.claims_done": 0.05 };
+  assert.equal(await onStop((await visualTurn()).stop), null);
+  script = VISUAL;
   process.env.JEVIS_MODE = "shadow";
   try {
     assert.equal(await onStop((await visualTurn()).stop), null);
@@ -196,7 +200,7 @@ test("criticPrompt: a follow-up is judged with the conversation's first request,
 test("formatReview and telltales read cleanly", () => {
   const text = formatReview({ kind: "page", targets: ["http://localhost:5173/"], shots: ["/h/reviews/s/turn1-round1/a.png"], verdict: parseReview(FIX), backend: "claude" }, 1);
   assert.match(text, /Claude looked at renders of http:\/\/localhost:5173\/ at 1440 and 390 px/);
-  assert.match(text, /screenshots are in \/h\/reviews\/s\/turn1-round1/);
+  assert.ok(text.includes(`screenshots are in ${dirname("/h/reviews/s/turn1-round1/a.png")}`));
   assert.match(text, /Jevis renders the page again at 1440 and 390 px and reviews it, so check only what these points need/, "round 1 spares the agent a full re-check");
   assert.match(text, /Your final message is the user's answer, written as if this review were not there: present the finished work/);
   const last = formatReview({ kind: "page", targets: ["x"], shots: [], verdict: parseReview(FIX), backend: "claude" }, REVIEW_ROUNDS);
@@ -209,7 +213,7 @@ test("formatReview: a film's last review asks for the video file to be re-render
   assert.match(film(1), /Jevis samples the film's frames again/);
   assert.doesNotMatch(film(1), /1440 and 390/, "no page wording in a film review");
   assert.match(film(REVIEW_ROUNDS), /re-render the final video file so it carries them/);
-  assert.match(film(REVIEW_ROUNDS), /The frames are in \/h\/r/);
+  assert.ok(film(REVIEW_ROUNDS).includes(`The frames are in ${dirname("/h/r/f.png")}`));
 });
 
 test("filmSound: a film's soundtrack is measured, and a video older than its source is flagged", async (t) => {

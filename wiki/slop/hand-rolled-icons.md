@@ -1,6 +1,7 @@
 ---
 event: tool
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+when: { marks.plain_read: false }
 ask: Does `input` write interface icons as Unicode symbols in buttons, links, or labels (such as ↗ → ← ✓ ✕ ★ ☰ ⚙ ➜ ▤ ◇ ↻), or as inline <svg> paths that redraw a stock icon-pack shape (a close X, chevron, arrow, check, hamburger, gear)?
 yes: A button or link ending in a raw glyph like 'Sign in ↗' or 'Next →', a ✓ or ✕ as a status icon, or <svg><path d="M5 12h14..."/></svg> pasted for an icon
 no: Icons imported from a library (lucide-react, @phosphor-icons, heroicons, the project's own icon component), arrows in running prose, math and code, or emoji and symbols that are the content itself (chat reactions, a user's own text, a rating the user asked for). The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

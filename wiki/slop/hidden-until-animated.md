@@ -1,6 +1,7 @@
 ---
 event: tool
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+when: { marks.plain_read: false }
 ask: Does `input` make visible content start hidden (opacity 0, visibility hidden, or translated off screen) and rely on JavaScript, an IntersectionObserver, a scroll timeline, or an animation library to reveal it?
 yes: Sections, headings, text, or controls with opacity: 0 or class="opacity-0" until a class is added on scroll, animation-timeline: view() reveals, or Framer or motion initial={{ opacity: 0 }} on content
 no: Hover or focus effects on content already visible, a modal or menu that is closed until opened, a loading skeleton, or reveals whose no-JavaScript fallback shows the content fully. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

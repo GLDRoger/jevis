@@ -388,7 +388,7 @@ footer b { color: var(--ink); }
       parts: [["request", "the user's words, up to 2,000 characters"], ["workspace", "git or not, up to 40 top-level names"], ["evidence", "<code>actions_after_last_edit</code>, e.g. <code>exit 0: pnpm test</code>"], ["memory", "the current request and turn, from <code>~/.jevis/sessions</code>"]],
       note: ["Why no judgement here", "An earlier hook system decided what a prompt meant with word patterns, and it misread requests. Here, whether a command was a test or a browser check is Jev's call."] },
     { n: 3, short: "Wiki", title: "The wiki is narrowed to what can apply", where: "wiki/<area>/<name>.md · src/wiki.mjs",
-      a: [`The wiki holds ${C.entries} lessons from real sessions: ${C.byEvent.prompt} for prompts, ${C.byEvent.tool} for tool calls, ${C.byEvent.stop} for turn endings. Each is one Markdown file with a yes/no question, a threshold, and what to do when it fires.`, "Before Jev is asked anything, entries are filtered by event, by tool name, and by model, so a Sol-only lesson never reaches a Claude session. A tool call no entry could apply to costs no call at all."],
+      a: [`The wiki holds ${C.entries} lessons from real sessions: ${C.byEvent.prompt} for prompts, ${C.byEvent.tool} for tool calls, ${C.byEvent.stop} for turn endings. Each is one Markdown file with a yes/no question, a threshold, and what to do when it fires.`, "Before Jev is asked anything, entries are filtered by event, by tool name, by model, and by the facts code already knows, so a Sol-only lesson never reaches a Claude session. A tool call no entry could apply to costs no call at all: a command that provably only reads (<code>ls</code>, <code>rg</code>, <code>git log</code>) skips every lesson about commands, and in the maintainer's log that was 42% of them."],
       parts: [["ask", "the entry's yes/no question about the state"], ["unless", "a second question that stands it down, usually “did the user ask for exactly this?”"], ["when", "conditions on the axes or on facts"], ["action", "<code>context</code>, <code>deny</code>, or <code>block</code>"]],
       note: ["Where the lessons came from", "Mined from 661 Codex and 126 Claude Code sessions plus an earlier hook system's history: user corrections, rejected designs, false claims. Every entry names its evidence."] },
     { n: 4, short: "Questions", title: "One question set is built", where: "src/axes.mjs · src/engine.mjs",
@@ -396,8 +396,8 @@ footer b { color: var(--ink); }
       parts: [["prompt", "10 axes"], ["tool", "2 axes: destructive, outward"], ["stop", "3 axes: work requested, claims done, claims verified"]],
       note: ["Why split ask and unless", "Jev reads literally. “Is this destructive when the user did not ask?” scored 0.86 on a case it should catch; split in two, the same case scored 0.97 and 0.28."] },
     { n: 5, short: "Jev", title: "Masked, sent once, hedged", where: "src/jev.mjs",
-      a: ["Secrets are masked first: API keys, tokens, bearer headers, passwords in URLs. Then every question goes to Jev in a single call, because questions in a call are answered in parallel: 1 question takes about 330 ms and 250 take about 360 ms.", "Jev's latency has a long tail, so if no answer arrives in 700 ms, an identical second request goes out and whichever answers first wins. The whole call has one deadline: 3 seconds for prompts and turn endings, 1.5 for tool calls."],
-      parts: [["chunk", "more than 200 questions split into parallel calls"], ["hedge", "a second request at 700 ms"], ["deadline", "3 s, or 1.5 s for tool calls"]],
+      a: ["Secrets are masked first: API keys, tokens, bearer headers, passwords in URLs. Then every question goes to Jev in a single call, because questions in a call are answered in parallel: 1 question takes about 330 ms and 250 take about 360 ms.", "Jev's latency has a long tail, so if no answer arrives in 350 ms, an identical request goes out, and another at 750 ms; whichever answers first wins. The whole call has one deadline: 3 seconds for prompts and turn endings, 1.5 for tool calls."],
+      parts: [["chunk", "more than 200 questions split into parallel calls"], ["hedge", "more requests at 350 and 750 ms"], ["deadline", "3 s, or 1.5 s for tool calls"]],
       note: ["Measured", "Before the hedge, 20 calls had a median of 390 ms but a 4.2 s worst case. With it, 40 calls in a row stayed under 1 s."] },
     { n: 6, short: "Record", title: "Every call is recorded", where: "~/.jevis/jev/calls.jsonl · ~/.jevis/jev/questions/",
       a: ["Each call is appended to a private log: the masked state, every answer with its probability, the timing, and any error. The question set itself is stored once per version.", "This is training data. Laya, an open-source model that serves the same API, can already stand in for Jev (set JEVIS_JEV_URL), and a checkpoint fine-tuned on these calls can learn to give Jev's answers offline."],
@@ -422,7 +422,7 @@ footer b { color: var(--ink); }
   const NS = "http://www.w3.org/2000/svg";
   const s = (tag, attrs = {}, text) => { const el = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v); if (text !== undefined) el.textContent = text; return el; };
   const X = 150, W = 300, H = 62, GAP = 34, Y0 = 36;
-  const sub = ["Codex · Claude Code, JSON on stdin", "request · workspace · evidence · memory", `${C.entries} entries → candidates`, "axes + ask + unless → version", "mask · one call · hedge 700 ms", "calls.jsonl · questions/<version>", "min · unless · when", "note · deny · block", "sessions/ · log.jsonl"];
+  const sub = ["Codex · Claude Code, JSON on stdin", "request · workspace · evidence · memory", `${C.entries} entries → candidates`, "axes + ask + unless → version", "mask · one call · hedge 350/750 ms", "calls.jsonl · questions/<version>", "min · unless · when", "note · deny · block", "sessions/ · log.jsonl"];
   svg.append(s("rect", { class: "ghost", x: 18, y: 14, width: 524, height: 872, rx: 12 }));
   STAGES.forEach((st, i) => {
     const y = Y0 + i * (H + GAP);
@@ -652,9 +652,9 @@ footer b { color: var(--ink); }
     const tick = (label, warn) => { clock.textContent = label; clock.classList.toggle("warn", Boolean(warn)); };
     if (down) {
       const target = 3000;
-      while (performance.now() - t0 < target / 4) { tick(`${Math.round((performance.now() - t0) * 4)} ms`, (performance.now() - t0) * 4 > 700); await wait(40); }
+      while (performance.now() - t0 < target / 4) { tick(`${Math.round((performance.now() - t0) * 4)} ms`, (performance.now() - t0) * 4 > 350); await wait(40); }
       tick("3,000 ms: deadline, no answer", true);
-      jevStep.querySelector("p").append(h("br"), "The hedge went out at 700 ms and failed too.");
+      jevStep.querySelector("p").append(h("br"), "The hedges went out at 350 and 750 ms and failed too.");
       await wait(300);
       await add(6, 6, "Recorded", "The failure is logged with its error, so outages show in <code>jevis stats</code>.");
       await add(7, 7, "Gates skipped", "There are no answers to judge.");
@@ -664,10 +664,10 @@ footer b { color: var(--ink); }
       return finish();
     }
     const real = sc.ms;
-    const total = lagging ? 700 + real : real;
+    const total = lagging ? 350 + real : real;
     while (performance.now() - t0 < total) {
       const t = performance.now() - t0;
-      tick(`${Math.round(t)} ms${lagging && t > 700 ? " · hedge sent at 700 ms" : ""}`);
+      tick(`${Math.round(t)} ms${lagging && t > 350 ? " · hedge sent at 350 ms" : ""}`);
       await wait(30);
     }
     tick(lagging ? `${Math.round(total)} ms · the hedge answered first` : `${real} ms`);

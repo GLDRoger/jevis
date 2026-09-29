@@ -1,6 +1,7 @@
 ---
 event: tool
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+when: { marks.plain_read: false }
 ask: Does `input` write user-interface code that draws text around a circle (SVG textPath on a circle path), usually as a rotating badge or stamp?
 yes: An SVG <textPath> on a circular path, often spun with a rotate animation
 no: textPath along a meaningful path in a diagram or map, or no circular text. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

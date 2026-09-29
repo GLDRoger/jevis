@@ -1,6 +1,7 @@
 ---
 event: tool
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+when: { marks.plain_read: false }
 ask: Does `input` write a large serif headline that sets one or two words in italic (an <em> or <i> inside the h1, or an italic accent span) as the stylistic accent?
 yes: An h1 or hero title in a serif face with one italic or differently colored italic word, like 'Coffee, made <em>slowly</em>'
 no: Italics for a title of a work or real emphasis in body text, or a headline without an italic accent word. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

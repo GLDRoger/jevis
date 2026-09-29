@@ -6,6 +6,7 @@ yes: git push --force or -f, --force-with-lease to a shared branch, git reset --
 no: Ordinary commits, pushes, stashes, reverts, and new branches
 min: 0.85
 tools: [Bash]
+when: { marks.plain_read: false }
 optional: true
 action: deny
 title: History and uncommitted work

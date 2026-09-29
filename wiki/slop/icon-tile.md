@@ -1,6 +1,7 @@
 ---
 event: tool
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+when: { marks.plain_read: false }
 ask: Does `input` write user-interface markup or styles that place an icon or logo inside a filled or bordered tile, circle, or rounded square used as a feature bullet, card header, or hero visual?
 yes: A single icon centered in a soft-colored rounded box (for example a div with bg-indigo-100 rounded-xl p-3 holding an icon), or a brand or social logo sitting on a colored chip
 no: A bare icon placed on the surface, an app's avatar photo, a real button whose icon is its label, or no icon. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

@@ -4,8 +4,10 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 import { ensureDir, jevisHome } from "./state.mjs";
+import { insideFolder } from "./paths.mjs";
+import { findOnPath } from "../bin/install.mjs";
 import { redact } from "./redact.mjs";
-import { loadWiki } from "./wiki.mjs";
+import { loadWiki, wikiFor } from "./wiki.mjs";
 
 /**
  * The reviewers: when a turn ends on visual work, Jevis renders what the agent
@@ -64,13 +66,13 @@ async function reachable(url) {
 }
 
 /** Ports whose listening process runs from inside `cwd`: the project's own dev server, not someone else's on the same machine. */
-export function projectPorts(cwd) {
-  if (!cwd || process.platform === "win32") return [];
+export function projectPorts(cwd, { platform = process.platform, exec = execFileSync } = {}) {
+  if (!cwd || platform === "win32" || typeof process.getuid !== "function") return [];
   try {
-    const listen = execFileSync("lsof", ["-nP", "-a", "-iTCP", "-sTCP:LISTEN", "-u", String(process.getuid()), "-Fpn"], { encoding: "utf8", timeout: 2000 });
+    const listen = exec("lsof", ["-nP", "-a", "-iTCP", "-sTCP:LISTEN", "-u", String(process.getuid()), "-Fpn"], { encoding: "utf8", timeout: 2000 });
     const ports = new Map();
     let pid = null;
-    for (const line of listen.split("\n")) {
+    for (const line of listen.split(/\r?\n/)) {
       if (line.startsWith("p")) pid = line.slice(1);
       else if (line.startsWith("n") && pid) {
         const port = line.match(/:(\d+)$/)?.[1];
@@ -79,8 +81,8 @@ export function projectPorts(cwd) {
     }
     return [...ports].filter(([, p]) => {
       try {
-        const where = execFileSync("lsof", ["-a", "-p", p, "-d", "cwd", "-Fn"], { encoding: "utf8", timeout: 1000 }).split("\n").find((l) => l.startsWith("n"))?.slice(1);
-        return where && (where === cwd || where.startsWith(`${cwd}/`));
+        const where = exec("lsof", ["-a", "-p", p, "-d", "cwd", "-Fn"], { encoding: "utf8", timeout: 1000 }).split(/\r?\n/).find((l) => l.startsWith("n"))?.slice(1);
+        return where && insideFolder(where, cwd, platform);
       } catch {
         return false;
       }
@@ -109,10 +111,14 @@ export async function renderTargets({ files = [], cwd, texts = [] }) {
 
 const slug = (url) => url.replace(/^\w+:\/\//, "").replace(/[^\w.-]+/g, "_").slice(-60);
 
-async function launch() {
+/**
+ * Headless and muted: no window takes focus and nothing plays aloud while the
+ * user works. WebGL renders in software (SwiftShader) unless `gpu`: a scene
+ * too heavy for software is retried on the machine's GPU (see capture).
+ */
+async function launch({ gpu = false } = {}) {
   const { chromium } = await import("playwright-core");
-  // Headless and muted: no window takes focus and nothing plays aloud while the user works.
-  return chromium.launch({ channel: "chrome", headless: true, args: ["--mute-audio", "--autoplay-policy=no-user-gesture-required", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
+  return chromium.launch({ channel: "chrome", headless: true, args: ["--mute-audio", "--autoplay-policy=no-user-gesture-required", ...(gpu ? [] : ["--use-angle=swiftshader"]), "--enable-unsafe-swiftshader"] });
 }
 
 function watch(page, errors) {
@@ -337,14 +343,32 @@ export function filmSound({ cwd, dir, files = [] }) {
   return { shots, facts };
 }
 
-/** Render every target into `dir`. Returns the screenshots with captions and the facts the critic should know. */
+/**
+ * Render every target into `dir`. Returns the screenshots with captions and
+ * the facts the critic should know.
+ *
+ * A target whose render times out in software is tried once more on the GPU.
+ * Software WebGL is about ten times slower (Sep 29 2026, Apple M4 Pro: one
+ * shader frame took 5.9 s in SwiftShader and 0.6 s on Metal), and two of seven
+ * film reviews in the maintainer's log failed on a 30 s screenshot timeout.
+ */
 export async function capture(targets, { dir, film = false }) {
   const browser = await launch();
+  let gpu = null;
   try {
     const out = { shots: [], facts: [] };
     for (const [i, url] of targets.entries()) {
+      const one = (b) => (film ? captureFilm(b, url, dir) : capturePage(b, url, dir, i));
       try {
-        const r = film ? await captureFilm(browser, url, dir) : await capturePage(browser, url, dir, i);
+        let r;
+        try {
+          r = await one(browser);
+        } catch (e) {
+          if (e?.name !== "TimeoutError" && !/Timeout \d+ms exceeded/.test(e?.message ?? "")) throw e;
+          gpu ??= await launch({ gpu: true });
+          r = await one(gpu);
+          r.facts.push("Rendered on the GPU: software rendering timed out.");
+        }
         out.shots.push(...r.shots);
         out.facts.push(...r.facts);
       } catch (e) {
@@ -354,6 +378,7 @@ export async function capture(targets, { dir, film = false }) {
     return out;
   } finally {
     await browser.close();
+    await gpu?.close();
   }
 }
 
@@ -446,23 +471,51 @@ export const criticBackend = () => {
   return ["claude", "codex", "off"].includes(v) ? v : "claude";
 };
 
-function run(cmd, args, { cwd, timeoutMs }) {
+/** A cmd word must not expand variables or break out of quotes. Prompts never enter this command. */
+const cmdWord = (arg) => {
+  if (/["%\r\n\0]/.test(arg)) throw new Error("unsupported character in a Windows critic argument");
+  // The shim forwards these words to a native CLI, whose parser treats a trailing backslash as a quote escape.
+  return `"${arg.replace(/\\+$/, (s) => s + s)}"`;
+};
+
+export function criticCommand(cmd, args, { platform = process.platform, path = process.env.PATH ?? "", comspec = process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe" } = {}) {
+  if (platform !== "win32") return { cmd, args, options: {} };
+  const file = /[\\/]/.test(cmd) ? cmd : findOnPath(cmd, path, platform) ?? cmd;
+  if (!/\.(cmd|bat)$/i.test(file)) return { cmd: file, args, options: { windowsHide: true } };
+  const line = `"${[file, ...args].map(cmdWord).join(" ")}"`;
+  return { cmd: comspec, args: ["/d", "/s", "/v:off", "/c", line], options: { windowsVerbatimArguments: true, windowsHide: true } };
+}
+
+export function run(cmd, args, prompt, { cwd, timeoutMs, platform = process.platform }) {
   return new Promise((done) => {
     // The critic's own session must not trigger Jevis again.
     const env = { ...process.env, JEVIS_DISABLE: "1" };
     let child;
     try {
-      child = spawn(cmd, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+      const command = criticCommand(cmd, args, { platform });
+      child = spawn(command.cmd, command.args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], ...command.options });
     } catch (e) {
       return done({ error: e.message });
     }
     let out = "";
     let err = "";
-    const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+    const timer = setTimeout(() => {
+      if (platform === "win32" && child.pid) {
+        // Killing cmd alone leaves its CLI alive and holding the output pipes open.
+        try {
+          execFileSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"), ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore", timeout: 1000, windowsHide: true });
+          return;
+        } catch { /* fall back if Windows cannot kill the process tree */ }
+      }
+      child.kill("SIGKILL");
+    }, timeoutMs);
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (err += d));
     child.on("error", (e) => (clearTimeout(timer), done({ error: e.message })));
     child.on("close", (code) => (clearTimeout(timer), done(code === 0 ? { text: out } : { error: `exit ${code}: ${err.slice(-300) || out.slice(-300)}` })));
+    // A CLI that exits before reading can close its pipe. That failure must still let the hook continue.
+    child.stdin.on("error", (e) => (clearTimeout(timer), child.kill(), done({ error: e.message })));
+    child.stdin.end(prompt);
   });
 }
 
@@ -470,16 +523,17 @@ let criticRunner = null;
 /** Tests swap the critic for a scripted one; null restores the real CLI. */
 export const setCritic = (fn) => (criticRunner = fn);
 
+/** Flags and image paths only: both critics read the full prompt from stdin. */
+export function criticArgs(backend, { dir, shots, model = process.env.JEVIS_CRITIC_MODEL, law = designLaw() }) {
+  if (backend === "codex") return ["exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", ...(model ? ["-m", model] : []), ...shots.flatMap((s) => ["-i", s.file]), "-"];
+  return ["-p", "--allowedTools", "Read", "--add-dir", dir, ...(law ? ["--add-dir", dirname(law)] : []), "--output-format", "text", ...(model ? ["--model", model] : [])];
+}
+
 export async function runCritic(prompt, { cwd, dir, shots, timeoutMs = CRITIC_TIMEOUT_MS }) {
   if (criticRunner) return criticRunner(prompt, { cwd, dir, shots });
   const backend = criticBackend();
   if (backend === "off") return { error: "critic off" };
-  const model = process.env.JEVIS_CRITIC_MODEL;
-  if (backend === "codex") {
-    return run("codex", ["exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", ...(model ? ["-m", model] : []), ...shots.flatMap((s) => ["-i", s.file]), prompt], { cwd, timeoutMs });
-  }
-  const law = designLaw();
-  return run("claude", ["-p", prompt, "--allowedTools", "Read", "--add-dir", dir, ...(law ? ["--add-dir", dirname(law)] : []), "--output-format", "text", ...(model ? ["--model", model] : [])], { cwd, timeoutMs });
+  return run(backend, criticArgs(backend, { dir, shots }), prompt, { cwd, timeoutMs });
 }
 
 let captureRunner = null;
@@ -506,7 +560,7 @@ export async function review({ kind = "page", sessionId, turn, round, of = REVIE
     const sound = filmSound({ cwd, dir, files });
     seen = { shots: [...seen.shots, ...sound.shots], facts: [...seen.facts, ...sound.facts] };
   }
-  const wiki = loadWiki();
+  const wiki = wikiFor(cwd);
   // The critic is a model call off this machine: the request passes through the same mask as Jev's state.
   const prompt = redact(criticPrompt({ kind, request, firstRequest, targets, shots: seen.shots, facts: seen.facts, files, telltales: telltales(wiki), lessons: lessonsShown(shown, wiki), round, of }));
   const t = Date.now();
@@ -537,7 +591,7 @@ export function formatReview(r, round, of = REVIEW_ROUNDS) {
   ].filter(Boolean).join("\n");
 }
 
-const dirOf = (files) => (files?.[0] ? files[0].replace(/\/[^/]+$/, "") : "");
+const dirOf = (files) => (files?.[0] ? (process.platform === "win32" ? dirname(files[0]) : files[0].replace(/\/[^/]+$/, "")) : "");
 
 /** Screenshot files a round left behind, for `jevis stats` and the docs. */
 export const reviewFiles = (dir) => (existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".png")) : []);
