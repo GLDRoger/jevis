@@ -60,9 +60,10 @@ export function saveSession(id, state, { platform = process.platform, rename = r
         wait(25);
       }
     }
-  } catch {
-    // Losing session memory is safer than breaking a hook. Keep the previous complete file.
+  } catch (error) {
+    // A block without saved counters could repeat forever. The hook boundary logs this error and lets the turn end.
     if (tmp) try { unlinkSync(tmp); } catch { /* already gone or still held open */ }
+    throw error;
   }
 }
 

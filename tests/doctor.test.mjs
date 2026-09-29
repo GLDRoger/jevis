@@ -22,8 +22,10 @@ const settings = (name, config) => {
 
 test("doctor: hooks are ok when every event runs an existing node and this checkout", () => {
   const good = plan({}, "claude", { node: process.execPath, cli: CLI }).config;
-  assert.equal(hookCheck("claude", settings("good.json", good), { cli: CLI }).status, "ok");
-  assert.equal(hookCheck("codex", settings("codex.json", plan({}, "codex", { node: process.execPath, cli: CLI }).config), { cli: CLI }).status, "ok");
+  const status = (config) => process.platform === "win32" && /^node /.test(config.hooks.Stop[0].hooks[0].command) ? "warn" : "ok";
+  assert.equal(hookCheck("claude", settings("good.json", good), { cli: CLI }).status, status(good));
+  const codex = plan({}, "codex", { node: process.execPath, cli: CLI }).config;
+  assert.equal(hookCheck("codex", settings("codex.json", codex), { cli: CLI }).status, status(codex));
 
   const noStop = structuredClone(good);
   delete noStop.hooks.Stop;

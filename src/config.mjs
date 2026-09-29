@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { delimiter, isAbsolute, join } from "node:path";
+import { delimiter, join, posix, win32 } from "node:path";
 import { ensureDir, jevisHome } from "./state.mjs";
-import { splitFolders } from "./paths.mjs";
+import { isQualifiedPath, splitFolders } from "./paths.mjs";
 
 /**
  * Settings: every setting in the README's Configuration table can live in
@@ -21,7 +21,7 @@ const text = (v) => typeof v === "string" && v.trim() !== "";
 const oneOf = (...values) => (v) => values.includes(v);
 const number = (v) => (typeof v === "number" && v > 0) || (typeof v === "string" && Number(v) > 0);
 const list = (v) => text(v) || (Array.isArray(v) && v.length > 0 && v.every(text));
-const absolutePaths = (v) => list(v) && [v].flat().flatMap((x) => splitFolders(x)).filter(Boolean).every((x) => isAbsolute(x));
+export const absolutePaths = (v, platform = process.platform) => list(v) && [v].flat().flatMap((x) => splitFolders(x, platform === "win32" ? win32.delimiter : posix.delimiter)).every((x) => isQualifiedPath(x, platform));
 const httpUrl = (v) => typeof v === "string" && /^https?:\/\/[^\s'"`$;&|<>]+$/.test(v);
 
 /** Each setting: how to check a value, how to write it as the environment reads it, and what it does. */

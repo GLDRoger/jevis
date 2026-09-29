@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, join, posix, relative, resolve, sep, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AXES } from "./axes.mjs";
 import { ensureDir, jevisHome } from "./state.mjs";
-import { insideFolder, samePath, splitFolders } from "./paths.mjs";
+import { insideFolder, isQualifiedPath, samePath, splitFolders } from "./paths.mjs";
 
 /**
  * The wiki: one Markdown file per lesson, `wiki/<area>/<name>.md`. The path is
@@ -177,6 +177,9 @@ function walk(dir, { strict = false, budget = { files: MAX_PROJECT_FILES } } = {
 /** The user's own wiki: entries here add to the shipped wiki, or replace or turn off a shipped entry with the same id. */
 export const userWiki = () => join(jevisHome(), "wiki");
 
+/** Canonical realpaths keep their exact case: Windows can enable case-sensitive folders. */
+export const projectContains = (real, parent, separator = sep) => real.startsWith(`${parent}${separator}`);
+
 /**
  * Project lessons: the nearest <folder>/.jevis/wiki at or above `cwd`, below
  * the home folder (whose .jevis is Jevis's own home). A project's lessons
@@ -198,7 +201,7 @@ export function projectWiki(cwd) {
       if (samePath(real, own) || samePath(dir, own)) continue;
       // A link out of the repository (.jevis -> /) is not the repository's lessons.
       const parent = realpathSync(d);
-      return !samePath(real, parent) && insideFolder(real, parent) && statSync(real).isDirectory() ? real : null;
+      return projectContains(real, parent) && statSync(real).isDirectory() ? real : null;
     } catch {
       return null;
     }
@@ -253,8 +256,8 @@ export function setTrust(path, { remove = false } = {}) {
  * folder, perhaps an untrusted project's, in every directory a hook runs in.
  * A trusted project wiki for `cwd` comes last.
  */
-function resolveRoots(cwd) {
-  if (process.env.JEVIS_WIKI) return { roots: splitFolders(process.env.JEVIS_WIKI).filter((r) => r && isAbsolute(r)), project: null };
+function resolveRoots(cwd, { platform = process.platform, env = process.env } = {}) {
+  if (env.JEVIS_WIKI) return { roots: splitFolders(env.JEVIS_WIKI, platform === "win32" ? win32.delimiter : posix.delimiter).filter((r) => isQualifiedPath(r, platform)), project: null };
   let status = null;
   try {
     status = cwd ? projectStatus(cwd) : null;
@@ -264,7 +267,7 @@ function resolveRoots(cwd) {
   const project = status?.trusted ? status.path : null;
   return { roots: [WIKI_ROOT, userWiki(), ...(project ? [project] : [])], project };
 }
-export const wikiRoots = (cwd = null) => resolveRoots(cwd).roots;
+export const wikiRoots = (cwd = null, options = {}) => resolveRoots(cwd, options).roots;
 
 /**
  * What a project wiki changes on top of the defaults, for `jevis trust` and

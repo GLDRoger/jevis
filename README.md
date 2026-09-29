@@ -157,7 +157,7 @@ node bin/install.mjs           # install for both harnesses (your old configs ar
 node bin/jevis.mjs doctor      # check the setup: hooks, settings, key, a live call, recent activity
 ```
 
-On Windows, the installer writes forward-slash paths and an unquoted first word, for example `node "C:/Users/me/My Projects/jevis/bin/jevis.mjs" hook prompt`. It uses the full Node executable path when that path has no spaces; otherwise `node` must be on PATH. The same command works in Git Bash, Windows PowerShell 5.1, PowerShell 7, and cmd. `~/.jevis` is under your Windows user profile; doctor reports that POSIX permissions are not checked there.
+On Windows, the installer writes forward-slash paths and an unquoted first word, for example `node "C:/Users/me/My Projects/jevis/bin/jevis.mjs" hook prompt`. It uses the full Node executable path when it can stay unquoted, otherwise its unquoted 8.3 short name if available. Only when neither works does it fall back to `node` on PATH; doctor warns that cmd can then run a repository's own `node.exe`. Install Node in a folder without spaces, or enable 8.3 names, to avoid that fallback. Paths with shell expansion characters are refused before the installer writes anything. The same command works in Git Bash, Windows PowerShell 5.1, PowerShell 7, and cmd. `~/.jevis` is under your Windows user profile; doctor reports that POSIX permissions are not checked there.
 
 The installer adds Jevis's entries next to your existing hooks and leaves every other hook alone. Running it twice gives the same config. The hooks take effect in new sessions, and Codex asks you to approve new hooks once.
 
@@ -265,7 +265,7 @@ The environment wins over the file, so `JEVIS_DISABLE=1` in one terminal still t
 | `JEVIS_CRITIC` | `claude` | Who reviews visual work: `claude`, `codex`, or `off`. The installer's `--critic` sets it. |
 | `JEVIS_CRITIC_MODEL` | the CLI's default | The model the critic uses |
 | `JEVIS_DESIGN_LAW` | `~/.jevis/design-law.md`, else `~/.claude/slop.md` or `~/.codex/slop.md`, if present | A Markdown file of your own design rules. When it exists, the agent is told to read it on visual work, and the critic judges against it. |
-| `JEVIS_WIKI` | `./wiki`, then `~/.jevis/wiki`, then a trusted project's `.jevis/wiki` | Lesson folders separated by `:` on macOS/Linux or `;` on Windows, later ones winning. Replaces all the defaults. |
+| `JEVIS_WIKI` | `./wiki`, then `~/.jevis/wiki`, then a trusted project's `.jevis/wiki` | Lesson folders separated by `:` on macOS/Linux or `;` on Windows, later ones winning. Windows paths must name a drive (`C:/wiki`) or UNC share (`\\server\share`). Replaces all the defaults. |
 | `JEVIS_HOME` | `~/.jevis` | Where sessions, logs, backups, and the key live |
 | `JEVIS_RECORD=off` | on | Keep no record of Jev calls (`~/.jevis/jev/calls.jsonl`, the training data for a local model) |
 

@@ -24,7 +24,7 @@ const LESSON = "---\nevent: prompt\nask: |\n  Does `request` want a page?\n  Or 
 
 test("Windows hook words are shell-neutral, and POSIX commands are unchanged", () => {
   const cli = "C:\\Users\\me\\My Projects\\jevis\\bin\\jevis.mjs";
-  assert.equal(hookCommand("stop", { platform: "win32", execPath: "C:\\Program Files\\nodejs\\node.exe", cli }), 'node "C:/Users/me/My Projects/jevis/bin/jevis.mjs" hook stop');
+  assert.equal(hookCommand("stop", { platform: "win32", execPath: "C:\\Program Files\\nodejs\\node.exe", cli, shortPath: () => null }), 'node "C:/Users/me/My Projects/jevis/bin/jevis.mjs" hook stop');
   assert.equal(hookCommand("prompt", { platform: "win32", execPath: "D:\\node\\node.exe", cli: "D:\\jevis\\bin\\jevis.mjs" }), "D:/node/node.exe D:/jevis/bin/jevis.mjs hook prompt");
   for (const platform of ["darwin", "linux"]) assert.equal(hookCommand("tool", { platform, execPath: "/node path/node", cli: "/my project/bin/jevis.mjs" }), '"/node path/node" "/my project/bin/jevis.mjs" hook tool');
   const old = configWith('JEVIS_MODE=shadow "C:\\Program Files\\nodejs\\node.exe" "C:\\Old Project\\BIN\\JEVIS.MJS" hook stop');
@@ -32,7 +32,7 @@ test("Windows hook words are shell-neutral, and POSIX commands are unchanged", (
   assert.equal(nodeIn(old, { platform: "win32", exists: (p) => p === "C:\\Program Files\\nodejs\\node.exe" }), "C:\\Program Files\\nodejs\\node.exe");
   assert.equal(nodeIn(configWith("node C:/old/bin/jevis.mjs hook stop"), { platform: "win32", onPath: (p) => p === "node" }), "node");
   assert.equal(nodeIn(old, { platform: "win32", exists: () => false }), null);
-  const opts = { platform: "win32", execPath: "C:\\Program Files\\nodejs\\node.exe", cli };
+  const opts = { platform: "win32", execPath: "C:\\Program Files\\nodejs\\node.exe", cli, shortPath: () => null };
   const once = plan(old, "codex", opts);
   assert.equal(once.removed.length, 1);
   assert.deepEqual(plan(once.config, "codex", opts).config, once.config);
@@ -58,7 +58,7 @@ test("doctor accepts bare node on PATH, an explicit .exe, and quoted script path
   const file = join(dir, "hooks.json");
   for (const node of ["node", process.platform === "win32" ? "node.exe" : process.execPath]) {
     writeFileSync(file, JSON.stringify({ hooks: jevisHooks("codex", { node, cli }) }));
-    assert.equal(hookCheck("codex", file, { cli }).status, "ok");
+    assert.equal(hookCheck("codex", file, { cli }).status, process.platform === "win32" && /^node(?:\.exe)?$/.test(node) ? "warn" : "ok");
   }
   writeFileSync(file, JSON.stringify({ hooks: jevisHooks("codex", { node: "missing-node-for-jevis", cli }) }));
   assert.match(hookCheck("codex", file, { cli }).detail, /node not found/);
@@ -169,12 +169,12 @@ test("session save retries Windows sharing failures, and keeps the previous file
   assert.deepEqual(waits, [25, 25]);
   attempts = 0;
   waits.length = 0;
-  assert.doesNotThrow(() => saveSession("retry", { turn: 8 }, { platform: "win32", wait: (ms) => waits.push(ms), rename: () => { attempts++; throw Object.assign(new Error("busy"), { code: "EBUSY" }); } }));
+  assert.throws(() => saveSession("retry", { turn: 8 }, { platform: "win32", wait: (ms) => waits.push(ms), rename: () => { attempts++; throw Object.assign(new Error("busy"), { code: "EBUSY" }); } }));
   assert.equal(attempts, 5);
   assert.equal(waits.reduce((a, b) => a + b, 0), 100);
   assert.equal(loadSession("retry").turn, 7);
   assert.equal(readdirSync(join(process.env.JEVIS_HOME, "sessions")).some((f) => f.endsWith(".tmp")), false);
-  assert.doesNotThrow(() => saveSession("retry", { turn: 9 }, { platform: "linux", wait: () => assert.fail("POSIX must not wait"), rename: () => { throw new Error("disk failure"); } }));
+  assert.throws(() => saveSession("retry", { turn: 9 }, { platform: "linux", wait: () => assert.fail("POSIX must not wait"), rename: () => { throw new Error("disk failure"); } }));
   assert.equal(loadSession("retry").turn, 7);
 });
 
