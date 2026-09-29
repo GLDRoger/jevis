@@ -40,9 +40,9 @@ test("install: running it twice gives the same config, and the hook commands car
   assert.ok(once.hooks.PostCompact, "Codex also refreshes notes after compaction");
   assert.equal(once.hooks.PreToolUse.at(-1).matcher, undefined, "Codex hooks see every tool");
   assert.equal(jevisHooks("claude", { node: "/n", cli: "/j/bin/jevis.mjs" }).Stop[0].hooks[0].command, "/n /j/bin/jevis.mjs hook stop");
-  // A path with a space is quoted, and a quoted install is still recognized as Jevis's own.
-  const win = jevisHooks("codex", { platform: "darwin", node: "C:\\Program Files\\nodejs\\node.exe", cli: "C:\\Users\\me\\jevis\\bin\\jevis.mjs" });
-  assert.equal(win.Stop[0].hooks[0].command, '"C:\\Program Files\\nodejs\\node.exe" C:\\Users\\me\\jevis\\bin\\jevis.mjs hook stop');
+  // Without a short Node name, Windows falls back to node and still recognizes the install.
+  const win = jevisHooks("codex", { platform: "win32", shortPath: () => null, node: "C:\\Program Files\\nodejs\\node.exe", cli: "C:\\Users\\me\\jevis\\bin\\jevis.mjs" });
+  assert.equal(win.Stop[0].hooks[0].command, 'node C:/Users/me/jevis/bin/jevis.mjs hook stop');
   assert.equal(plan({ hooks: win }, "codex", { uninstall: true }).removed.length, Object.keys(win).length);
 });
 

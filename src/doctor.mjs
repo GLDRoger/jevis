@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TARGETS, commandWords, isJevis, jevisHooks, onPath, reviewStatus } from "../bin/install.mjs";
 import { readConfig, settingSources } from "./config.mjs";
@@ -8,7 +8,7 @@ import { jevisHome } from "./state.mjs";
 import { eachJsonl } from "./transcript.mjs";
 import { redact } from "./redact.mjs";
 import { projectStatus, wikiFor } from "./wiki.mjs";
-import { samePath, splitFolders } from "./paths.mjs";
+import { isQualifiedPath, samePath, splitFolders } from "./paths.mjs";
 
 /**
  * `jevis doctor`: every way Jevis can be installed but silently doing
@@ -43,7 +43,7 @@ export function nodeCheck(version = process.versions.node) {
 }
 
 /** One harness's hooks: every event present, pointing at a node and a checkout that exist. */
-export function hookCheck(harness, file, { cli = CLI } = {}) {
+export function hookCheck(harness, file, { cli = CLI, platform = process.platform } = {}) {
   const name = `${HARNESS[harness] ?? harness} hooks`;
   const install = `node bin/install.mjs --harness ${harness}`;
   if (!existsSync(file)) return existsSync(dirname(file)) ? warn(name, `not installed: ${file} does not exist`, install) : skip(name, `${HARNESS[harness] ?? harness} is not set up on this machine`);
@@ -54,13 +54,15 @@ export function hookCheck(harness, file, { cli = CLI } = {}) {
     return fail(name, `${file} is not valid JSON (${String(e.message).slice(0, 80)}), so ${HARNESS[harness]} may be running no hooks at all`, `fix ${file}; the installer will not overwrite it`);
   }
   const found = {};
-  for (const [event, groups] of Object.entries(config.hooks ?? {})) for (const g of groups ?? []) for (const h of g.hooks ?? []) if (isJevis(h.command)) (found[event] ??= []).push({ ...h, matcher: g.matcher });
+  for (const [event, groups] of Object.entries(config.hooks ?? {})) for (const g of groups ?? []) for (const h of g.hooks ?? []) if (isJevis(h.command, platform)) (found[event] ??= []).push({ ...h, matcher: g.matcher });
   if (!Object.keys(found).length) return warn(name, "not installed", install);
-  const want = jevisHooks(harness, { cli });
+  // Only the event names, matcher, and timeouts are needed, not this checkout's command paths.
+  const want = jevisHooks(harness, { cli: "/bin/jevis.mjs", execPath: "node", platform: "linux" });
   const problems = new Set();
   const notes = new Set();
   const checkouts = new Set();
   const nodes = new Set();
+  let bareNode = false;
   const missing = Object.keys(want).filter((e) => !found[e]);
   if (missing.length) problems.add(`no hook for ${missing.join(", ")}`);
   for (const [event, hooks] of Object.entries(found)) {
@@ -68,22 +70,27 @@ export function hookCheck(harness, file, { cli = CLI } = {}) {
     const expected = want[event]?.[0];
     for (const h of hooks) {
       const words = commandWords(h.command);
-      if (process.platform === "win32" && (h.command.includes("\\") || h.command.startsWith('"'))) notes.add("old Windows command quoting or separators; reinstall for Git Bash, PowerShell, and cmd");
+      if (platform === "win32" && (h.command.includes("\\") || h.command.startsWith('"'))) notes.add("old Windows command quoting or separators; reinstall for Git Bash, PowerShell, and cmd");
       const prefixes = words.filter((w) => /^[A-Z][A-Z0-9_]*=/.test(w));
       const [node, script] = words.filter((w) => !prefixes.includes(w));
+      if (platform === "win32" && /^node(?:\.exe)?$/i.test(node ?? "")) {
+        bareNode = true;
+        notes.add("bare node can run a node.exe from the current folder under cmd");
+      }
       if (prefixes.length) notes.add(`settings on the command (${prefixes.map((p) => p.split("=")[0]).join(", ")}), which only POSIX shells run; reinstalling moves them to config.json`);
-      if (node?.includes("/") || node?.includes("\\") ? !existsSync(node) : !onPath(node ?? "")) problems.add(`node not found: ${node}`);
+      if (node?.includes("/") || node?.includes("\\") ? !existsSync(node) : !onPath(node ?? "", process.env.PATH ?? "", platform)) problems.add(`node not found: ${node}`);
       else nodes.add(node);
       if (!script || !existsSync(script)) problems.add(`${script} does not exist (the checkout moved or was deleted)`);
-      else if (!samePath(resolve(script), resolve(cli))) checkouts.add(script);
+      else if (!samePath(resolve(script), resolve(cli), platform)) checkouts.add(script);
       if (expected?.matcher && h.matcher !== expected.matcher) notes.add(`${event} matches ${h.matcher ?? "every tool"} rather than ${expected.matcher}`);
       const wantTimeout = expected?.hooks[0].timeout;
       if (wantTimeout && h.timeout && h.timeout < wantTimeout) notes.add(`${event} times out after ${h.timeout} s; it needs ${wantTimeout} s`);
     }
   }
   if (checkouts.size) notes.add(`runs another Jevis checkout: ${[...checkouts].join(", ")}`);
-  if (problems.size) return fail(name, [...problems, ...notes].join("; "), install);
-  if (notes.size) return warn(name, [...notes].join("; "), install);
+  const fix = bareNode ? `install Node in a folder without spaces, or enable 8.3 names; then ${install}` : install;
+  if (problems.size) return fail(name, [...problems, ...notes].join("; "), fix);
+  if (notes.size) return warn(name, [...notes].join("; "), fix);
   return ok(name, `${Object.keys(found).length} events, ${[...nodes][0]}`);
 }
 
@@ -142,11 +149,11 @@ export function reviewChecks({ env = process.env, tools = {} } = {}) {
 }
 
 /** The lessons that apply here, a trusted project's included: none broken, and untrusted project lessons noted. */
-export function wikiChecks(cwd = process.cwd(), env = process.env) {
+export function wikiChecks(cwd = process.cwd(), env = process.env, { platform = process.platform } = {}) {
   const out = [];
   const { entries, broken } = wikiFor(cwd);
   out.push(broken.length ? fail("lessons", `${entries.length} load; broken: ${broken.map((b) => b.id).join(", ")}`, "run jevis lint in this folder to see why") : ok("lessons", `${entries.length} load`));
-  const relative = splitFolders(env.JEVIS_WIKI).filter((r) => r && !isAbsolute(r));
+  const relative = splitFolders(env.JEVIS_WIKI, platform === "win32" ? win32.delimiter : posix.delimiter).filter((r) => !isQualifiedPath(r, platform));
   if (relative.length) out.push(warn("lessons", `JEVIS_WIKI folders that are not absolute are ignored: ${relative.join(", ")}`, "give each as an absolute path"));
   const project = process.env.JEVIS_WIKI ? null : projectStatus(cwd);
   if (project?.trusted) out.push(ok("project lessons", `${project.path}, trusted`));

@@ -18,3 +18,8 @@ export function insideFolder(path, folder, platform = process.platform) {
   const d = pathKey(folder, platform);
   return p === d || p.startsWith(platform === "win32" && d.endsWith(slash) ? d : `${d}${slash}`);
 }
+
+/** A full Windows path names its drive or UNC share, not the hook's current drive. */
+export const isQualifiedPath = (value, platform = process.platform) => platform === "win32"
+  ? /^(?:[a-z]:[\\/]|[\\/]{2}[^\\/:]+[\\/][^\\/:]+(?:[\\/]|$))/i.test(value)
+  : posix.isAbsolute(value);

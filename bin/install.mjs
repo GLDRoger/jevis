@@ -15,12 +15,14 @@
  * same config. Options are saved in ~/.jevis/config.json, not on the hook
  * commands: they last until changed, and the commands run in any shell.
  */
+import { execFileSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SETTINGS, configFile, readConfig, writeConfig } from "../src/config.mjs";
 import { ensureDir, jevisHome } from "../src/state.mjs";
+import { isQualifiedPath } from "../src/paths.mjs";
 
 const JEVIS = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CLI = join(JEVIS, "bin", "jevis.mjs");
@@ -33,8 +35,31 @@ export const TARGETS = {
 export const isJevis = (cmd, platform = process.platform) => new RegExp('bin[\\\\/]jevis\\.mjs"? hook ', platform === "win32" ? "i" : "").test(cmd ?? "");
 /** A hook command's words, preserving backslashes in older Windows installs. */
 export const commandWords = (cmd) => [...String(cmd).matchAll(/"([^"]*)"|(\S+)/g)].map((m) => m[1] ?? m[2]);
-/** A path as a hook command word: quoted when it has a space (C:\Program Files\nodejs\node.exe). */
-const word = (path) => (/\s/.test(path) ? `"${path}"` : path);
+/** Only literal shell words are supported; one escaping scheme cannot serve bash, PowerShell, and cmd. */
+export function word(path, platform = process.platform) {
+  const forbidden = [...path].filter((ch) => /[%$`"!\p{Cc}]/u.test(ch) || (platform !== "win32" && ch === "\\"));
+  if (forbidden.length) {
+    const chars = [...new Set(forbidden)].map((ch) => `${JSON.stringify(ch)} (U+${ch.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")})`);
+    throw new Error(`Cannot install hook path ${JSON.stringify(path)}: unsupported characters ${chars.join(", ")}`);
+  }
+  const value = platform === "win32" ? path.replaceAll("\\", "/") : path;
+  return /^[\p{L}\p{Nd}._\-/:+@,~=]+$/u.test(value) ? value : `"${value}"`;
+}
+
+/** A short executable name avoids cmd's search of the current folder for a bare node command. */
+export function windowsShortPath(path, { platform = process.platform, exec = execFileSync, exists = existsSync, comspec = process.env.ComSpec ?? process.env.COMSPEC ?? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe") } = {}) {
+  word(path, "win32");
+  if (platform !== "win32") return null;
+  try {
+    // Without 8.3 names the result can still contain metacharacters, so echo it inside quotes too.
+    const output = exec(comspec, ["/d", "/s", "/v:off", "/c", `"for %I in ("${path}") do @echo "%~sI""`], { encoding: "utf8", timeout: 1000, windowsVerbatimArguments: true, windowsHide: true }).trim();
+    const result = output.replace(/^"([^"\r\n]*)"$/, "$1");
+    const value = word(result, "win32");
+    return isQualifiedPath(value, "win32") && !value.startsWith('"') && exists(result) ? value : null;
+  } catch {
+    return null;
+  }
+}
 
 export const CRITICS = ["claude", "codex", "off"];
 
@@ -115,15 +140,21 @@ export function settingsChanges({ shadow = false, live = false, jevUrl = null, c
 }
 
 /** Windows needs an unquoted executable word in every supported shell; forward slashes survive Git Bash. */
-export function hookCommand(event, { platform = process.platform, execPath = process.execPath, cli = CLI } = {}) {
-  if (platform !== "win32") return `${word(execPath)} ${word(cli)} hook ${event}`;
-  const node = execPath.replaceAll("\\", "/");
-  return `${/\s/.test(node) ? "node" : node} ${word(cli.replaceAll("\\", "/"))} hook ${event}`;
+export function hookCommand(event, { platform = process.platform, execPath = process.execPath, cli = CLI, shortPath = windowsShortPath } = {}) {
+  const script = word(cli, platform);
+  let node = word(execPath, platform);
+  if (platform === "win32" && node.startsWith('"')) {
+    const short = shortPath(execPath);
+    const candidate = short ? word(short, platform) : null;
+    node = candidate && isQualifiedPath(candidate, platform) && !candidate.startsWith('"') ? candidate : "node";
+  }
+  return `${node} ${script} hook ${event}`;
 }
 
 /** Jevis's entries for one harness: plain commands with no settings on them. Claude Code filters tools by matcher; Codex sends every tool. */
-export function jevisHooks(harness, { node = process.execPath, execPath = node, cli = CLI, platform = process.platform } = {}) {
-  const hook = (event, timeout, matcher) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command: hookCommand(event, { platform, execPath, cli }), timeout }] }];
+export function jevisHooks(harness, { node = process.execPath, execPath = node, cli = CLI, platform = process.platform, shortPath = windowsShortPath } = {}) {
+  const prefix = hookCommand("", { platform, execPath, cli, shortPath });
+  const hook = (event, timeout, matcher) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command: `${prefix}${event}`, timeout }] }];
   const out = {
     UserPromptSubmit: hook("prompt", 10),
     PreToolUse: hook("tool", 10, harness === "claude" ? "^(Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__.*)$" : undefined),
@@ -165,6 +196,8 @@ function main(argv) {
   const value = (f) => (argv.includes(`--${f}`) ? argv[argv.indexOf(`--${f}`) + 1] : null);
   const opts = { uninstall: has("uninstall"), shadow: has("shadow"), live: has("live"), jevUrl: value("jev-url"), critic: value("critic") };
   const dry = has("dry-run");
+  // Only the words the hook commands contain must survive every shell; other paths are opened by Node, not a shell.
+  for (const path of [CLI, process.execPath]) word(path);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const backups = join(jevisHome(), "backups", stamp);
   const befores = Object.fromEntries(pick.map((harness) => {
@@ -179,6 +212,10 @@ function main(argv) {
   const changes = opts.uninstall ? {} : settingsChanges(opts, { carried, saved: saved.raw });
   const settings = { ...saved.raw };
   for (const [k, v] of Object.entries(changes)) v === null ? delete settings[k] : (settings[k] = v);
+  const plans = Object.fromEntries(pick.map((harness) => [harness, plan(befores[harness], harness, {
+    uninstall: opts.uninstall,
+    node: process.platform === "win32" ? process.execPath : nodeIn(befores[harness]) ?? process.execPath,
+  })]));
   const usesTypeSafe = !process.env.JEVIS_JEV_URL && !settings.JEVIS_JEV_URL;
   if (!opts.uninstall && usesTypeSafe && !existsSync(join(jevisHome(), "secrets", "typesafe_api_key")) && !process.env.TYPESAFE_API_KEY && !process.env.JEVIS_JEV_KEY) {
     console.log("No TypeSafe key in ~/.jevis/secrets/typesafe_api_key: Jevis will install but do nothing until one is there (mode 600), or reinstall with --jev-url for a Laya server.");
@@ -190,8 +227,7 @@ function main(argv) {
   }
   for (const harness of pick) {
     const file = TARGETS[harness];
-    const before = befores[harness];
-    const { config, removed } = plan(before, harness, { uninstall: opts.uninstall, node: nodeIn(before) ?? process.execPath });
+    const { config, removed } = plans[harness];
     console.log(`\n${harness}: ${file}`);
     for (const r of removed) console.log(`  - ${r}`);
     for (const [event, groups] of Object.entries(config.hooks ?? {})) for (const g of groups) for (const h of g.hooks) if (isJevis(h.command)) console.log(`  + ${event}: ${h.command}`);
