@@ -49,6 +49,26 @@ test("doctor: hooks are ok when every event runs an existing node and this check
   assert.equal(hookCheck("codex", join(dir, "no-harness", "hooks.json"), { cli: CLI }).status, "skip");
 });
 
+test("doctor: every installed handler must match its event, including duplicate hooks", () => {
+  const handlers = { UserPromptSubmit: "prompt", PreToolUse: "tool", Stop: "stop", SessionStart: "session", PostCompact: "session" };
+  for (const harness of ["claude", "codex"]) {
+    const good = plan({}, harness, { node: process.execPath, cli: CLI }).config;
+    for (const [event, groups] of Object.entries(good.hooks)) {
+      for (const handler of [handlers[event] === "stop" ? "prompt" : "stop", "unknown", ""]) {
+        const bad = structuredClone(good);
+        bad.hooks[event][0].hooks[0].command = groups[0].hooks[0].command.replace(/hook \w+$/, `hook ${handler}`);
+        const r = hookCheck(harness, settings(`wrong-${harness}-${event}-${handler}.json`, bad), { cli: CLI });
+        assert.equal(r.status, "fail", `${event}: ${handler}`);
+        assert.ok(r.detail.includes(`expected hook ${handlers[event]}`));
+        assert.equal(r.fix, `node bin/install.mjs --harness ${harness}`);
+      }
+    }
+    const duplicate = structuredClone(good);
+    duplicate.hooks.UserPromptSubmit[0].hooks.push({ ...duplicate.hooks.Stop[0].hooks[0] });
+    assert.equal(hookCheck(harness, settings(`duplicate-${harness}.json`, duplicate), { cli: CLI }).status, "fail");
+  }
+});
+
 test("doctor: a broken settings file fails, shadow or disabled modes are named, and secrets stay masked", () => {
   writeFileSync(join(process.env.JEVIS_HOME, "config.json"), "{ nope");
   assert.ok(settingsChecks({}).some((c) => c.status === "fail" && /not valid JSON/.test(c.detail)));

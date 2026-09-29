@@ -21,6 +21,7 @@ import { isQualifiedPath, samePath, splitFolders } from "./paths.mjs";
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "jevis.mjs");
 const HARNESS = { claude: "Claude Code", codex: "Codex" };
+const HANDLERS = { UserPromptSubmit: "prompt", PreToolUse: "tool", Stop: "stop", SessionStart: "session", PostCompact: "session" };
 const DAY = 24 * 60 * 60 * 1000;
 /** The log's last 32 MB covers well over a day of hooks; older rows are not needed for a health check. */
 const LOG_TAIL = 32 * 1024 * 1024;
@@ -72,7 +73,8 @@ export function hookCheck(harness, file, { cli = CLI, platform = process.platfor
       const words = commandWords(h.command);
       if (platform === "win32" && (h.command.includes("\\") || h.command.startsWith('"'))) notes.add("old Windows command quoting or separators; reinstall for Git Bash, PowerShell, and cmd");
       const prefixes = words.filter((w) => /^[A-Z][A-Z0-9_]*=/.test(w));
-      const [node, script] = words.filter((w) => !prefixes.includes(w));
+      const [node, script, verb, handler] = words.filter((w) => !prefixes.includes(w));
+      if (!HANDLERS[event] || verb !== "hook" || handler !== HANDLERS[event]) problems.add(`${event} runs ${verb} ${handler}; expected hook ${HANDLERS[event] ?? "on a supported event"}`);
       if (platform === "win32" && /^node(?:\.exe)?$/i.test(node ?? "")) {
         bareNode = true;
         notes.add("bare node can run a node.exe from the current folder under cmd");

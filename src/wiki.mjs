@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, opendirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, posix, relative, resolve, sep, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -141,35 +141,43 @@ export function validateEntry(e) {
 
 /** Past this, a file is not a lesson: a project's lessons are read on every hook, so a huge one would stall them all. */
 const MAX_LESSON_BYTES = 256 * 1024;
-const MAX_PROJECT_FILES = 1000;
+const MAX_PROJECT_ENTRIES = 1000;
+const MAX_PROJECT_DEPTH = 8;
 
 /**
  * Every .md file under `dir`. `strict` (a project's lessons, which arrive
  * with a cloned repository) takes only regular files of lesson size: no
  * symlink out to /dev/zero or a secret, no FIFO that blocks the read.
  */
-function walk(dir, { strict = false, budget = { files: MAX_PROJECT_FILES } } = {}) {
+function walk(dir, { strict = false, budget = { entries: MAX_PROJECT_ENTRIES }, depth = 0 } = {}) {
   let out = [];
-  let entries = [];
+  if (strict && (budget.entries <= 0 || depth > MAX_PROJECT_DEPTH)) return out;
+  let entries;
   try {
-    entries = readdirSync(dir, { withFileTypes: true });
+    // A directory stream bounds the work even when one folder has millions of non-lesson entries.
+    entries = strict ? opendirSync(dir, { bufferSize: 1 }) : readdirSync(dir, { withFileTypes: true });
   } catch {
     return out;
   }
-  for (const d of entries) {
-    const p = join(dir, d.name);
-    if (strict && budget.files <= 0) break;
-    if (d.isDirectory()) out = out.concat(walk(p, { strict, budget }));
-    else if (!d.name.endsWith(".md")) continue;
-    else if (!strict) out.push(p);
-    else if (d.isFile()) {
-      budget.files -= 1;
-      try {
-        if (statSync(p).size <= MAX_LESSON_BYTES) out.push(p);
-      } catch {
-        /* gone or unreadable: not a lesson */
+  try {
+    for (let i = 0; !strict || budget.entries > 0; i += 1) {
+      const d = strict ? entries.readSync() : entries[i];
+      if (!d) break;
+      if (strict) budget.entries -= 1;
+      const p = join(dir, d.name);
+      if (d.isDirectory()) out = out.concat(walk(p, { strict, budget, depth: depth + 1 }));
+      else if (!d.name.endsWith(".md")) continue;
+      else if (!strict) out.push(p);
+      else if (d.isFile()) {
+        try {
+          if (statSync(p).size <= MAX_LESSON_BYTES) out.push(p);
+        } catch {
+          /* gone or unreadable: not a lesson */
+        }
       }
     }
+  } finally {
+    if (strict) entries.closeSync();
   }
   return out.sort();
 }
@@ -210,11 +218,12 @@ export function projectWiki(cwd) {
 }
 
 /** Trust stays byte-exact: even a CRLF/LF-only edit needs trusting again, although both parse alike. */
-export function wikiDigest(dir) {
+function digestFiles(dir, files) {
   const h = createHash("sha256");
-  for (const file of walk(dir, { strict: true })) h.update(`${relative(dir, file)}\0${readFileSync(file)}\0`);
+  for (const file of files) h.update(`${relative(dir, file)}\0${readFileSync(file)}\0`);
   return h.digest("hex").slice(0, 16);
 }
+export const wikiDigest = (dir) => digestFiles(dir, walk(dir, { strict: true }));
 
 const trustFile = () => join(jevisHome(), "trusted.json");
 const readTrust = () => {
@@ -231,14 +240,16 @@ const readTrust = () => {
  * as it is now. A folder never trusted is not read at all, so an untrusted
  * repository costs a hook only the walk up to find it.
  */
-export function projectStatus(cwd) {
+function projectState(cwd) {
   const path = projectWiki(cwd);
   if (!path) return null;
   const record = readTrust()[path];
-  if (typeof record?.hash !== "string") return { path, hash: null, trusted: false, changed: false };
-  const hash = wikiDigest(path);
-  return { path, hash, trusted: record.hash === hash, changed: record.hash !== hash };
+  if (typeof record?.hash !== "string") return { status: { path, hash: null, trusted: false, changed: false }, files: [] };
+  const files = walk(path, { strict: true });
+  const hash = digestFiles(path, files);
+  return { status: { path, hash, trusted: record.hash === hash, changed: record.hash !== hash }, files };
 }
+export const projectStatus = (cwd) => projectState(cwd)?.status ?? null;
 
 /** Trust a project wiki as it is now, or (`remove`) forget it. The record is private to this user. */
 export function setTrust(path, { remove = false } = {}) {
@@ -258,14 +269,14 @@ export function setTrust(path, { remove = false } = {}) {
  */
 function resolveRoots(cwd, { platform = process.platform, env = process.env } = {}) {
   if (env.JEVIS_WIKI) return { roots: splitFolders(env.JEVIS_WIKI, platform === "win32" ? win32.delimiter : posix.delimiter).filter((r) => isQualifiedPath(r, platform)), project: null };
-  let status = null;
+  let checked = null;
   try {
-    status = cwd ? projectStatus(cwd) : null;
+    checked = cwd ? projectState(cwd) : null;
   } catch {
     /* an unreadable project folder loads the defaults */
   }
-  const project = status?.trusted ? status.path : null;
-  return { roots: [WIKI_ROOT, userWiki(), ...(project ? [project] : [])], project };
+  const project = checked?.status.trusted ? checked.status.path : null;
+  return { roots: [WIKI_ROOT, userWiki(), ...(project ? [project] : [])], project, files: project ? { [project]: checked.files } : {} };
 }
 export const wikiRoots = (cwd = null, options = {}) => resolveRoots(cwd, options).roots;
 
@@ -289,8 +300,9 @@ export function projectLessons(path) {
 
 /** The lessons that apply in `cwd`: the defaults, and the project's once trusted, guarded as loadWiki describes. */
 export function wikiFor(cwd) {
-  const { roots, project } = resolveRoots(cwd);
-  return loadWiki(roots, { guarded: project ? [project] : [] });
+  const { roots, project, files } = resolveRoots(cwd);
+  // Reuse the files just hashed, rather than selecting a second bounded slice of a changing tree.
+  return loadWiki(roots, { guarded: project ? [project] : [], files });
 }
 
 /**
@@ -303,13 +315,13 @@ export function wikiFor(cwd) {
  * force push or a machine-wide delete is the user's call, in ~/.jevis/wiki,
  * not something a cloned repository brings along.
  */
-export function loadWiki(roots = wikiRoots(), { guarded = [] } = {}) {
+export function loadWiki(roots = wikiRoots(), { guarded = [], files = {} } = {}) {
   const byId = new Map();
   const broken = [];
   const replaced = [];
   const off = [];
   for (const root of roots) {
-    for (const file of walk(root, { strict: guarded.includes(root) })) {
+    for (const file of Object.hasOwn(files, root) ? files[root] : walk(root, { strict: guarded.includes(root) })) {
       const id = relative(root, file).split(process.platform === "win32" ? "\\" : "/").join("/").replace(/\.md$/, "");
       try {
         const e = parseEntry(readFileSync(file, "utf8"), id);

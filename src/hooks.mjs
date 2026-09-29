@@ -92,7 +92,7 @@ export async function onPrompt(input) {
   };
   const result = await evaluate({ event: "prompt", state, model: session.model, harness, sessionId, timeoutMs: timeout("prompt"), wiki: wikiFor(cwd) });
   const notes = pickNotes(result.fired, session);
-  log({ event: "prompt", sessionId, harness, model: session.model, turn: session.turn, cwd, request: clip(session.request, 200), ...summary(result), acted: notes.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
+  log({ event: "prompt", sessionId, harness, model: session.model, origin: state.agent.origin, turn: session.turn, cwd, request: clip(session.request, 200), ...summary(result), acted: notes.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
   if (!notes.length || shadow()) return null;
   const now = loadSession(sessionId);
   for (const e of notes) now.shown[e.id] = session.turn;

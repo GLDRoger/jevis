@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
@@ -10,7 +12,7 @@ const base = realpathSync(mkdtempSync(join(tmpdir(), "jevis-project-")));
 process.env.JEVIS_HOME = join(base, ".jevis");
 for (const k of ["JEVIS_WIKI", "JEVIS_MODE", "JEVIS_SCOPE", "JEVIS_DISABLE", "JEVIS_ENABLE"]) delete process.env[k];
 const { setJevTransport } = await import("../src/jev.mjs");
-const { projectLessons, projectStatus, projectWiki, setTrust, wikiFor, wikiRoots, WIKI_ROOT } = await import("../src/wiki.mjs");
+const { loadWiki, projectLessons, projectStatus, projectWiki, setTrust, wikiDigest, wikiFor, wikiRoots, WIKI_ROOT } = await import("../src/wiki.mjs");
 const { onPrompt } = await import("../src/hooks.mjs");
 
 const repo = join(base, "repo");
@@ -110,4 +112,79 @@ test("project lessons: a hook in a trusted repo gives the project's note", async
   assert.match(out?.hookSpecificOutput?.additionalContext ?? "", /Billing changes need a second reviewer/);
   const elsewhere = await onPrompt({ session_id: "p2", cwd: base, prompt: "change the invoice rounding in billing.ts" });
   assert.equal(elsewhere, null, "outside the repo the project's lessons do not apply");
+});
+
+test("project lessons: wide trees charge folders and non-Markdown entries, and hashing and loading share one bounded walk", { timeout: 10_000 }, (t) => {
+  const repo = join(base, "wide");
+  const root = join(repo, ".jevis", "wiki");
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, "lesson.md"), TEAM);
+  setTrust(projectWiki(repo));
+  for (let i = 0; i < 1100; i += 1) {
+    mkdirSync(join(root, `d${i}`));
+    writeFileSync(join(root, `f${i}.txt`), "not a lesson");
+  }
+  setTrust(projectWiki(repo));
+  let opened = 0;
+  let reads = 0;
+  let charged = 0;
+  let closed = 0;
+  const open = fs.opendirSync;
+  t.mock.method(fs, "opendirSync", (...args) => {
+    opened += 1;
+    const dir = open(...args);
+    return {
+      readSync() {
+        reads += 1;
+        const entry = dir.readSync();
+        if (entry) charged += 1;
+        return entry;
+      },
+      closeSync() { closed += 1; dir.closeSync(); },
+    };
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const hash = wikiDigest(root);
+  assert.equal(charged, 1000, "every entry consumes the shared budget, not just .md files");
+  assert.ok(opened <= 1001);
+  assert.ok(reads <= 2001, "one read per charged entry and at most one EOF per folder");
+  assert.equal(opened, closed);
+  const expected = loadWiki([root], { guarded: [root] }).entries.map((e) => e.id);
+  opened = reads = charged = closed = 0;
+  const loaded = wikiFor(repo).entries.filter((e) => e.source === "team rule").map((e) => e.id);
+  assert.deepEqual(loaded, expected);
+  assert.equal(charged, 1000, "the loader reuses the list that trust hashed rather than walking again");
+  assert.equal(opened, closed);
+  assert.equal(projectStatus(repo).hash, hash);
+});
+
+test("project lessons: deep trees stop after eight folder levels, with the same digest and loader boundary", { timeout: 10_000 }, (t) => {
+  const repo = join(base, "deep");
+  const root = join(repo, ".jevis", "wiki");
+  const dirs = Array.from({ length: 16 }, () => "d");
+  mkdirSync(join(root, ...dirs), { recursive: true });
+  const included = join(root, ...dirs.slice(0, 8), "lesson.md");
+  const excluded = join(root, ...dirs.slice(0, 9), "lesson.md");
+  writeFileSync(included, TEAM);
+  writeFileSync(excluded, TEAM);
+  setTrust(projectWiki(repo));
+  let opened = 0;
+  const open = fs.opendirSync;
+  t.mock.method(fs, "opendirSync", (...args) => { opened += 1; return open(...args); });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const hash = wikiDigest(root);
+  assert.equal(opened, 9, "the root and eight nested folders, never the deeper tree");
+  const own = loadWiki([root], { guarded: [root] });
+  assert.deepEqual(own.entries.map((e) => e.id), [`${dirs.slice(0, 8).join("/")}/lesson`]);
+  appendFileSync(excluded, "Changed outside the boundary.\n");
+  assert.equal(wikiDigest(root), hash);
+  assert.equal(projectStatus(repo).trusted, true);
+  opened = 0;
+  assert.deepEqual(wikiFor(repo).entries.filter((e) => e.source === "team rule"), own.entries);
+  assert.equal(opened, 9, "trust and loading use one bounded list");
+  appendFileSync(included, "Changed inside the boundary.\n");
+  assert.notEqual(wikiDigest(root), hash);
+  assert.equal(projectStatus(repo).trusted, false);
 });

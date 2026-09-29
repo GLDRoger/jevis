@@ -50,7 +50,8 @@ export function segments(command) {
   let unsafe = false;
   const endWord = () => {
     if (word !== null) {
-      if (globbed && hiddenGlob(word)) unsafe = true;
+      // A cd glob is not a literal folder and can expand to several operands.
+      if (globbed && (hiddenGlob(word) || words[0] === "cd")) unsafe = true;
       words.push(word);
     }
     word = null;
@@ -136,10 +137,67 @@ export function segments(command) {
 }
 
 const positional = (args) => args.filter((a) => !a.startsWith("-"));
-/** A short-flag cluster (-uo) or a long flag (--output, --output=x) among the args. */
+/** getopt accepts unambiguous long-flag prefixes, so a write flag cannot hide behind --out=x. */
 const hasFlag = (args, short, long = []) =>
-  args.some((a) => (short && /^-[^-]/.test(a) && [...a.slice(1)].some((ch) => short.includes(ch))) || long.some((l) => a === l || a.startsWith(`${l}=`)));
+  args.some((a) => (short && /^-[^-]/.test(a) && [...a.slice(1)].some((ch) => short.includes(ch))) || (a.startsWith("--") && a.length > 2 && long.some((l) => l.startsWith(a.split("=")[0]))));
 const always = () => true;
+// Variable predicates can evaluate array subscripts as shell arithmetic, including assignments.
+const testRead = (args) => !args.includes("-v") && !args.includes("-R");
+
+/** Literal cd only chooses where the next read runs. zsh chpwd hooks are the user's own configuration, outside plain_read's promise. */
+function cd(args) {
+  let i = 0;
+  while (/^-[LP]+$/.test(args[i] ?? "")) i += 1;
+  const endOptions = args[i] === "--";
+  if (endOptions) i += 1;
+  const folder = args[i];
+  return args.length === i + 1 && Boolean(folder) && (endOptions || !folder.startsWith("-")) && folder !== "-" && !/^[-+]\d+$/.test(folder) && !/^~(?:[+-]|\d)/.test(folder);
+}
+
+/** Bash and zsh assign with -v and %n; zsh also evaluates numeric arguments as shell arithmetic. */
+function printf(args) {
+  if (hasFlag(args, "v")) return false;
+  const rest = args[0] === "--" ? args.slice(1) : args;
+  const [format, ...values] = rest;
+  if (format === undefined) return false;
+  const spec = /%[-+ #0]*(\d+|\*)?(?:\.(\d+|\*))?([bqscdiouxXeEfFgGaA%])/g;
+  const fields = [...format.matchAll(spec)];
+  if (format.replace(spec, "").includes("%")) return false;
+  const number = (v) => v === undefined || /^[+-]?(?:0[xX][\da-fA-F]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)$/.test(v);
+  let i = 0;
+  do {
+    const start = i;
+    for (const [, width, precision, kind] of fields) {
+      if (width === "*" && !number(values[i++])) return false;
+      if (precision === "*" && !number(values[i++])) return false;
+      if (kind !== "%") {
+        if ("diouxXeEfFgGaA".includes(kind) && !number(values[i])) return false;
+        i += 1;
+      }
+    }
+    if (i === start) break;
+  } while (i < values.length);
+  return true;
+}
+
+/** The union of documented display options across the supported systems, never a hostname operand. */
+const hostname = (args) => args.every((a) => /^-[sfdiIaA]+$/.test(a) || ["--short", "--fqdn", "--long", "--domain", "--ip-address", "--all-ip-addresses", "--alias", "--all-fqdns", "--help", "--version"].includes(a));
+const uname = (args) => args.every((a) => /^-[amnprsvioKUb]+$/.test(a) || ["--all", "--kernel-name", "--nodename", "--kernel-release", "--kernel-version", "--machine", "--processor", "--hardware-platform", "--operating-system", "--help", "--version"].includes(a));
+
+/** A BSD input format can set the clock even when its date operand begins with +. */
+function date(args) {
+  if (hasFlag(args, "asf", ["--set"])) return false;
+  const rest = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const a = args[i];
+    if (["-d", "--date", "-r", "--reference", "-v", "-z"].includes(a)) {
+      if (++i >= args.length) return false;
+    } else if (/^-(?:d|r|v|z)./.test(a) || /^--(?:date|reference|iso-8601|rfc-3339)=/.test(a) || /^-I(?:date|hours|minutes|seconds|ns)?$/.test(a)) continue;
+    else if (/^-[jnRu]+$/.test(a) || ["--utc", "--universal", "--rfc-email", "--iso-8601", "--debug", "--help", "--version"].includes(a)) continue;
+    else rest.push(a);
+  }
+  return rest.length <= 1 && rest.every((a) => a.startsWith("+"));
+}
 
 /**
  * A sed script that only transforms the text it streams: addresses, then
@@ -226,10 +284,7 @@ function awk(args) {
     if (a === "-F" || a === "-v") i += 1;
     else if (/^-F./.test(a) || /^-v\w+=/.test(a)) continue;
     else if (a.startsWith("-") && a !== "-") return false;
-    else {
-      program = a;
-      break;
-    }
+    else if (program === undefined) program = a;
   }
   return program !== undefined && !/[>|]|system|getline|close|fflush|@/.test(program);
 }
@@ -239,7 +294,7 @@ const operands = (args) => args.filter((a) => a === "-" || !a.startsWith("-"));
 
 /** git subcommands that only read the repository, each with the arguments that would make it write. */
 const GIT_READS = new Set(["status", "log", "diff", "show", "rev-parse", "ls-files", "ls-tree", "blame", "grep", "shortlog", "describe", "cat-file", "rev-list", "merge-base", "name-rev", "whatchanged", "show-ref", "for-each-ref", "check-ignore", "count-objects", "cherry", "range-diff", "diff-tree", "diff-files", "diff-index", "annotate", "show-branch"]);
-const GIT_BRANCH_WRITES = ["-d", "-D", "-m", "-M", "-c", "-C", "-f", "-u", "--delete", "--move", "--copy", "--force", "--set-upstream-to", "--unset-upstream", "--edit-description", "--track", "--no-track", "--create-reflog"];
+const GIT_BRANCH_WRITES = ["--delete", "--move", "--copy", "--force", "--set-upstream-to", "--unset-upstream", "--edit-description", "--track", "--no-track", "--create-reflog"];
 
 function git(args) {
   let i = 0;
@@ -254,13 +309,13 @@ function git(args) {
   const rest = args.slice(i + 1);
   // --ext-diff and --textconv run the diff programs a repository configures.
   // -O<pager> (git grep) runs any program it names, attached or not.
-  if (hasFlag(rest, "", ["--output", "--open-files-in-pager", "--ext-diff", "--textconv"]) || rest.some((a) => a.startsWith("-O"))) return false;
+  if (hasFlag(rest, "", ["--output", "--open-files-in-pager", "--ext-diff", "--textconv", "--filters"]) || rest.some((a) => a.startsWith("-O"))) return false;
   if (GIT_READS.has(sub)) return true;
   switch (sub) {
     case "branch":
-      return rest.every((a) => a.startsWith("-") && !GIT_BRANCH_WRITES.some((w) => a === w || a.startsWith(`${w}=`)));
+      return rest.every((a) => a.startsWith("-")) && !hasFlag(rest, "dDmMcCfu", GIT_BRANCH_WRITES);
     case "tag":
-      return !rest.length || ((rest.includes("-l") || rest.includes("--list")) && !hasFlag(rest, "dasfmu", ["--delete", "--annotate", "--sign", "--force", "--message", "--file"]));
+      return !rest.length || ((rest.includes("-l") || rest.includes("--list")) && !hasFlag(rest, "dasfmueF", ["--delete", "--annotate", "--sign", "--force", "--message", "--file", "--edit", "--local-user", "--trailer", "--create-reflog"]));
     case "remote":
       return !rest.length || (rest.length === 1 && ["-v", "--verbose"].includes(rest[0])) || ["get-url", "show"].includes(rest[0]);
     case "stash":
@@ -268,9 +323,10 @@ function git(args) {
     case "worktree":
       return rest[0] === "list";
     case "reflog":
-      return !["expire", "delete"].includes(rest[0]);
+      return !rest.length || ["show", "list", "exists", "HEAD"].includes(rest[0]) || rest[0].startsWith("-") || rest[0].startsWith("refs/");
     case "config":
-      return rest.some((a) => ["--get", "--get-all", "--get-regexp", "--list", "-l", "--show-origin"].includes(a)) && !hasFlag(rest, "e", ["--unset", "--unset-all", "--add", "--replace-all", "--rename-section", "--remove-section", "--edit"]);
+      // --show-origin only changes display; without an actual query action, config can still set a value.
+      return (rest.some((a) => ["--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color", "--get-colorbool", "--list", "-l"].includes(a)) || ["get", "list"].includes(rest[0])) && !hasFlag(rest, "e", ["--unset", "--unset-all", "--add", "--replace-all", "--rename-section", "--remove-section", "--edit"]);
     default:
       return false;
   }
@@ -279,7 +335,7 @@ function git(args) {
 /** gh reads: viewing and listing, never in a browser window (--web). */
 const GH_READS = { pr: ["view", "list", "diff", "checks", "status"], issue: ["view", "list", "status"], run: ["view", "list"], repo: ["view"], release: ["view", "list"], workflow: ["view", "list"], search: ["repos", "issues", "prs", "code", "commits"] };
 function gh(args) {
-  if (hasFlag(args, "w", ["--web", "--cache"])) return false;
+  if (hasFlag(args, "w", ["--web", "--cache", "--log", "--log-failed"])) return false;
   const [noun, verb] = positional(args);
   if (noun === "api") return !hasFlag(args, "XfF", ["--method", "--field", "--raw-field", "--input"]);
   return GH_READS[noun]?.includes(verb) ?? false;
@@ -300,28 +356,34 @@ const nodeJevis = (args) => isOwnCli(args[0]) && jevisCli(args.slice(1));
 /** Read-only programs, each with a check on the arguments that would make it write or run something else. */
 const READERS = {
   ls: always, cat: always, head: always, tail: always, wc: always, nl: always, cut: always, tr: always, column: always, paste: always, fold: always, rev: always, comm: always, join: always,
-  diff: always, cmp: always, stat: always, du: always, df: always, pwd: always, echo: always, printf: always, which: always, whereis: always, type: always,
-  basename: always, dirname: always, realpath: always, readlink: always, whoami: always, id: always, uname: always, true: always, false: always, test: always, "[": always,
-  sleep: always, pgrep: always, lsof: always, grep: always, egrep: always, fgrep: always, jq: always, od: always, hexdump: always, strings: always,
-  shasum: always, md5: always, md5sum: always, sha1sum: always, sha256sum: always, cd: always, mdls: always, mdfind: always, sw_vers: always, uptime: always, nproc: always,
+  diff: always, cmp: always, du: always, pwd: always, echo: always, printf, which: always, whereis: always, type: always,
+  basename: always, dirname: always, realpath: always, readlink: always, whoami: always, id: always, uname, true: always, false: always, test: testRead, "[": testRead,
+  sleep: always, pgrep: always, grep: always, egrep: always, fgrep: always, jq: always, od: always, hexdump: always, strings: always,
+  shasum: always, md5: always, md5sum: always, sha1sum: always, sha256sum: always, mdls: always, mdfind: always, sw_vers: always, uptime: always, nproc: always,
+  cd,
+  // zsh's stat module can store the results in a shell array or hash instead of printing them.
+  stat: (a) => !hasFlag(a, "AH"),
+  df: (a) => !hasFlag(a, "", ["--sync"]),
+  // The device-cache controls can build or update a file, not just list open files.
+  lsof: (a) => !hasFlag(a, "D"),
   // ps e / ps -e (macOS) print each process's environment, API keys and all.
   ps: (a) => !a.some((x) => !x.startsWith("--") && /^-?[a-z]+$/i.test(x) && /e/i.test(x)),
-  file: (a) => !hasFlag(a, "C", ["--compile"]),
-  sort: (a) => !hasFlag(a, "o", ["--output", "--compress-program"]),
+  file: (a) => !hasFlag(a, "CpzZ", ["--compile", "--preserve-date", "--uncompress", "--uncompress-noreport"]),
+  sort: (a) => !hasFlag(a, "o", ["--output", "--compress-program"]) && !a.some((x) => /^\/o(?:$|\b)/i.test(x)),
   uniq: (a) => operands(a).length <= 1,
   xxd: (a) => operands(a).length <= 1,
   // tree -R with -H writes an 00Tree.html into every folder.
   tree: (a) => !hasFlag(a, "oR"),
-  rg: (a) => !hasFlag(a, "", ["--pre", "--hostname-bin"]),
-  fd: (a) => !hasFlag(a, "xX", ["--exec", "--exec-batch"]),
+  rg: (a) => !hasFlag(a, "z", ["--pre", "--hostname-bin", "--search-zip"]),
+  fd: (a) => !hasFlag(a, "xXl", ["--exec", "--exec-batch", "--list-details"]),
   find: (a) => !a.some((x) => ["-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"].includes(x)),
   sed,
   awk,
-  yq: (a) => !hasFlag(a, "is", ["--inplace", "--split-exp"]),
+  yq: (a) => !hasFlag(a, "is", ["--inplace", "--in-place", "--split-exp", "--split-exp-file"]),
   // Not `sg`: on Linux that name runs a command as another group.
   "ast-grep": (a) => !hasFlag(a, "Ui", ["--update-all", "--interactive"]) && !["new", "lsp", "test"].some((x) => a.includes(x)),
-  date: (a) => !hasFlag(a, "s", ["--set"]) && positional(a).every((x) => x.startsWith("+")),
-  hostname: (a) => !positional(a).length,
+  date,
+  hostname,
   command: (a) => ["-v", "-V"].includes(a[0]),
   sysctl: (a) => !hasFlag(a, "wpf", ["--write", "--load", "--system"]) && !a.some((x) => x.includes("=")),
   git,

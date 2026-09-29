@@ -16,6 +16,8 @@ const { loadWiki } = await import("../src/wiki.mjs");
 const { log } = await import("../src/state.mjs");
 const { tune, formatTune, sinceTime } = await import("../src/tune.mjs");
 const { mine, formatMine } = await import("../src/mine.mjs");
+const { clip } = await import("../src/context.mjs");
+const { onPrompt } = await import("../src/hooks.mjs");
 const { exportDataset, goldOf, pickTest } = await import("../src/export.mjs");
 
 const put = (id, text) => {
@@ -128,6 +130,97 @@ test("mine: a person's correction, with the request and answer it corrects and w
   // A correction just after --since still gets the request and answer just before it.
   assert.equal(mine({ home, since: Date.parse("2026-09-29T10:02:30.000Z") }).corrections[0].before, "make a chart");
   assert.equal(mine({ since: Date.now() + 1000 }).corrections.length, 0);
+});
+
+test("mine: recording turned off keeps later log-only corrections and marks their excerpts", async () => {
+  const savedHome = process.env.JEVIS_HOME;
+  const savedRecord = process.env.JEVIS_RECORD;
+  const home = mkdtempSync(join(tmpdir(), "jevis-mine-off-"));
+  process.env.JEVIS_HOME = home;
+  delete process.env.JEVIS_RECORD;
+  const sessionId = "transition";
+  const request = `make a page ${"with bread ".repeat(30)}`;
+  const correction = `wrong header ${"needs a title ".repeat(30)}`;
+  const later = `wrong footer ${"needs an address ".repeat(30)}`;
+  const final = `Here is the page ${"with a heading ".repeat(30)}`;
+  const unrecordedFinal = `Here is the header ${"with the title ".repeat(30)}`;
+  const loggedPrompt = async (text) => {
+    const r = await evaluate({ event: "prompt", sessionId, harness: "Codex", wiki: loadWiki(), state: { request: text, agent: { origin: "person" } } });
+    log({ event: "prompt", sessionId, harness: "Codex", request: clip(text, 200), profile: r.profile, origin: "person" });
+    await tick();
+  };
+  const loggedStop = async (text) => {
+    await evaluate({ event: "stop", sessionId, harness: "Codex", wiki: loadWiki(), state: { final_message: text } });
+    log({ event: "stop", sessionId, harness: "Codex", final: clip(text, 200) });
+    await tick();
+  };
+  try {
+    await loggedPrompt(request);
+    await loggedStop(final);
+    await loggedPrompt(correction);
+    process.env.JEVIS_RECORD = "off";
+    await loggedStop(unrecordedFinal);
+    await loggedPrompt(later);
+    const r = mine({ home });
+    assert.equal(r.source, "mixed");
+    assert.equal(r.total, 2, "the recorded correction is not duplicated by its log row");
+    assert.deepEqual(r.corrections.map((c) => [c.before, c.final, c.request, c.source]), [
+      [request, final, correction, "calls"],
+      [correction, clip(unrecordedFinal, 200), clip(later, 200), "log"],
+    ]);
+    assert.deepEqual(r.corrections[1].excerpts, ["then", "agent answered"]);
+    assert.match(formatMine(r), /Decision-log excerpts, cut to 200 characters: then, agent answered/);
+    assert.equal(mine({ home, limit: 1 }).corrections[0].request, clip(later, 200));
+    assert.equal(mine({ home, since: Date.parse(r.corrections[1].at) }).total, 1);
+    assert.equal(mine({ home, min: 0.95 }).total, 0);
+    await onPrompt({ session_id: sessionId, cwd: wikiDir, model: "gpt-6", prompt: "[agent] wrong again" });
+    const logRows = readFileSync(join(home, "log.jsonl"), "utf8").trim().split("\n").map((row) => JSON.parse(row));
+    assert.equal(logRows.at(-1).origin, "agent", "log-only turns retain the origin needed by --agents");
+    assert.equal(mine({ home }).total, 2);
+    assert.equal(mine({ home, agents: true }).total, 3);
+  } finally {
+    process.env.JEVIS_HOME = savedHome;
+    if (savedRecord === undefined) delete process.env.JEVIS_RECORD;
+    else process.env.JEVIS_RECORD = savedRecord;
+  }
+});
+
+test("mine: mixed sessions join calls by time, preserve gap context, and filter and limit both sources", () => {
+  const home = mkdtempSync(join(tmpdir(), "jevis-mine-mixed-"));
+  mkdirSync(join(home, "jev"));
+  const at = (ms) => new Date(Date.parse("2026-09-29T10:00:00Z") + ms).toISOString();
+  const full = `wrong ${"x".repeat(250)}`;
+  const call = (ms, event, text, correction = 0.1, origin = "person", duration = 0) => ({ at: at(ms), sessionId: "a", event, ms: duration, harness: "Codex", state: event === "prompt" ? { request: text, agent: { origin } } : { final_message: text }, answers: { "axis.correction": correction } });
+  const logRow = (ms, event, text, correction = 0.1, sessionId = "a") => ({ at: at(ms), sessionId, event, harness: "Codex", ...(event === "prompt" ? { request: text, profile: { correction } } : { final: text }) });
+  const writeRows = (file, rows) => writeFileSync(file, rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  writeRows(join(home, "jev", "calls.jsonl"), [
+    call(0, "prompt", "build a chart"),
+    call(6000, "stop", "full chart answer", 0, "person", 2000),
+    call(10000, "prompt", full, 0.9, "person", 1200),
+    call(13100, "prompt", "agent correction", 0.99, "agent"),
+    call(16000, "prompt", "person correction", 0.99),
+  ]);
+  writeRows(join(home, "log.jsonl"), [
+    logRow(5, "prompt", "build a chart"),
+    logRow(500, "prompt", "build a table", 0.1, "b"),
+    logRow(8005, "stop", "short chart answer"),
+    logRow(11201, "prompt", full.slice(0, 200), 0.9),
+    logRow(12000, "stop", "log-only answer"),
+    logRow(13000, "prompt", "gap correction", 0.7),
+    logRow(13105, "prompt", "agent correction", 0.99),
+    logRow(15000, "prompt", "wrong table", 0.85, "b"),
+  ]);
+  const r = mine({ home });
+  assert.equal(r.total, 4);
+  assert.deepEqual(r.corrections.map((c) => c.request), [full, "gap correction", "wrong table", "person correction"]);
+  assert.equal(r.corrections[0].final, "full chart answer", "the slower stop call wins over the shorter log text");
+  assert.deepEqual([r.corrections[1].before, r.corrections[1].final], [full, "log-only answer"]);
+  assert.equal(r.corrections[3].before, "agent correction", "excluded agent corrections still provide the preceding context");
+  assert.equal(mine({ home, agents: true }).total, 5, "a matched agent log row cannot sneak past --agents");
+  assert.equal(mine({ home, since: Date.parse(at(12000)) }).total, 3);
+  assert.deepEqual(mine({ home, min: 0.95 }).corrections.map((c) => c.request), ["person correction"]);
+  assert.deepEqual(mine({ home, limit: 2 }).corrections.map((c) => c.request), ["wrong table", "person correction"]);
+  assert.equal(mine({ home, limit: 0 }).corrections.length, 0);
 });
 
 test("export: rows in Laya's format, split by whole sessions, repeats dropped, files private", () => {
