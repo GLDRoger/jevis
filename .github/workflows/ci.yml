@@ -9,7 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  platform:
+    name: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -27,3 +28,16 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run lint
+
+  test:
+    name: test
+    needs: platform
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions: {}
+    steps:
+      - name: Require all platforms to succeed
+        env:
+          PLATFORM_RESULT: ${{ needs.platform.result }}
+        run: test "$PLATFORM_RESULT" = success
