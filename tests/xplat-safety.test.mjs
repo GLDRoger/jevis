@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { hookCommand, jevisHooks, windowsShortPath, word } from "../bin/install.mjs";
 import { absolutePaths } from "../src/config.mjs";
 import { hookCheck, wikiChecks } from "../src/doctor.mjs";
@@ -35,7 +35,7 @@ test("Stop save failure fails open before returning a block", () => {
   const preload = join(home, "transport.mjs");
   writeFileSync(preload, `import { setJevTransport } from ${JSON.stringify(new URL("../src/jev.mjs", import.meta.url).href)};\nsetJevTransport(async body => ({ answers: Object.fromEntries(Object.keys(body.questions).map(key => [key, { type: "noul", noul: 0.99 }])) }));\n`);
   const input = JSON.stringify({ session_id: "cannot-save", cwd: home, last_assistant_message: "Done." });
-  const result = spawnSync(process.execPath, ["--import", preload, join(root, "bin", "jevis.mjs"), "hook", "stop"], { env: { ...env, JEVIS_WIKI: wiki }, input, encoding: "utf8", timeout: 10000 });
+  const result = spawnSync(process.execPath, ["--import", pathToFileURL(preload).href, join(root, "bin", "jevis.mjs"), "hook", "stop"], { env: { ...env, JEVIS_WIKI: wiki }, input, encoding: "utf8", timeout: 10000 });
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0);
   assert.equal(result.stdout, "", "the unpersisted block must never reach the harness");
@@ -190,7 +190,7 @@ test("Windows short-name lookup runs cmd and returns an existing executable", { 
   const result = windowsShortPath(executable);
   assert.equal(typeof result, "string");
   assert.equal(word(result, "win32"), result);
-  assert.equal(realpathSync(result), realpathSync(executable));
+  assert.equal(realpathSync.native(result), realpathSync.native(executable));
   const dir = join(temp(), "Node with spaces");
   mkdirSync(dir);
   const node = join(dir, "node.exe");
@@ -200,6 +200,6 @@ test("Windows short-name lookup runs cmd and returns an existing executable", { 
   if (alias !== null) {
     assert.equal(word(alias, "win32"), alias);
     assert.equal(readFileSync(alias, "utf8"), "short-name fixture");
-    assert.equal(realpathSync(alias), realpathSync(node));
+    assert.equal(realpathSync.native(alias), realpathSync.native(node));
   }
 });
