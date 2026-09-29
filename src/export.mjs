@@ -61,7 +61,7 @@ export function pickTest(counts, share = TEST_SHARE) {
 /** A gzip file written in 8 MB members: valid gzip that stays small in memory, however long the record. */
 function gzipWriter(file) {
   const fd = openSync(file, "w", 0o600);
-  chmodSync(file, 0o600);
+  if (process.platform !== "win32") chmodSync(file, 0o600);
   let parts = [];
   let size = 0;
   let wrote = false;

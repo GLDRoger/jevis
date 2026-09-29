@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { plainRead, sedStreamOnly, segments } from "../src/shell.mjs";
 
 // A plain read skips the decision model, so every doubt must answer "no": each NO below is a command that writes, runs, opens, or touches a credential.
@@ -27,7 +28,7 @@ const YES = [
   "jq '.hooks | keys' settings.json",
   "git status # a plain comment",
   "node bin/jevis.mjs ask --event tool --request 'fix the footer' 'cat > Hero.tsx <<EOF\n<h1 class=\"bg-clip-text\">x</h1>\nEOF'",
-  "node ~/code/jevis/bin/jevis.mjs lint",
+  `node "${fileURLToPath(new URL("../bin/jevis.mjs", import.meta.url)).replaceAll("\\", "/")}" lint`,
   "jevis replay abc123 --events tool",
   "node bin/jevis.mjs doctor --offline",
   "jevis mine --since 7d",

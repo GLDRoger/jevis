@@ -144,7 +144,7 @@ test("export: rows in Laya's format, split by whole sessions, repeats dropped, f
   const rows = (split) => gunzipSync(readFileSync(r.files[split])).toString().trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
   const bySession = {};
   for (const split of ["train", "test"]) {
-    assert.equal(statSync(r.files[split]).mode & 0o777, 0o600);
+    if (process.platform !== "win32") assert.equal(statSync(r.files[split]).mode & 0o777, 0o600);
     for (const row of rows(split)) {
       assert.deepEqual(Object.keys(row).sort(), ["gold", "id", "questions", "state", "workflow"]);
       const q = JSON.parse(row.questions);

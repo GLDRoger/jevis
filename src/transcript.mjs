@@ -44,7 +44,8 @@ export function eachJsonl(file, fn, { from = 0, keep = null } = {}) {
       pos += n;
       const lines = (rest + decoder.write(buf.subarray(0, n))).split("\n");
       rest = lines.pop();
-      for (const line of lines) {
+      for (const raw of lines) {
+        const line = raw.replace(/\r$/, "");
         if (cut) { cut = false; continue; }
         if (!line || (keep && !keep(line))) continue;
         let row;
@@ -52,7 +53,7 @@ export function eachJsonl(file, fn, { from = 0, keep = null } = {}) {
         fn(row);
       }
     }
-    rest += decoder.end();
+    rest = (rest + decoder.end()).replace(/\r$/, "");
     if (rest && !cut && (!keep || keep(rest))) {
       let row;
       try { row = JSON.parse(rest); } catch { /* still being written */ }

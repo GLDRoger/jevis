@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AXES } from "./axes.mjs";
 import { ensureDir, jevisHome } from "./state.mjs";
+import { insideFolder, samePath, splitFolders } from "./paths.mjs";
 
 /**
  * The wiki: one Markdown file per lesson, `wiki/<area>/<name>.md`. The path is
@@ -83,7 +84,7 @@ function splitTop(text) {
 }
 
 export function parseEntry(text, id) {
-  const m = String(text).match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  const m = String(text).replaceAll("\r\n", "\n").match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!m) throw new Error(`${id}: no frontmatter`);
   const entry = { id };
   const lines = m[1].split("\n");
@@ -188,15 +189,16 @@ export function projectWiki(cwd) {
   if (!cwd) return null;
   const home = homedir();
   const own = resolve(userWiki());
-  for (let d = resolve(cwd); d !== dirname(d) && d !== home; d = dirname(d)) {
+  for (let d = resolve(cwd); d !== dirname(d) && !samePath(d, home); d = dirname(d)) {
     const dir = join(d, ".jevis", "wiki");
     if (!existsSync(dir)) continue;
     try {
       // The real path: a hook's cwd and a terminal's can name one folder two ways (/var and /private/var on macOS), and trust is keyed by path.
       const real = realpathSync(dir);
-      if (real === own || dir === own) continue;
+      if (samePath(real, own) || samePath(dir, own)) continue;
       // A link out of the repository (.jevis -> /) is not the repository's lessons.
-      return real.startsWith(`${realpathSync(d)}${sep}`) && statSync(real).isDirectory() ? real : null;
+      const parent = realpathSync(d);
+      return !samePath(real, parent) && insideFolder(real, parent) && statSync(real).isDirectory() ? real : null;
     } catch {
       return null;
     }
@@ -204,7 +206,7 @@ export function projectWiki(cwd) {
   return null;
 }
 
-/** A project wiki's content hash: every lesson file's path and text, read as loadWiki reads a project's lessons. */
+/** Trust stays byte-exact: even a CRLF/LF-only edit needs trusting again, although both parse alike. */
 export function wikiDigest(dir) {
   const h = createHash("sha256");
   for (const file of walk(dir, { strict: true })) h.update(`${relative(dir, file)}\0${readFileSync(file)}\0`);
@@ -246,13 +248,13 @@ export function setTrust(path, { remove = false } = {}) {
 }
 
 /**
- * Later roots win. JEVIS_WIKI (colon-separated absolute folders) replaces the
+ * Later roots win. JEVIS_WIKI (platform-separated absolute folders) replaces the
  * defaults; a relative one is ignored, since it would name a different
  * folder, perhaps an untrusted project's, in every directory a hook runs in.
  * A trusted project wiki for `cwd` comes last.
  */
 function resolveRoots(cwd) {
-  if (process.env.JEVIS_WIKI) return { roots: process.env.JEVIS_WIKI.split(":").filter((r) => r && isAbsolute(r)), project: null };
+  if (process.env.JEVIS_WIKI) return { roots: splitFolders(process.env.JEVIS_WIKI).filter((r) => r && isAbsolute(r)), project: null };
   let status = null;
   try {
     status = cwd ? projectStatus(cwd) : null;
@@ -272,7 +274,7 @@ export const wikiRoots = (cwd = null) => resolveRoots(cwd).roots;
 export function projectLessons(path) {
   const base = new Set(loadWiki([WIKI_ROOT, userWiki()]).entries.map((e) => e.id));
   const own = loadWiki([path], { guarded: [path] });
-  const broken = loadWiki([WIKI_ROOT, userWiki(), path], { guarded: [path] }).broken.filter((b) => b.file.startsWith(`${path}${sep}`));
+  const broken = loadWiki([WIKI_ROOT, userWiki(), path], { guarded: [path] }).broken.filter((b) => insideFolder(b.file, path));
   const bad = new Set(broken.map((b) => b.id));
   return {
     added: own.entries.filter((e) => !base.has(e.id)),
@@ -305,7 +307,7 @@ export function loadWiki(roots = wikiRoots(), { guarded = [] } = {}) {
   const off = [];
   for (const root of roots) {
     for (const file of walk(root, { strict: guarded.includes(root) })) {
-      const id = relative(root, file).replace(/\.md$/, "");
+      const id = relative(root, file).split(process.platform === "win32" ? "\\" : "/").join("/").replace(/\.md$/, "");
       try {
         const e = parseEntry(readFileSync(file, "utf8"), id);
         if (guarded.includes(root) && id.startsWith("safety/") && byId.has(id)) {

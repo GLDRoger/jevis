@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { test } from "node:test";
 
 // A private home, a project folder, and a scripted Jev: no network, no real state.
@@ -45,7 +45,7 @@ test("project lessons: untrusted ones never load; trusted ones load until a file
   assert.deepEqual(l.broken.map((b) => b.id), ["safety/force-push"]);
 
   setTrust(lessons);
-  assert.equal(statSync(join(process.env.JEVIS_HOME, "trusted.json")).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal(statSync(join(process.env.JEVIS_HOME, "trusted.json")).mode & 0o777, 0o600);
   const w = wikiFor(cwd);
   const ids = new Set(w.entries.map((e) => e.id));
   assert.ok(ids.has("team/billing"), "a trusted project adds its lessons");
@@ -66,8 +66,11 @@ test("project lessons: a hostile repository can neither stall a hook nor get aro
   const evil = join(base, "evil");
   mkdirSync(join(evil, ".jevis", "wiki", "safety"), { recursive: true });
   writeFileSync(join(evil, ".jevis", "wiki", "safety", "force-push.md"), "---\noff: true\n---\n");
-  symlinkSync("/dev/urandom", join(evil, ".jevis", "wiki", "random.md"));
-  execFileSync("mkfifo", [join(evil, ".jevis", "wiki", "pipe.md")]);
+  // Windows has no FIFOs, and unprivileged symlinks need developer mode.
+  if (process.platform !== "win32") {
+    symlinkSync("/dev/urandom", join(evil, ".jevis", "wiki", "random.md"));
+    execFileSync("mkfifo", [join(evil, ".jevis", "wiki", "pipe.md")]);
+  }
   // Never trusted: not read at all, so neither the device nor the pipe is opened.
   assert.equal(projectStatus(evil).trusted, false);
   assert.ok(wikiFor(evil).entries.some((e) => e.id === "safety/force-push"));
@@ -78,7 +81,7 @@ test("project lessons: a hostile repository can neither stall a hook nor get aro
   setTrust(projectWiki(evil), { remove: true });
 
   // A relative JEVIS_WIKI would name every folder's .jevis/wiki: it is ignored.
-  process.env.JEVIS_WIKI = `${WIKI_ROOT}:.jevis/wiki`;
+  process.env.JEVIS_WIKI = `${WIKI_ROOT}${delimiter}.jevis/wiki`;
   try {
     assert.deepEqual(wikiRoots(evil), [WIKI_ROOT]);
   } finally {
@@ -89,8 +92,10 @@ test("project lessons: a hostile repository can neither stall a hook nor get aro
   const elsewhere = join(base, "elsewhere");
   mkdirSync(join(elsewhere, "wiki"), { recursive: true });
   mkdirSync(join(base, "linked"));
-  symlinkSync(elsewhere, join(base, "linked", ".jevis"));
-  assert.equal(projectWiki(join(base, "linked")), null);
+  if (process.platform !== "win32") {
+    symlinkSync(elsewhere, join(base, "linked", ".jevis"));
+    assert.equal(projectWiki(join(base, "linked")), null);
+  }
 
   // A trust file that is valid JSON but not a record of folders is treated as trusting nothing.
   writeFileSync(join(process.env.JEVIS_HOME, "trusted.json"), "null");

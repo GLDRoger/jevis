@@ -1,13 +1,14 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TARGETS, jevisHooks, onPath, reviewStatus } from "../bin/install.mjs";
+import { TARGETS, commandWords, isJevis, jevisHooks, onPath, reviewStatus } from "../bin/install.mjs";
 import { readConfig, settingSources } from "./config.mjs";
 import { askJev, jevUrl, TYPESAFE_URL } from "./jev.mjs";
 import { jevisHome } from "./state.mjs";
 import { eachJsonl } from "./transcript.mjs";
 import { redact } from "./redact.mjs";
 import { projectStatus, wikiFor } from "./wiki.mjs";
+import { samePath, splitFolders } from "./paths.mjs";
 
 /**
  * `jevis doctor`: every way Jevis can be installed but silently doing
@@ -31,9 +32,6 @@ const fail = check("fail");
 const info = check("info");
 const skip = check("skip");
 
-const isJevis = (cmd) => /bin[\\/]jevis\.mjs"? hook /.test(cmd ?? "");
-/** A hook command's words, double quotes grouping a path with spaces. */
-const commandWords = (cmd) => [...String(cmd).matchAll(/"([^"]*)"|(\S+)/g)].map((m) => m[1] ?? m[2]);
 const modeOf = (path) => statSync(path).mode & 0o777;
 const ago = (ms) => (ms < 90_000 ? "just now" : ms < 90 * 60_000 ? `${Math.round(ms / 60_000)} min ago` : `${Math.round(ms / 3_600_000)} h ago`);
 /** A setting safe to print: passwords, tokens, and signed-URL parameters masked as everywhere else. */
@@ -70,13 +68,14 @@ export function hookCheck(harness, file, { cli = CLI } = {}) {
     const expected = want[event]?.[0];
     for (const h of hooks) {
       const words = commandWords(h.command);
+      if (process.platform === "win32" && (h.command.includes("\\") || h.command.startsWith('"'))) notes.add("old Windows command quoting or separators; reinstall for Git Bash, PowerShell, and cmd");
       const prefixes = words.filter((w) => /^[A-Z][A-Z0-9_]*=/.test(w));
       const [node, script] = words.filter((w) => !prefixes.includes(w));
       if (prefixes.length) notes.add(`settings on the command (${prefixes.map((p) => p.split("=")[0]).join(", ")}), which only POSIX shells run; reinstalling moves them to config.json`);
       if (node?.includes("/") || node?.includes("\\") ? !existsSync(node) : !onPath(node ?? "")) problems.add(`node not found: ${node}`);
       else nodes.add(node);
       if (!script || !existsSync(script)) problems.add(`${script} does not exist (the checkout moved or was deleted)`);
-      else if (resolve(script) !== resolve(cli)) checkouts.add(script);
+      else if (!samePath(resolve(script), resolve(cli))) checkouts.add(script);
       if (expected?.matcher && h.matcher !== expected.matcher) notes.add(`${event} matches ${h.matcher ?? "every tool"} rather than ${expected.matcher}`);
       const wantTimeout = expected?.hooks[0].timeout;
       if (wantTimeout && h.timeout && h.timeout < wantTimeout) notes.add(`${event} times out after ${h.timeout} s; it needs ${wantTimeout} s`);
@@ -116,7 +115,7 @@ export async function jevChecks({ env = process.env, offline = false, timeoutMs 
   const out = [];
   const source = keySource(env);
   if (typesafe && !source) return [fail("decision model", `TypeSafe at ${url}, but no API key: every hook does nothing`, "put the key in ~/.jevis/secrets/typesafe_api_key (chmod 600), or point --jev-url at a Laya server")];
-  if (source && isAbsolute(source) && modeOf(source) & 0o077) out.push(warn("api key", `${source} is readable by others (mode ${modeOf(source).toString(8)})`, `chmod 600 ${source}`));
+  if (process.platform !== "win32" && source && isAbsolute(source) && modeOf(source) & 0o077) out.push(warn("api key", `${source} is readable by others (mode ${modeOf(source).toString(8)})`, `chmod 600 ${source}`));
   if (offline) return [...out, info("decision model", `${shown(url)}${source ? `, key from ${source}` : ""}; not called (--offline)`)];
   if (env.JEVIS_JEV === "off") return [...out, warn("decision model", "JEVIS_JEV=off: no calls are made", "unset JEVIS_JEV")];
   const r = await askJev({ state: { request: "jevis doctor checking the connection" }, questions: { doctor: { type: "noul", instructions: "Does `request` mention a connection check?" } }, event: "doctor", timeoutMs, record: false });
@@ -125,7 +124,8 @@ export async function jevChecks({ env = process.env, offline = false, timeoutMs 
 }
 
 /** ~/.jevis holds prompts and the call record: it and what is in it stay private to this user. */
-export function privacyCheck(home = jevisHome()) {
+export function privacyCheck(home = jevisHome(), platform = process.platform) {
+  if (platform === "win32") return info("privacy", `permissions are not checked on Windows; the default folder is under your user profile: ${home}`);
   if (!existsSync(home)) return info("privacy", `${home} does not exist yet`);
   const open = [home, ...readdirSync(home).filter((f) => f !== ".DS_Store").map((f) => join(home, f))].filter((p) => modeOf(p) & 0o077);
   if (!open.length) return ok("privacy", `${home} and its contents are private`);
@@ -146,7 +146,7 @@ export function wikiChecks(cwd = process.cwd(), env = process.env) {
   const out = [];
   const { entries, broken } = wikiFor(cwd);
   out.push(broken.length ? fail("lessons", `${entries.length} load; broken: ${broken.map((b) => b.id).join(", ")}`, "run jevis lint in this folder to see why") : ok("lessons", `${entries.length} load`));
-  const relative = String(env.JEVIS_WIKI ?? "").split(":").filter((r) => r && !isAbsolute(r));
+  const relative = splitFolders(env.JEVIS_WIKI).filter((r) => r && !isAbsolute(r));
   if (relative.length) out.push(warn("lessons", `JEVIS_WIKI folders that are not absolute are ignored: ${relative.join(", ")}`, "give each as an absolute path"));
   const project = process.env.JEVIS_WIKI ? null : projectStatus(cwd);
   if (project?.trusted) out.push(ok("project lessons", `${project.path}, trusted`));

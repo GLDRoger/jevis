@@ -30,7 +30,9 @@ export const TARGETS = {
   codex: join(homedir(), ".codex", "hooks.json"),
 };
 
-const isJevis = (cmd) => /bin[\\/]jevis\.mjs"? hook /.test(cmd ?? "");
+export const isJevis = (cmd, platform = process.platform) => new RegExp('bin[\\\\/]jevis\\.mjs"? hook ', platform === "win32" ? "i" : "").test(cmd ?? "");
+/** A hook command's words, preserving backslashes in older Windows installs. */
+export const commandWords = (cmd) => [...String(cmd).matchAll(/"([^"]*)"|(\S+)/g)].map((m) => m[1] ?? m[2]);
 /** A path as a hook command word: quoted when it has a space (C:\Program Files\nodejs\node.exe). */
 const word = (path) => (/\s/.test(path) ? `"${path}"` : path);
 
@@ -43,7 +45,18 @@ const CHROME = {
 };
 
 /** Whether a command is on PATH, found without running anything. */
-export const onPath = (cmd, path = process.env.PATH ?? "") => path.split(delimiter).some((d) => d && (existsSync(join(d, cmd)) || existsSync(join(d, `${cmd}.exe`))));
+export function findOnPath(cmd, path = process.env.PATH ?? "", platform = process.platform) {
+  if (!cmd) return null;
+  const suffixes = platform === "win32" ? (/\.(exe|cmd|bat)$/i.test(cmd) ? [""] : [".exe", ".cmd", ".bat"]) : ["", ".exe"];
+  for (const d of path.split(platform === "win32" ? ";" : delimiter).filter(Boolean)) {
+    for (const suffix of suffixes) {
+      const file = join(platform === "win32" ? d.replace(/^"|"$/g, "") : d, `${cmd}${suffix}`);
+      if (existsSync(file)) return file;
+    }
+  }
+  return null;
+}
+export const onPath = (cmd, path = process.env.PATH ?? "", platform = process.platform) => findOnPath(cmd, path, platform) !== null;
 
 /** One line on whether the design and film review can run with this critic, and what to do if not. */
 export function reviewStatus(critic, { chrome = (CHROME[process.platform] ?? []).some(existsSync), cli = onPath(critic) } = {}) {
@@ -54,8 +67,14 @@ export function reviewStatus(critic, { chrome = (CHROME[process.platform] ?? [])
 }
 
 /** The node binary an earlier Jevis install runs with: a path known to work in this user's hooks. */
-export function nodeIn(config) {
+export function nodeIn(config, { platform = process.platform, exists = existsSync, onPath: found = onPath } = {}) {
   for (const groups of Object.values(config?.hooks ?? {})) for (const g of groups ?? []) for (const h of g.hooks ?? []) {
+    if (platform === "win32") {
+      if (!isJevis(h.command, platform)) continue;
+      const node = commandWords(h.command).find((w) => /(?:^|[\\/])node(?:\.exe)?$/i.test(w));
+      if (node && (/[\\/]/.test(node) ? exists(node) : found(node))) return node;
+      continue;
+    }
     const m = isJevis(h.command) && String(h.command).match(/(?:^|\s)"?(\/[^"]*?\/node)"?\s/);
     if (m && existsSync(m[1])) return m[1];
   }
@@ -67,10 +86,10 @@ export function nodeIn(config) {
  * node .../jevis.mjs hook stop). They move to config.json, so reinstalling
  * does not quietly drop them.
  */
-export function carriedSettings(config) {
+export function carriedSettings(config, { platform = process.platform } = {}) {
   const out = {};
   for (const groups of Object.values(config?.hooks ?? {})) for (const g of groups ?? []) for (const h of g.hooks ?? []) {
-    if (!isJevis(h.command)) continue;
+    if (!isJevis(h.command, platform)) continue;
     for (const [, key, value] of String(h.command).matchAll(/(?:^|\s)(JEVIS_[A-Z_]+)=(\S+)(?=\s)/g)) if (SETTINGS[key] && SETTINGS[key].ok(value)) out[key] = value;
   }
   return out;
@@ -95,9 +114,16 @@ export function settingsChanges({ shadow = false, live = false, jevUrl = null, c
   return changes;
 }
 
+/** Windows needs an unquoted executable word in every supported shell; forward slashes survive Git Bash. */
+export function hookCommand(event, { platform = process.platform, execPath = process.execPath, cli = CLI } = {}) {
+  if (platform !== "win32") return `${word(execPath)} ${word(cli)} hook ${event}`;
+  const node = execPath.replaceAll("\\", "/");
+  return `${/\s/.test(node) ? "node" : node} ${word(cli.replaceAll("\\", "/"))} hook ${event}`;
+}
+
 /** Jevis's entries for one harness: plain commands with no settings on them. Claude Code filters tools by matcher; Codex sends every tool. */
-export function jevisHooks(harness, { node = process.execPath, cli = CLI } = {}) {
-  const hook = (event, timeout, matcher) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command: `${word(node)} ${word(cli)} hook ${event}`, timeout }] }];
+export function jevisHooks(harness, { node = process.execPath, execPath = node, cli = CLI, platform = process.platform } = {}) {
+  const hook = (event, timeout, matcher) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command: hookCommand(event, { platform, execPath, cli }), timeout }] }];
   const out = {
     UserPromptSubmit: hook("prompt", 10),
     PreToolUse: hook("tool", 10, harness === "claude" ? "^(Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__.*)$" : undefined),
@@ -118,7 +144,7 @@ export function plan(config, harness, { uninstall = false, ...opts } = {}) {
     const kept = [];
     for (const group of groups ?? []) {
       const inner = (group.hooks ?? []).filter((h) => {
-        const drop = isJevis(h.command);
+        const drop = isJevis(h.command, opts.platform);
         if (drop) removed.push(`${event}: ${h.command}`);
         return !drop;
       });
@@ -149,7 +175,7 @@ function main(argv) {
   // Settings first: a bad option or a broken config.json stops the install before any harness file changes.
   const saved = readConfig();
   if (saved.raw === null) throw new Error(`${saved.file} is ${saved.errors[0]}; fix or remove it first`);
-  const carried = Object.assign({}, ...Object.values(befores).map(carriedSettings));
+  const carried = Object.assign({}, ...Object.values(befores).map((config) => carriedSettings(config)));
   const changes = opts.uninstall ? {} : settingsChanges(opts, { carried, saved: saved.raw });
   const settings = { ...saved.raw };
   for (const [k, v] of Object.entries(changes)) v === null ? delete settings[k] : (settings[k] = v);
@@ -174,7 +200,7 @@ function main(argv) {
       // A settings file can hold API keys in its env block: the copy is private whatever the original's mode.
       const copy = join(ensureDir("backups", stamp), `${harness}-${basename(file)}`);
       copyFileSync(file, copy);
-      chmodSync(copy, 0o600);
+      if (process.platform !== "win32") chmodSync(copy, 0o600);
     }
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);

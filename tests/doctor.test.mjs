@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 // A private home and scripted Jev: no network, and the real ~/.claude and ~/.codex are never read.
 process.env.JEVIS_HOME = mkdtempSync(join(tmpdir(), "jevis-doctor-home-"));
@@ -11,7 +12,7 @@ const { plan } = await import("../bin/install.mjs");
 const { activityChecks, doctor, formatDoctor, hookCheck, jevChecks, privacyCheck, settingsChecks, wikiChecks } = await import("../src/doctor.mjs");
 const { setJevTransport } = await import("../src/jev.mjs");
 
-const CLI = new URL("../bin/jevis.mjs", import.meta.url).pathname;
+const CLI = fileURLToPath(new URL("../bin/jevis.mjs", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "jevis-doctor-"));
 const settings = (name, config) => {
   const file = join(dir, name);
@@ -34,7 +35,8 @@ test("doctor: hooks are ok when every event runs an existing node and this check
   const moved = plan({}, "claude", { node: process.execPath, cli: "/gone/jevis/bin/jevis.mjs" }).config;
   assert.match(hookCheck("claude", settings("moved.json", moved), { cli: CLI }).detail, /does not exist \(the checkout moved/);
 
-  const old = JSON.parse(JSON.stringify(good).replaceAll(`${process.execPath} `, `JEVIS_MODE=shadow ${process.execPath} `));
+  const old = structuredClone(good);
+  for (const groups of Object.values(old.hooks)) for (const g of groups) for (const h of g.hooks) h.command = `JEVIS_MODE=shadow ${h.command}`;
   const w = hookCheck("claude", settings("old.json", old), { cli: CLI });
   assert.equal(w.status, "warn");
   assert.match(w.detail, /settings on the command \(JEVIS_MODE\)/);
@@ -72,11 +74,16 @@ test("doctor: the decision model needs a key for TypeSafe, and a live answer", a
 test("doctor: loose permissions, broken hooks, and failing decisions in the log are warned about", () => {
   const home = mkdtempSync(join(tmpdir(), "jevis-doctor-priv-"));
   mkdirSync(join(home, "backups"));
-  chmodSync(join(home, "backups"), 0o755);
-  chmodSync(home, 0o700);
-  assert.equal(privacyCheck(home).status, "warn");
-  chmodSync(join(home, "backups"), 0o700);
-  assert.equal(privacyCheck(home).status, "ok");
+  if (process.platform !== "win32") {
+    chmodSync(join(home, "backups"), 0o755);
+    chmodSync(home, 0o700);
+    assert.equal(privacyCheck(home).status, "warn");
+    chmodSync(join(home, "backups"), 0o700);
+    assert.equal(privacyCheck(home).status, "ok");
+  } else {
+    assert.equal(privacyCheck(home).status, "info");
+    assert.match(privacyCheck(home).detail, /permissions are not checked on Windows/);
+  }
 
   const now = Date.parse("2026-09-29T12:00:00Z");
   const log = join(home, "log.jsonl");

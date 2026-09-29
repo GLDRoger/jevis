@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { delimiter, isAbsolute, join } from "node:path";
 import { ensureDir, jevisHome } from "./state.mjs";
+import { splitFolders } from "./paths.mjs";
 
 /**
  * Settings: every setting in the README's Configuration table can live in
@@ -20,19 +21,19 @@ const text = (v) => typeof v === "string" && v.trim() !== "";
 const oneOf = (...values) => (v) => values.includes(v);
 const number = (v) => (typeof v === "number" && v > 0) || (typeof v === "string" && Number(v) > 0);
 const list = (v) => text(v) || (Array.isArray(v) && v.length > 0 && v.every(text));
-const absolutePaths = (v) => list(v) && [v].flat().flatMap((x) => x.split(":")).filter(Boolean).every((x) => isAbsolute(x));
+const absolutePaths = (v) => list(v) && [v].flat().flatMap((x) => splitFolders(x)).filter(Boolean).every((x) => isAbsolute(x));
 const httpUrl = (v) => typeof v === "string" && /^https?:\/\/[^\s'"`$;&|<>]+$/.test(v);
 
 /** Each setting: how to check a value, how to write it as the environment reads it, and what it does. */
 export const SETTINGS = {
   JEVIS_MODE: { ok: oneOf("live", "shadow"), help: "live, or shadow: log what Jevis would do and change nothing" },
   JEVIS_DISABLE: { ok: oneOf(true, false, "1", "0"), env: (v) => (v === true || v === "1" ? "1" : null), help: "true turns every hook off" },
-  JEVIS_SCOPE: { ok: list, env: (v) => [v].flat().join(":"), help: "folders Jevis acts in (a list, or colon-separated)" },
+  JEVIS_SCOPE: { ok: list, env: (v) => [v].flat().join(delimiter), help: `folders Jevis acts in (a list, or ${process.platform === "win32" ? "semicolon" : "colon"}-separated)` },
   JEVIS_ENABLE: { ok: list, env: (v) => [v].flat().join(","), help: "optional entries to turn on: safety, all, or entry ids" },
   JEVIS_CRITIC: { ok: oneOf("claude", "codex", "off"), help: "who reviews visual work: claude, codex, or off" },
   JEVIS_CRITIC_MODEL: { ok: text, help: "the model the critic uses" },
   JEVIS_DESIGN_LAW: { ok: text, help: "a Markdown file of your own design rules" },
-  JEVIS_WIKI: { ok: absolutePaths, env: (v) => [v].flat().join(":"), help: "absolute lesson folders, replacing the defaults" },
+  JEVIS_WIKI: { ok: absolutePaths, env: (v) => [v].flat().join(delimiter), help: "absolute lesson folders, replacing the defaults" },
   JEVIS_JEV_URL: { ok: httpUrl, help: "a /v1/systemone server instead of TypeSafe" },
   JEVIS_JEV_MODEL: { ok: text, help: "the model field sent with each call" },
   JEVIS_JEV_CHUNK: { ok: number, env: String, help: "questions per request" },
@@ -110,6 +111,6 @@ export function writeConfig(changes, file = configFile()) {
   ensureDir();
   writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
   // The mode above applies only to a new file; one the user created by hand is made private too.
-  chmodSync(file, 0o600);
+  if (process.platform !== "win32") chmodSync(file, 0o600);
   return next;
 }

@@ -3,6 +3,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFile
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 // Every test runs against a private home and a scripted Jev: no network, no real state.
 process.env.JEVIS_HOME = mkdtempSync(join(tmpdir(), "jevis-home-"));
@@ -97,7 +98,7 @@ test("an entry parses from its frontmatter, and the parser rejects what the guid
 });
 
 test("the shipped wiki lints clean", () => {
-  const { broken } = loadWiki([new URL("../wiki", import.meta.url).pathname]);
+  const { broken } = loadWiki([fileURLToPath(new URL("../wiki", import.meta.url))]);
   assert.deepEqual(broken, []);
 });
 
@@ -231,7 +232,7 @@ test("Jev failing means Jevis does nothing", async () => {
   setJevTransport(async () => {
     throw new Error("boom");
   });
-  const out = await onPrompt({ session_id: newSession(), cwd: "/tmp", prompt: "make a landing page", model: "gpt-6-sol" });
+  const out = await onPrompt({ session_id: newSession(), cwd: tmpdir(), prompt: "make a landing page", model: "gpt-6-sol" });
   assert.equal(out, null);
   setJevTransport(scripted);
 });
@@ -239,13 +240,13 @@ test("Jev failing means Jevis does nothing", async () => {
 test("prompt: a matching note is injected once per session, and again after compaction", async () => {
   reset({ "design/open-page": 0.9, "axis.wants_change": 0.9 });
   const id = newSession();
-  const first = await onPrompt({ session_id: id, cwd: "/tmp", prompt: "make me a landing page", model: "gpt-6-astra" });
+  const first = await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "make me a landing page", model: "gpt-6-astra" });
   assert.match(first.hookSpecificOutput.additionalContext, /Open page\.\*\* Pick a concept first\./);
   assert.match(first.hookSpecificOutput.additionalContext, /the user's instructions differ, theirs win/);
-  const second = await onPrompt({ session_id: id, cwd: "/tmp", prompt: "another landing page", model: "gpt-6-astra" });
+  const second = await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "another landing page", model: "gpt-6-astra" });
   assert.equal(second, null);
   onSession({ session_id: id, source: "compact", hook_event_name: "SessionStart" });
-  const third = await onPrompt({ session_id: id, cwd: "/tmp", prompt: "one more", model: "gpt-6-astra" });
+  const third = await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "one more", model: "gpt-6-astra" });
   assert.ok(third);
   assert.equal(loadSession(id).turn, 3);
 });
@@ -253,9 +254,9 @@ test("prompt: a matching note is injected once per session, and again after comp
 test("prompt: harness-written prompts are not requests and leave the turn alone", async () => {
   reset({ "design/open-page": 0.9, "axis.wants_change": 0.9 });
   const id = newSession();
-  await onPrompt({ session_id: id, cwd: "/tmp", prompt: "make me a landing page", model: "gpt-6-astra" });
+  await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "make me a landing page", model: "gpt-6-astra" });
   calls = [];
-  const out = await onPrompt({ session_id: id, cwd: "/tmp", prompt: "<task-notification>\n<task-id>x</task-id>", model: "gpt-6-astra" });
+  const out = await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "<task-notification>\n<task-id>x</task-id>", model: "gpt-6-astra" });
   assert.equal(out, null);
   assert.equal(calls.length, 0);
   assert.equal(loadSession(id).turn, 1);
@@ -266,7 +267,7 @@ test("prompt: shadow mode logs but never injects", async () => {
   reset({ "design/open-page": 0.9, "axis.wants_change": 0.9 });
   process.env.JEVIS_MODE = "shadow";
   try {
-    assert.equal(await onPrompt({ session_id: newSession(), cwd: "/tmp", prompt: "make me a landing page", model: "gpt-6-astra" }), null);
+    assert.equal(await onPrompt({ session_id: newSession(), cwd: tmpdir(), prompt: "make me a landing page", model: "gpt-6-astra" }), null);
     assert.equal(calls.length, 1);
   } finally {
     delete process.env.JEVIS_MODE;
@@ -280,14 +281,14 @@ test("prompt: JEVIS_SCOPE and JEVIS_DISABLE keep Jevis out", async () => {
     assert.equal(await onPrompt({ session_id: newSession(), cwd: "/home/x/code", prompt: "make me a landing page" }), null);
     assert.equal(calls.length, 0);
     // A scope is a folder and everything inside it, never a string prefix.
-    assert.deepEqual(["/tmp/pilot", "/tmp/pilot/a/b", "/private/tmp/pilot/a", "/home/x/app", "/home/x/app/src"].map(inScope), [true, true, true, true, true]);
-    assert.deepEqual(["/tmp/pilot-2", "/tmp/pilotx", "/home/x/application", "/home/x", undefined].map(inScope), [false, false, false, false, false]);
+    assert.deepEqual(["/tmp/pilot", "/tmp/pilot/a/b", "/private/tmp/pilot/a", "/home/x/app", "/home/x/app/src"].map((cwd) => inScope(cwd, { platform: "darwin" })), [true, true, true, true, true]);
+    assert.deepEqual(["/tmp/pilot-2", "/tmp/pilotx", "/home/x/application", "/home/x", undefined].map((cwd) => inScope(cwd, { platform: "darwin" })), [false, false, false, false, false]);
   } finally {
     delete process.env.JEVIS_SCOPE;
   }
   process.env.JEVIS_DISABLE = "1";
   try {
-    assert.equal(await onPrompt({ session_id: newSession(), cwd: "/tmp", prompt: "make me a landing page" }), null);
+    assert.equal(await onPrompt({ session_id: newSession(), cwd: tmpdir(), prompt: "make me a landing page" }), null);
   } finally {
     delete process.env.JEVIS_DISABLE;
   }
@@ -309,20 +310,20 @@ test("prompt: in Claude Code, claude-family entries apply on the first turn, bef
 test("tool: a deny entry refuses the call with its reason, and reads the user's current request", async () => {
   const id = newSession();
   reset((key, body) => (key === "safety/force" ? 0.97 : key === "safety/force#unless" ? (/force push/.test(body.state.request) ? 0.95 : 0.05) : 0.02));
-  await onPrompt({ session_id: id, cwd: "/tmp", prompt: "fix the typo and push", model: "gpt-6-sol" });
-  const denied = await onTool({ session_id: id, cwd: "/tmp", tool_name: "Bash", tool_input: { command: "git push --force origin main" } });
+  await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "fix the typo and push", model: "gpt-6-sol" });
+  const denied = await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "git push --force origin main" } });
   assert.equal(denied.hookSpecificOutput.permissionDecision, "deny");
   assert.match(denied.hookSpecificOutput.permissionDecisionReason, /Force push: Use a new commit\./);
   assert.equal(calls.at(-1).state.request, "fix the typo and push");
-  await onPrompt({ session_id: id, cwd: "/tmp", prompt: "squash and force push the branch", model: "gpt-6-sol" });
-  assert.equal(await onTool({ session_id: id, cwd: "/tmp", tool_name: "Bash", tool_input: { command: "git push --force origin main" } }), null);
+  await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "squash and force push the branch", model: "gpt-6-sol" });
+  assert.equal(await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "git push --force origin main" } }), null);
 });
 
 test("tool: an edit shows Jev only what it adds, and every matching deny goes back in one reason", async () => {
   const id = newSession();
   reset({ "slop/glow": 0.95, "slop/gradient": 0.93 });
   const patch = "*** Begin Patch\n*** Update File: src/Hero.tsx\n@@\n-<h1 className=\"old\">Hi</h1>\n+<h1 className=\"bg-clip-text\">Hi</h1>\n <p>kept</p>\n*** End Patch";
-  const denied = await onTool({ session_id: id, cwd: "/tmp", tool_name: "apply_patch", tool_input: { input: patch } });
+  const denied = await onTool({ session_id: id, cwd: tmpdir(), tool_name: "apply_patch", tool_input: { input: patch } });
   assert.equal(calls.at(-1).state.input, "*** Update File: src/Hero.tsx\n<h1 className=\"bg-clip-text\">Hi</h1>", "removed and context lines are not shown");
   const reason = denied.hookSpecificOutput.permissionDecisionReason;
   assert.match(reason, /^Jevis stopped this call:\n- Glow blobs: Show the product instead\.\n- Gradient text: Use one solid color\./);
@@ -332,9 +333,9 @@ test("tool: an edit shows Jev only what it adds, and every matching deny goes ba
 test("tool: a context note is added once per session", async () => {
   const id = newSession();
   reset({ "workflow/poll": 0.9 });
-  const first = await onTool({ session_id: id, cwd: "/tmp", tool_name: "Bash", tool_input: { command: "while true; do sleep 5; done" } });
+  const first = await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "while true; do sleep 5; done" } });
   assert.match(first.hookSpecificOutput.additionalContext, /Polling\.\*\* Wait on the process instead\./);
-  assert.equal(await onTool({ session_id: id, cwd: "/tmp", tool_name: "Bash", tool_input: { command: "sleep 30" } }), null);
+  assert.equal(await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "sleep 30" } }), null);
 });
 
 test("tool: a plain read no entry asks about is counted in the log, without its input", async () => {
@@ -347,7 +348,7 @@ test("tool: a plain read no entry asks about is counted in the log, without its 
   writeFileSync(join(only, "slop", "shell-glow.md"), `---\nevent: tool\nask: Does \`input\` write glow blobs?\nunless: Does \`request\` ask for glow?\ntools: [Bash]\nwhen: { marks.plain_read: false }\naction: deny\ntitle: Shell glow\nsource: test\n---\nShow the product.\n`);
   process.env.JEVIS_WIKI = only;
   try {
-    assert.equal(await onTool({ session_id: id, cwd: "/tmp", tool_name: "Bash", tool_input: { command: "git log --oneline -3" } }), null);
+    assert.equal(await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "git log --oneline -3" } }), null);
     assert.equal(calls.length, 0);
     const row = readLog().filter((r) => r.sessionId === id).at(-1);
     assert.equal(row.skipped, "no entries");
@@ -366,7 +367,7 @@ test("tool: a note saved after Jev answers keeps what other hooks of the session
     return key === "workflow/poll" ? 0.9 : 0.05;
   };
   calls = [];
-  const out = await onTool({ session_id: id, cwd: "/tmp", tool_name: "Bash", tool_input: { command: "while true; do sleep 5; done" } });
+  const out = await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "while true; do sleep 5; done" } });
   assert.match(out.hookSpecificOutput.additionalContext, /Polling/);
   const saved = loadSession(id);
   assert.ok(saved.commands.includes("parallel"), "the parallel hook's write survives");
@@ -376,10 +377,10 @@ test("tool: a note saved after Jev answers keeps what other hooks of the session
 test("tool: marks.ran_before is a code fact, so a rerun note waits for the second identical command", async () => {
   const id = newSession();
   reset({ "workflow/rerun": 0.95 });
-  assert.equal(await onTool({ session_id: id, cwd: "/tmp", tool_name: "Bash", tool_input: { command: "npm test" } }), null, "the first run is not a rerun");
+  assert.equal(await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "npm test" } }), null, "the first run is not a rerun");
   assert.equal(calls.at(-1).state.marks.ran_before, false);
-  assert.equal(await onTool({ session_id: id, cwd: "/tmp", tool_name: "Bash", tool_input: { command: "npm run build" } }), null);
-  const again = await onTool({ session_id: id, cwd: "/tmp", tool_name: "Bash", tool_input: { command: "npm  test" } });
+  assert.equal(await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "npm run build" } }), null);
+  const again = await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "npm  test" } });
   assert.match(again.hookSpecificOutput.additionalContext, /Rerun\.\*\* Run the focused test\./, "whitespace does not make a new command");
 });
 
@@ -413,12 +414,12 @@ test("stop: the evidence comes from the session log, and an entry never blocks t
   // An earlier turn, already in the log when the prompt hook runs: its edit must not count as this turn's.
   const earlier = [
     { type: "user", uuid: "u0", timestamp: at(-60), message: { role: "user", content: "rename the footer" } },
-    { type: "assistant", uuid: "a0", timestamp: at(-59), message: { model: "claude-opus-5-5", content: [{ type: "tool_use", id: "t0", name: "Edit", input: { file_path: `${dir}/src/Footer.tsx` } }] } },
+    { type: "assistant", uuid: "a0", timestamp: at(-59), message: { model: "claude-opus-5-5", content: [{ type: "tool_use", id: "t0", name: "Edit", input: { file_path: join(dir, "src", "Footer.tsx") } }] } },
     { type: "user", uuid: "u00", timestamp: at(-58), message: { content: [{ type: "tool_result", tool_use_id: "t0", content: "ok" }] } },
   ];
   const rows = [
     { type: "user", uuid: "u1", timestamp: at(1), message: { role: "user", content: "fix the checkout button" } },
-    { type: "assistant", uuid: "a1", timestamp: at(2), message: { model: "claude-opus-5-5", content: [{ type: "tool_use", id: "t1", name: "Edit", input: { file_path: `${dir}/src/Checkout.tsx` } }] } },
+    { type: "assistant", uuid: "a1", timestamp: at(2), message: { model: "claude-opus-5-5", content: [{ type: "tool_use", id: "t1", name: "Edit", input: { file_path: join(dir, "src", "Checkout.tsx") } }] } },
     { type: "user", uuid: "u2", timestamp: at(3), message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] } },
     { type: "assistant", uuid: "a2", timestamp: at(4), message: { model: "claude-opus-5-5", content: [{ type: "tool_use", id: "t2", name: "Bash", input: { command: "npm test" } }] } },
     { type: "user", uuid: "u3", timestamp: at(5), message: { content: [{ type: "tool_result", tool_use_id: "t2", content: "pass" }] } },
@@ -561,7 +562,7 @@ test("the call record keeps each answer as its probability, and JEVIS_RECORD=off
   }
 });
 
-test("Jevis's home is private (0700) even when something else created it open", () => {
+test("Jevis's home is private (0700) even when something else created it open", { skip: process.platform === "win32" && "POSIX permissions do not exist on Windows" }, () => {
   const saved = process.env.JEVIS_HOME;
   const open = mkdtempSync(join(tmpdir(), "jevis-open-home-"));
   chmodSync(open, 0o755);

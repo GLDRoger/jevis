@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 const { plan, jevisHooks, nodeIn, reviewStatus, settingsChanges, carriedSettings } = await import("../bin/install.mjs");
 
@@ -40,7 +41,7 @@ test("install: running it twice gives the same config, and the hook commands car
   assert.equal(once.hooks.PreToolUse.at(-1).matcher, undefined, "Codex hooks see every tool");
   assert.equal(jevisHooks("claude", { node: "/n", cli: "/j/bin/jevis.mjs" }).Stop[0].hooks[0].command, "/n /j/bin/jevis.mjs hook stop");
   // A path with a space is quoted, and a quoted install is still recognized as Jevis's own.
-  const win = jevisHooks("codex", { node: "C:\\Program Files\\nodejs\\node.exe", cli: "C:\\Users\\me\\jevis\\bin\\jevis.mjs" });
+  const win = jevisHooks("codex", { platform: "darwin", node: "C:\\Program Files\\nodejs\\node.exe", cli: "C:\\Users\\me\\jevis\\bin\\jevis.mjs" });
   assert.equal(win.Stop[0].hooks[0].command, '"C:\\Program Files\\nodejs\\node.exe" C:\\Users\\me\\jevis\\bin\\jevis.mjs hook stop');
   assert.equal(plan({ hooks: win }, "codex", { uninstall: true }).removed.length, Object.keys(win).length);
 });
@@ -80,7 +81,7 @@ test("uninstall: removes Jevis and leaves the rest, down to an empty hooks key",
 
 test("install: reuses the node binary an earlier Jevis install runs with", () => {
   const node = process.execPath;
-  assert.equal(nodeIn({ hooks: { Stop: [{ hooks: [{ command: `${node} /u/code/jevis/bin/jevis.mjs hook stop` }] }] } }), node);
+  assert.equal(nodeIn({ hooks: { Stop: [{ hooks: [{ command: `${/\s/.test(node) ? `"${node}"` : node} /u/code/jevis/bin/jevis.mjs hook stop` }] }] } }), node);
   assert.equal(nodeIn({ hooks: { Stop: [{ hooks: [{ command: "/gone/bin/node /u/code/jevis/bin/jevis.mjs hook stop" }] }] } }), null, "a path that no longer exists is not reused");
   assert.equal(nodeIn({}), null);
 });
@@ -90,21 +91,22 @@ test("install: backups of your settings are private, even when the README's mkdi
   mkdirSync(join(home, ".claude"));
   writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ env: { ANTHROPIC_API_KEY: "fake" } }), { mode: 0o644 });
   mkdirSync(join(home, ".jevis", "secrets"), { recursive: true, mode: 0o755 });
-  const env = { ...process.env, HOME: home };
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
   delete env.JEVIS_HOME;
-  execFileSync(process.execPath, [new URL("../bin/install.mjs", import.meta.url).pathname, "--harness", "claude", "--shadow"], { env, stdio: "ignore" });
+  execFileSync(process.execPath, [fileURLToPath(new URL("../bin/install.mjs", import.meta.url)), "--harness", "claude", "--shadow"], { env, stdio: "ignore" });
   const mode = (p) => statSync(p).mode & 0o777;
   const backups = join(home, ".jevis", "backups");
   const stamp = readdirSync(backups)[0];
-  assert.equal(mode(join(home, ".jevis")), 0o700);
-  assert.equal(mode(join(backups, stamp)), 0o700);
-  assert.equal(mode(join(backups, stamp, "claude-settings.json")), 0o600);
+  assert.deepEqual(JSON.parse(readFileSync(join(backups, stamp, "claude-settings.json"), "utf8")), { env: { ANTHROPIC_API_KEY: "fake" } });
+  if (process.platform !== "win32") assert.equal(mode(join(home, ".jevis")), 0o700);
+  if (process.platform !== "win32") assert.equal(mode(join(backups, stamp)), 0o700);
+  if (process.platform !== "win32") assert.equal(mode(join(backups, stamp, "claude-settings.json")), 0o600);
   // The option went to the private settings file, not onto the hook command.
-  assert.equal(mode(join(home, ".jevis", "config.json")), 0o600);
+  if (process.platform !== "win32") assert.equal(mode(join(home, ".jevis", "config.json")), 0o600);
   assert.deepEqual(JSON.parse(readFileSync(join(home, ".jevis", "config.json"), "utf8")), { JEVIS_MODE: "shadow" });
   const settings = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
   assert.doesNotMatch(settings.hooks.Stop[0].hooks[0].command, /JEVIS_MODE/);
   // A second install without options keeps the saved setting.
-  execFileSync(process.execPath, [new URL("../bin/install.mjs", import.meta.url).pathname, "--harness", "claude"], { env, stdio: "ignore" });
+  execFileSync(process.execPath, [fileURLToPath(new URL("../bin/install.mjs", import.meta.url)), "--harness", "claude"], { env, stdio: "ignore" });
   assert.deepEqual(JSON.parse(readFileSync(join(home, ".jevis", "config.json"), "utf8")), { JEVIS_MODE: "shadow" });
 });

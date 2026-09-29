@@ -42,7 +42,7 @@ function toolEvent(it, harness) {
     // Shown as the live hook shows apply_patch: the file header and only the lines the edit adds.
     const [path, change] = Object.entries(it.changes ?? {})[0] ?? [];
     if (!path) return null;
-    const added = change?.content ?? (change?.unified_diff ?? "").split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).map((l) => l.slice(1)).join("\n");
+    const added = change?.content ?? (change?.unified_diff ?? "").split(/\r?\n/).filter((l) => l.startsWith("+") && !l.startsWith("+++")).map((l) => l.slice(1)).join("\n");
     return { tool: "apply_patch", input: clip(`*** ${change?.type === "add" ? "Add" : "Update"} File: ${path}\n${added}`, EDIT_CLIP) };
   }
   if (it.tool && it.input) return { tool: it.tool, input: toolInput(it.tool, it.input) };

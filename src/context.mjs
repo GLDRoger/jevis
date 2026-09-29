@@ -3,6 +3,7 @@ import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { plainRead } from "./shell.mjs";
+import { insideFolder, samePath } from "./paths.mjs";
 import { commandText, readSession } from "./transcript.mjs";
 
 /**
@@ -130,7 +131,7 @@ export const commandKey = (command) => createHash("sha256").update(String(comman
 /** An apply_patch body reduced to its file headers and added lines. */
 export function patchAdditions(patch) {
   const out = [];
-  for (const line of patch.split("\n")) {
+  for (const line of patch.split(/\r?\n/)) {
     if (/^\*\*\* (Add|Update|Delete) File: /.test(line) || /^\*\*\* Move to: /.test(line)) out.push(line);
     else if (line.startsWith("+")) out.push(line.slice(1));
   }
@@ -155,7 +156,11 @@ function describe(it, cwd) {
 
 function changedPaths(it, cwd) {
   const paths = Array.isArray(it.changes) ? it.changes.map((c) => c.path ?? "") : Object.keys(it.changes ?? {});
-  return paths.filter(Boolean).map((p) => (cwd && isAbsolute(p) && p.startsWith(`${cwd}/`) ? relative(cwd, p) : p));
+  return paths.filter(Boolean).map((p) => {
+    const nested = cwd && isAbsolute(p) && insideFolder(p, cwd) && (process.platform === "win32" || p !== cwd);
+    const file = nested ? relative(cwd, p) : p;
+    return process.platform === "win32" ? file.replaceAll("\\", "/") : file;
+  });
 }
 
 /**
@@ -193,7 +198,7 @@ const SKIP_DIRS = new Set(["node_modules", "dist", "build", "out", "coverage", "
  * folders, and never walks the home folder itself.
  */
 export function touchedFiles(root, since, { limit = 5000, depth = 5 } = {}) {
-  if (!root || !since || root === homedir() || !existsSync(root)) return [];
+  if (!root || !since || samePath(root, homedir()) || !existsSync(root)) return [];
   const out = [];
   let seen = 0;
   const walk = (dir, level) => {
@@ -211,7 +216,7 @@ export function touchedFiles(root, since, { limit = 5000, depth = 5 } = {}) {
       if (e.isDirectory()) walk(path, level + 1);
       else if (e.isFile()) {
         try {
-          if (statSync(path).mtimeMs >= since) out.push(relative(root, path));
+          if (statSync(path).mtimeMs >= since) out.push(process.platform === "win32" ? relative(root, path).replaceAll("\\", "/") : relative(root, path));
         } catch {
           /* gone since the listing */
         }

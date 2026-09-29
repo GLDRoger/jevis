@@ -157,6 +157,8 @@ node bin/install.mjs           # install for both harnesses (your old configs ar
 node bin/jevis.mjs doctor      # check the setup: hooks, settings, key, a live call, recent activity
 ```
 
+On Windows, the installer writes forward-slash paths and an unquoted first word, for example `node "C:/Users/me/My Projects/jevis/bin/jevis.mjs" hook prompt`. It uses the full Node executable path when that path has no spaces; otherwise `node` must be on PATH. The same command works in Git Bash, Windows PowerShell 5.1, PowerShell 7, and cmd. `~/.jevis` is under your Windows user profile; doctor reports that POSIX permissions are not checked there.
+
 The installer adds Jevis's entries next to your existing hooks and leaves every other hook alone. Running it twice gives the same config. The hooks take effect in new sessions, and Codex asks you to approve new hooks once.
 
 Jevis fails open: without a key, with a moved checkout, or with a broken settings file, it steps aside and your agent works as if it weren't there. `doctor` is how you tell that apart from "no lesson applied". It checks each harness's hooks, your settings and where each came from, the key and a live call to the decision model, file permissions, the design review's tools, the lessons, and the last day of the log, and prints the fix for anything wrong.
@@ -258,12 +260,12 @@ The environment wins over the file, so `JEVIS_DISABLE=1` in one terminal still t
 | `JEVIS_TIMEOUT_MS` | 3000 prompt, 1500 tool, 3000 stop | How long a hook waits for the decision model before standing aside |
 | `JEVIS_MODE=shadow` | off | Log what would have happened and change nothing |
 | `JEVIS_DISABLE=1` | off | Turn Jevis off (for one session, if set there) |
-| `JEVIS_SCOPE` | everywhere | Colon-separated folders; Jevis only acts inside them |
+| `JEVIS_SCOPE` | everywhere | Folders separated by `:` on macOS/Linux or `;` on Windows; Jevis only acts inside them |
 | `JEVIS_ENABLE` | none | Turn on optional entries: `safety`, `all`, or entry ids. Off by default: force pushes, machine-wide Docker deletes, browser security flags, wide deletes. The harnesses already guard these. |
 | `JEVIS_CRITIC` | `claude` | Who reviews visual work: `claude`, `codex`, or `off`. The installer's `--critic` sets it. |
 | `JEVIS_CRITIC_MODEL` | the CLI's default | The model the critic uses |
 | `JEVIS_DESIGN_LAW` | `~/.jevis/design-law.md`, else `~/.claude/slop.md` or `~/.codex/slop.md`, if present | A Markdown file of your own design rules. When it exists, the agent is told to read it on visual work, and the critic judges against it. |
-| `JEVIS_WIKI` | `./wiki`, then `~/.jevis/wiki`, then a trusted project's `.jevis/wiki` | Colon-separated lesson folders, later ones winning. Replaces all the defaults. |
+| `JEVIS_WIKI` | `./wiki`, then `~/.jevis/wiki`, then a trusted project's `.jevis/wiki` | Lesson folders separated by `:` on macOS/Linux or `;` on Windows, later ones winning. Replaces all the defaults. |
 | `JEVIS_HOME` | `~/.jevis` | Where sessions, logs, backups, and the key live |
 | `JEVIS_RECORD=off` | on | Keep no record of Jev calls (`~/.jevis/jev/calls.jsonl`, the training data for a local model) |
 
@@ -361,7 +363,7 @@ node bin/jevis.mjs trust ~/code/app            # lists what the lessons add, rep
 node bin/jevis.mjs trust --remove ~/code/app   # stop loading them
 ```
 
-A cloned repository could otherwise slip text into your agent's context or switch off a refusal, so trust is pinned to the files' contents: after a pull or an edit changes any of them, they stop loading until you trust them again. Until you trust a folder, Jevis doesn't read it at all, and it never follows a symlink out of one. A project's lessons can turn off or replace any shipped lesson except the safety ones (force pushes, machine-wide deletes, borrowed credentials); that stays your call, in `~/.jevis/wiki/`. Run `lint` inside the repository to check its lessons before you trust them. `doctor` tells you when the folder you're in has lessons you haven't trusted.
+A cloned repository could otherwise slip text into your agent's context or switch off a refusal, so trust is pinned to the files' contents: after a pull or an edit changes any of them (including only CRLF/LF line endings), they stop loading until you trust them again. Until you trust a folder, Jevis doesn't read it at all, and it never follows a symlink out of one. A project's lessons can turn off or replace any shipped lesson except the safety ones (force pushes, machine-wide deletes, borrowed credentials); that stays your call, in `~/.jevis/wiki/`. Run `lint` inside the repository to check its lessons before you trust them. `doctor` tells you when the folder you're in has lessons you haven't trusted.
 
 For a style guide of your own, too long and too nuanced for yes/no questions, write it as Markdown in `~/.jevis/design-law.md`. Agents are then told to read it before visual work, and the design review judges against it.
 

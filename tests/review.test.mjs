@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 
 // A private home, a scripted Jev, a stub renderer, and a scripted critic: no network, no browser, no CLI.
@@ -200,7 +200,7 @@ test("criticPrompt: a follow-up is judged with the conversation's first request,
 test("formatReview and telltales read cleanly", () => {
   const text = formatReview({ kind: "page", targets: ["http://localhost:5173/"], shots: ["/h/reviews/s/turn1-round1/a.png"], verdict: parseReview(FIX), backend: "claude" }, 1);
   assert.match(text, /Claude looked at renders of http:\/\/localhost:5173\/ at 1440 and 390 px/);
-  assert.match(text, /screenshots are in \/h\/reviews\/s\/turn1-round1/);
+  assert.ok(text.includes(`screenshots are in ${dirname("/h/reviews/s/turn1-round1/a.png")}`));
   assert.match(text, /Jevis renders the page again at 1440 and 390 px and reviews it, so check only what these points need/, "round 1 spares the agent a full re-check");
   assert.match(text, /Your final message is the user's answer, written as if this review were not there: present the finished work/);
   const last = formatReview({ kind: "page", targets: ["x"], shots: [], verdict: parseReview(FIX), backend: "claude" }, REVIEW_ROUNDS);
@@ -213,7 +213,7 @@ test("formatReview: a film's last review asks for the video file to be re-render
   assert.match(film(1), /Jevis samples the film's frames again/);
   assert.doesNotMatch(film(1), /1440 and 390/, "no page wording in a film review");
   assert.match(film(REVIEW_ROUNDS), /re-render the final video file so it carries them/);
-  assert.match(film(REVIEW_ROUNDS), /The frames are in \/h\/r/);
+  assert.ok(film(REVIEW_ROUNDS).includes(`The frames are in ${dirname("/h/r/f.png")}`));
 });
 
 test("filmSound: a film's soundtrack is measured, and a video older than its source is flagged", async (t) => {

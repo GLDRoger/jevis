@@ -1,4 +1,4 @@
-import { appendFileSync, chmodSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { redactDeep } from "./redact.mjs";
@@ -17,6 +17,7 @@ export function ensureDir(...parts) {
   const root = jevisHome();
   const dir = join(root, ...parts);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (process.platform === "win32") return dir;
   for (const d of [root, ...parts.map((_, i) => join(root, ...parts.slice(0, i + 1)))]) {
     if (checked.has(d)) continue;
     try {
@@ -42,13 +43,27 @@ export function loadSession(id) {
   }
 }
 
-export function saveSession(id, state) {
+export function saveSession(id, state, { platform = process.platform, rename = renameSync, wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } = {}) {
   if (!id) return;
-  const file = sessionFile(id);
-  // Parallel hooks (a subagent's tool call during a prompt) must never read a half-written file.
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
-  renameSync(tmp, file);
+  let tmp;
+  try {
+    const file = sessionFile(id);
+    // Parallel hooks must never read a half-written file. Windows readers can briefly hold the target open.
+    tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        rename(tmp, file);
+        return;
+      } catch (e) {
+        if (platform !== "win32" || !["EPERM", "EBUSY"].includes(e.code) || attempt === 4) throw e;
+        wait(25);
+      }
+    }
+  } catch {
+    // Losing session memory is safer than breaking a hook. Keep the previous complete file.
+    if (tmp) try { unlinkSync(tmp); } catch { /* already gone or still held open */ }
+  }
 }
 
 export const freshSession = () => ({ turn: 0, request: null, previousRequest: null, firstRequest: null, turnStartedAt: null, model: null, shown: {}, stop: { turn: -1, blocked: [], reviews: 0 } });

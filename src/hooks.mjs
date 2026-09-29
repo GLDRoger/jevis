@@ -4,6 +4,7 @@ import { redact } from "./redact.mjs";
 import { criticBackend, designLaw, formatReview, review, roundsFor } from "./review.mjs";
 import { freshSession, loadSession, log, saveSession } from "./state.mjs";
 import { wikiFor } from "./wiki.mjs";
+import { insideFolder, splitFolders } from "./paths.mjs";
 
 /**
  * The four hooks. Every one fails open: no Jev, no key, a timeout, or a bug
@@ -28,15 +29,16 @@ export const TIMEOUTS = { prompt: 3000, tool: 1500, stop: 3000 };
 const timeout = (event) => Number(process.env.JEVIS_TIMEOUT_MS) || TIMEOUTS[event];
 const shadow = () => process.env.JEVIS_MODE === "shadow";
 
-/** JEVIS_DISABLE silences every hook; JEVIS_SCOPE (colon-separated folders) limits them to those folders and everything inside them. */
-export function inScope(cwd) {
+/** JEVIS_DISABLE silences every hook; JEVIS_SCOPE (platform-separated folders) limits them to those folders and everything inside them. */
+export function inScope(cwd, { platform = process.platform, delimiter = platform === "win32" ? ";" : ":" } = {}) {
   if (process.env.JEVIS_DISABLE) return false;
   const scope = process.env.JEVIS_SCOPE;
   if (!scope) return true;
   if (!cwd) return false;
   // A folder, not a string prefix: /projects/app does not cover /projects/application. macOS reports /tmp as /private/tmp.
-  const within = (dir) => dir === "" || cwd === dir || cwd.startsWith(`${dir}/`);
-  return scope.split(":").filter(Boolean).map((p) => p.replace(/\/+$/, "")).some((p) => within(p) || within(`/private${p}`));
+  if (platform === "win32") return splitFolders(scope, delimiter).some((p) => insideFolder(cwd, p, platform));
+  const within = (dir) => dir === "" || insideFolder(cwd, dir, platform);
+  return splitFolders(scope, delimiter).map((p) => p.replace(/\/+$/, "")).some((p) => within(p) || within(`/private${p}`));
 }
 
 const summary = (r) => ({ ms: r.ms, error: r.error ?? undefined, skipped: r.skipped ?? undefined, pool: r.pool, profile: r.profile, fired: r.fired.map((e) => ({ id: e.id, p: r.scores[e.id] })) });
