@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -14,6 +14,8 @@ const windows = process.platform === "win32";
 const CHILD_TIMEOUT_MS = windows ? 15000 : 5000;
 // Windows launches up to 36 cold shells, plus the installer and lint, before cleanup.
 const TEST_TIMEOUT_MS = windows ? 4 * 9 * CHILD_TIMEOUT_MS + 2 * CHILD_TIMEOUT_MS + 30000 : 30000;
+// The spaced Node case adds 24 shell launches and has its own setup and cleanup.
+const SPACED_NODE_TIMEOUT_MS = 4 * 6 * CHILD_TIMEOUT_MS + 2 * CHILD_TIMEOUT_MS + 30000;
 const envValue = (name) => Object.entries(process.env).find(([key]) => key.toUpperCase() === name.toUpperCase())?.[1];
 
 function executable(paths) {
@@ -75,7 +77,7 @@ function assertExit(result) {
   assert.equal(result.code, 0);
 }
 
-test("e2e: installed hooks work through the harness shells", { timeout: TEST_TIMEOUT_MS }, async (t) => {
+async function checkInstalledHooks(t, { nodeWithSpaces = false, selectedEvents = null } = {}) {
   const root = mkdtempSync(join(tmpdir(), "jevis hooks e2e-"));
   const home = join(root, "home with spaces");
   const wiki = join(root, "lesson wiki");
@@ -114,12 +116,20 @@ test("e2e: installed hooks work through the harness shells", { timeout: TEST_TIM
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   const url = `http://127.0.0.1:${server.address().port}/v1/systemone`;
+  let node = process.execPath;
+  if (nodeWithSpaces) {
+    const nodeDir = join(root, "Node with spaces");
+    mkdirSync(nodeDir);
+    node = join(nodeDir, "node.exe");
+    // The runner's usual Node path has no space, so the installer needs a real copied executable.
+    copyFileSync(process.execPath, node);
+  }
   const options = { env, cwd, signal: t.signal };
-  const installed = await run(process.execPath, [installer, "--jev-url", url], options);
+  const installed = await run(node, [installer, "--jev-url", url], options);
   try {
     assertExit(installed);
   } catch (error) {
-    diagnostics(t, "node installer", `${installer} --jev-url ${url}`, installed, logFile);
+    diagnostics(t, `node installer (${node})`, `${installer} --jev-url ${url}`, installed, logFile);
     throw error;
   }
 
@@ -134,7 +144,7 @@ test("e2e: installed hooks work through the harness shells", { timeout: TEST_TIM
   const settings = readJson(configFile);
   assert.equal(settings.JEVIS_JEV_URL, url);
   writeFileSync(configFile, `${JSON.stringify({ ...settings, JEVIS_WIKI: wiki }, null, 2)}\n`);
-  const lint = await run(process.execPath, [cli, "lint"], options);
+  const lint = await run(node, [cli, "lint"], options);
   try {
     assertExit(lint);
     assert.match(lint.stdout, /3 entries/);
@@ -148,13 +158,25 @@ test("e2e: installed hooks work through the harness shells", { timeout: TEST_TIM
     codex: readJson(join(home, ".codex", "hooks.json")),
   };
   const events = { UserPromptSubmit: "prompt", PreToolUse: "tool", Stop: "stop", SessionStart: "session", PostCompact: "session" };
-  for (const [harness, config] of Object.entries(configs)) assert.deepEqual(Object.keys(config.hooks).sort(), Object.keys(events).filter((event) => harness === "codex" || event !== "PostCompact").sort());
+  for (const [harness, config] of Object.entries(configs)) {
+    assert.deepEqual(Object.keys(config.hooks).sort(), Object.keys(events).filter((event) => harness === "codex" || event !== "PostCompact").sort());
+    const firstWords = new Set();
+    for (const [event, groups] of Object.entries(config.hooks)) for (const group of groups) for (const hook of group.hooks) {
+      t.diagnostic(`${harness} ${event} installed command: ${hook.command}`);
+      firstWords.add(hook.command.match(/^(?:"[^"]*"|\S+)/)?.[0]);
+    }
+    if (nodeWithSpaces) for (const firstWord of firstWords) {
+      const choice = /^node(?:\.exe)?$/i.test(firstWord) ? "bare node fallback" : firstWord?.includes("~") ? "8.3 short path" : "other executable form";
+      t.diagnostic(`${harness} spaced Node first word: ${firstWord} (${choice})`);
+    }
+  }
 
   for (const shell of shells()) {
     const required = shell.required && envValue("CI")?.toLowerCase() === "true";
     await t.test(shell.name, { skip: !shell.file && !required ? `${shell.name} is not installed; not required for this run` : false }, async (s) => {
       assert.ok(shell.file, `${shell.name} is required on ${process.platform} under CI=true`);
       for (const [harness, config] of Object.entries(configs)) for (const [event, groups] of Object.entries(config.hooks)) {
+        if (selectedEvents && !selectedEvents.includes(event)) continue;
         const hooks = groups.flatMap((group) => group.hooks);
         assert.ok(hooks.length, `${harness} ${event} must install a hook`);
         for (const [index, hook] of hooks.entries()) await s.test(`${harness} ${event} ${index + 1}`, async (h) => {
@@ -208,4 +230,10 @@ test("e2e: installed hooks work through the harness shells", { timeout: TEST_TIM
   assert.ok(existsSync(logFile));
   assert.deepEqual(logRows(logFile).filter((row) => row.event === "hook-error"), []);
   assert.deepEqual(serverErrors, []);
-});
+}
+
+test("e2e: installed hooks work through the harness shells", { timeout: TEST_TIMEOUT_MS }, (t) => checkInstalledHooks(t));
+test("e2e: Windows hooks work with Node installed under a spaced path", {
+  timeout: SPACED_NODE_TIMEOUT_MS,
+  skip: windows ? false : "Windows-only: copied node.exe tests 8.3 paths or bare node through Windows shells",
+}, (t) => checkInstalledHooks(t, { nodeWithSpaces: true, selectedEvents: ["UserPromptSubmit", "PreToolUse", "Stop"] }));
