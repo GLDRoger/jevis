@@ -7,6 +7,7 @@
  *   node bin/install.mjs --harness claude    # one harness
  *   node bin/install.mjs --dry-run           # print the new config, write nothing
  *   node bin/install.mjs --jev-url http://127.0.0.1:8000/v1/systemone   # a self-hosted Laya instead of TypeSafe
+ *   node bin/install.mjs --critic codex      # who reviews visual work: claude (default), codex, or off
  *   node bin/install.mjs --uninstall         # remove Jevis's hooks
  *
  * Every write is preceded by a backup in ~/.jevis/backups/<time>/. Hooks that
@@ -15,7 +16,7 @@
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const JEVIS = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -28,6 +29,25 @@ export const TARGETS = {
 
 const isJevis = (cmd) => /bin\/jevis\.mjs hook /.test(cmd ?? "");
 
+export const CRITICS = ["claude", "codex", "off"];
+
+const CHROME = {
+  darwin: ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"],
+  linux: ["/opt/google/chrome/chrome", "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable"],
+  win32: [join(process.env.PROGRAMFILES ?? "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe")],
+};
+
+/** Whether a command is on PATH, found without running anything. */
+const onPath = (cmd, path = process.env.PATH ?? "") => path.split(delimiter).some((d) => d && (existsSync(join(d, cmd)) || existsSync(join(d, `${cmd}.exe`))));
+
+/** One line on whether the design and film review can run with this critic, and what to do if not. */
+export function reviewStatus(critic, { chrome = (CHROME[process.platform] ?? []).some(existsSync), cli = onPath(critic) } = {}) {
+  if (critic === "off") return "Design review: off. Every other check still runs.";
+  const missing = [chrome ? "" : "Google Chrome", cli ? "" : `the ${critic} CLI`].filter(Boolean);
+  if (!missing.length) return `Design review: on, reviewed by ${critic === "codex" ? "Codex" : "Claude"} through your own ${critic} CLI and plan.`;
+  return `Design review: skipped until ${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} installed. Every other check still runs. To turn it off explicitly, reinstall with --critic off${critic === "claude" ? ", or pick --critic codex" : ""}.`;
+}
+
 /** The node binary an earlier Jevis install runs with: a path known to work in this user's hooks. */
 export function nodeIn(config) {
   for (const groups of Object.values(config?.hooks ?? {})) for (const g of groups ?? []) for (const h of g.hooks ?? []) {
@@ -38,9 +58,11 @@ export function nodeIn(config) {
 }
 
 /** Jevis's entries for one harness. Claude Code filters tools by matcher; Codex sends every tool. */
-export function jevisHooks(harness, { node = process.execPath, cli = CLI, shadow = false, jevUrl = null } = {}) {
+export function jevisHooks(harness, { node = process.execPath, cli = CLI, shadow = false, jevUrl = null, critic = null } = {}) {
   if (jevUrl && !/^https?:\/\/[^\s'"`$;&|<>]+$/.test(jevUrl)) throw new Error(`--jev-url must be a plain http(s) URL, got ${jevUrl}`);
-  const env = [shadow ? "JEVIS_MODE=shadow" : "", jevUrl ? `JEVIS_JEV_URL=${jevUrl}` : ""].filter(Boolean).map((v) => `${v} `).join("");
+  if (critic && !CRITICS.includes(critic)) throw new Error(`--critic must be one of ${CRITICS.join(", ")}, got ${critic}`);
+  // claude is the default, so only a different choice goes on the command.
+  const env = [shadow ? "JEVIS_MODE=shadow" : "", jevUrl ? `JEVIS_JEV_URL=${jevUrl}` : "", critic && critic !== "claude" ? `JEVIS_CRITIC=${critic}` : ""].filter(Boolean).map((v) => `${v} `).join("");
   const hook = (event, timeout, matcher) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command: `${env}${node} ${cli} hook ${event}`, timeout }] }];
   const out = {
     UserPromptSubmit: hook("prompt", 10),
@@ -81,7 +103,8 @@ function main(argv) {
   const has = (f) => argv.includes(`--${f}`);
   const pick = argv.includes("--harness") ? argv[argv.indexOf("--harness") + 1].split(",") : Object.keys(TARGETS);
   const value = (f) => (argv.includes(`--${f}`) ? argv[argv.indexOf(`--${f}`) + 1] : null);
-  const opts = { uninstall: has("uninstall"), shadow: has("shadow"), jevUrl: value("jev-url") };
+  const opts = { uninstall: has("uninstall"), shadow: has("shadow"), jevUrl: value("jev-url"), critic: value("critic") };
+  if (opts.critic && !CRITICS.includes(opts.critic)) throw new Error(`--critic must be one of ${CRITICS.join(", ")}, got ${opts.critic}`);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const backups = join(homedir(), ".jevis", "backups", stamp);
   if (!opts.uninstall && !opts.jevUrl && !existsSync(join(homedir(), ".jevis", "secrets", "typesafe_api_key")) && !process.env.TYPESAFE_API_KEY && !process.env.JEVIS_JEV_KEY) {
@@ -108,6 +131,7 @@ function main(argv) {
   if (!opts.uninstall) {
     console.log("Takes effect in new sessions. Codex asks you to review new hooks once before it runs them.");
     console.log(opts.shadow ? "Shadow mode: Jevis logs what it would do (jevis stats) and changes nothing." : "Live. JEVIS_DISABLE=1 turns it off for one session; --uninstall removes it.");
+    console.log(reviewStatus(opts.critic ?? "claude"));
   }
 }
 

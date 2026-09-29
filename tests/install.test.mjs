@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-const { plan, jevisHooks, nodeIn } = await import("../bin/install.mjs");
+const { plan, jevisHooks, nodeIn, reviewStatus } = await import("../bin/install.mjs");
 
 const OLD = "/home/u/.local/bin/node /home/u/old/jevis/bin/jevis.mjs hook";
 const userSettings = () => ({
@@ -39,6 +39,22 @@ test("install: running it twice gives the same config; shadow mode and a Laya UR
   const laya = jevisHooks("codex", { node: "/n", cli: "/j/bin/jevis.mjs", jevUrl: "http://127.0.0.1:8000/v1/systemone" });
   assert.equal(laya.UserPromptSubmit[0].hooks[0].command, "JEVIS_JEV_URL=http://127.0.0.1:8000/v1/systemone /n /j/bin/jevis.mjs hook prompt");
   assert.throws(() => jevisHooks("codex", { jevUrl: "http://x/v1; rm -rf ~" }), /plain http\(s\) URL/, "a URL cannot smuggle a shell command into the hook");
+});
+
+test("install: --critic picks the reviewer or turns the review off, and says whether it can run", () => {
+  const cmd = (critic) => jevisHooks("claude", { node: "/n", cli: "/j/bin/jevis.mjs", critic }).Stop[0].hooks[0].command;
+  assert.equal(cmd("off"), "JEVIS_CRITIC=off /n /j/bin/jevis.mjs hook stop");
+  assert.equal(cmd("codex"), "JEVIS_CRITIC=codex /n /j/bin/jevis.mjs hook stop");
+  assert.equal(cmd("claude"), "/n /j/bin/jevis.mjs hook stop", "the default stays off the command");
+  assert.equal(jevisHooks("codex", { node: "/n", cli: "/j/bin/jevis.mjs", shadow: true, critic: "off" }).Stop[0].hooks[0].command, "JEVIS_MODE=shadow JEVIS_CRITIC=off /n /j/bin/jevis.mjs hook stop");
+  assert.throws(() => jevisHooks("claude", { critic: "gemini; rm -rf ~" }), /--critic must be one of/, "only the three known values reach the hook command");
+  assert.match(reviewStatus("off"), /off\. Every other check still runs/);
+  assert.match(reviewStatus("claude", { chrome: true, cli: true }), /on, reviewed by Claude/);
+  assert.match(reviewStatus("codex", { chrome: true, cli: true }), /on, reviewed by Codex/);
+  const missing = reviewStatus("claude", { chrome: false, cli: false });
+  assert.match(missing, /skipped until Google Chrome and the claude CLI are installed/);
+  assert.match(missing, /--critic off, or pick --critic codex/);
+  assert.match(reviewStatus("codex", { chrome: true, cli: false }), /skipped until the codex CLI is installed\. .*--critic off\.$/);
 });
 
 test("uninstall: removes Jevis and leaves the rest, down to an empty hooks key", () => {
