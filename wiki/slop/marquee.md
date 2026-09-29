@@ -1,6 +1,7 @@
 ---
 event: tool
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+when: { marks.plain_read: false }
 ask: Does `input` write user-interface code that adds an endlessly scrolling horizontal strip (a marquee or ticker) of brand values, adjectives, or slogans?
 yes: @keyframes that translate a duplicated row across the screen forever, <marquee>, or classes like marquee, ticker, ribbon
 no: A live data ticker the product needs (real prices, real scores), a strip of real customer logos or real work, a carousel the user controls, or no endless strip. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

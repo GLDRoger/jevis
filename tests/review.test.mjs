@@ -19,7 +19,7 @@ const { loadSession, readLog } = await import("../src/state.mjs");
 
 let script = {};
 setJevTransport(async (body) => ({ answers: Object.fromEntries(Object.keys(body.questions).map((k) => [k, { type: "noul", noul: script[k] ?? 0.05 }])) }));
-const VISUAL = { "axis.work_requested": 0.95, "axis.visual": 0.95, "axis.film": 0.05 };
+const VISUAL = { "axis.work_requested": 0.95, "axis.visual": 0.95, "axis.film": 0.05, "axis.claims_done": 0.95 };
 
 let rendered = [];
 setCapture(async (targets, { dir, film }) => {
@@ -138,6 +138,10 @@ test("review: skipped for non-visual work, for turns that changed no interface f
   assert.equal(await onStop((await visualTurn("add retries to the sender")).stop), null);
   script = VISUAL;
   assert.equal(await onStop((await visualTurn("make me a page", "notes.py")).stop), null);
+  // A progress report ("workers are still building the page") is not finished work.
+  script = { ...VISUAL, "axis.claims_done": 0.05 };
+  assert.equal(await onStop((await visualTurn()).stop), null);
+  script = VISUAL;
   process.env.JEVIS_MODE = "shadow";
   try {
     assert.equal(await onStop((await visualTurn()).stop), null);

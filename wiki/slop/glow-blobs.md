@@ -1,6 +1,7 @@
 ---
 event: tool
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+when: { marks.plain_read: false }
 ask: Does `input` write user-interface code that adds decorative blurred color blobs or orbs behind content, or neon glow shadows on cards and buttons?
 yes: Absolutely positioned circles with large blur (filter: blur(80px), blur-3xl) and bright colors behind a hero, or colored box-shadow glows like 0 0 40px rgba(139,92,246,.5)
 no: A real illustration, a product image, a neutral elevation shadow, or a focus ring. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

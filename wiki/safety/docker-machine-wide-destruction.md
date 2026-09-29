@@ -6,6 +6,7 @@ no: Stopping or removing only containers this task created, or `docker compose d
 unless: Does `request` explicitly ask to reset the database, delete Docker volumes, or clean up Docker?
 min: 0.9
 tools: [Bash]
+when: { marks.plain_read: false }
 optional: true
 action: deny
 title: Docker volumes and caches belong to every project

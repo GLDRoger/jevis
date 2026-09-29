@@ -1,6 +1,7 @@
 ---
 event: tool
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+when: { marks.plain_read: false }
 ask: Does `input` write user-interface styles that give cards, callouts, list items, or quotes a single thick colored accent bar along one edge (left, right, top, or bottom), as a colored border on that side or an inset shadow?
 yes: border-left or border-top 3px or more in an accent color, Tailwind border-l-4 or border-t-4 with a color, or box-shadow: inset 4px 0 0 <color> on cards, notes, alerts, stat boxes, or selected items
 no: A thin neutral divider, a table or grid border, a code-diff gutter, or a focus ring. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

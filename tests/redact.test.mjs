@@ -51,6 +51,26 @@ test("passwords: assignments, JSON, env files, flags, URLs, curl, headers", () =
   assert.equal(redact("DB_PASSWORD=hunter22"), "DB_PASSWORD=[redacted]", "the name stays so Jev can read the command");
 });
 
+test("secrets as quoted phrases, separate arguments, piped logins, connection strings, and signed URLs", () => {
+  const v = fake("FAKEq7Lm2Zp9", "Xw4Rt8Yv3Nb6Kc1");
+  assert.equal(redact(`export DB_PASSWORD="correct horse battery staple"`), 'export DB_PASSWORD="[redacted]"', "every word of a quoted password");
+  hidden(`aws configure set aws_secret_access_key ${v}`, v);
+  // Quoted values are masked whole, in every form that takes a secret as its own argument.
+  for (const cmd of [`aws configure set aws_secret_access_key "correct horse ${v}"`, `gh secret set FOO --body 'correct horse ${v}'`, `printf '%s' "correct horse ${v}" | gh auth login --with-token`, `mysql --password "correct horse ${v}"`, `sshpass -p 'correct horse ${v}' ssh host`]) {
+    const out = hidden(cmd, "horse");
+    assert.ok(!out.includes(v), out);
+  }
+  hidden(`npm config set //registry.npmjs.org/:_authToken ${v}`, v);
+  hidden(`gh secret set STRIPE_KEY --body ${v}`, v);
+  hidden(`echo ${v} | gh auth login --with-token`, v);
+  hidden(`printf '%s' ${v} | docker login -u me --password-stdin ghcr.io`, v);
+  hidden(`DefaultEndpointsProtocol=https;AccountName=ex;AccountKey=${v}+/==;EndpointSuffix=core.windows.net`, v);
+  hidden(`curl 'https://acct.blob.core.windows.net/c/f?sv=2024-01-01&sig=${v}%2B'`, v);
+  // Names that continue past the secret word are still secrets.
+  for (const name of ["SECRET_KEY_BASE", "DB_PASSWORD_FILE", "GITHUB_TOKEN_2"]) hidden(`${name}=${v}`, v);
+  assert.equal(redact("aws configure set region us-east-1"), "aws configure set region us-east-1");
+});
+
 test("provider tokens", () => {
   for (const t of [
     fake("sk", "-ant-api03-abcdefghijklmnopqrstuvwx"),
@@ -72,6 +92,11 @@ test("provider tokens", () => {
 });
 
 test("what is not a secret survives, so Jev can still read the work", () => {
+  // Design tokens hold colors and lengths, and the slop checks must read them.
+  for (const css of ["--token-color: #abcdef;", "--token-radius: 8px;", "--token-accent: var(--brand);", "--token-ink: oklch(0.2 0.02 250);", "--token-accent: red;", ":root { --brand-token: rebeccapurple; }"]) assert.equal(redact(css), css);
+  // The same words outside a custom property are still secrets.
+  assert.equal(redact("token: abc123def"), "token: [redacted]");
+  assert.equal(redact("--db-password=abc123def"), "--db-password=[redacted]");
   const keep = [
     "type Login = { email: string; password: string }",
     "const token = process.env.API_TOKEN",

@@ -1,5 +1,6 @@
 import { closeSync, existsSync, fstatSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 /**
  * Reads a session transcript into the items Jevis needs: commands with exit
@@ -16,35 +17,50 @@ import { basename, dirname, join } from "node:path";
  * The rows of a JSONL log from byte `from` on, read in chunks: session logs
  * reach several gigabytes (the largest Codex rollout here is 2.7 GB), past what
  * one string can hold. `keep` skips lines before parsing them. A line cut by
- * `from` or still being written is skipped.
+ * `from` (one that does not start right after a newline) or still being
+ * written is skipped. A character split across two chunks is decoded whole.
  */
-export function readJsonl(file, { from = 0, keep = null } = {}) {
-  if (!file || !existsSync(file)) return [];
+export function readJsonl(file, options = {}) {
   const rows = [];
+  eachJsonl(file, (row) => rows.push(row), options);
+  return rows;
+}
+
+/** readJsonl without holding the rows: `fn` sees each one in turn, so a reader can total a log of any size. */
+export function eachJsonl(file, fn, { from = 0, keep = null } = {}) {
+  if (!file || !existsSync(file)) return;
   const fd = openSync(file, "r");
   try {
     const size = fstatSync(fd).size;
     const buf = Buffer.alloc(8 * 1024 * 1024);
+    const decoder = new StringDecoder("utf8");
     let pos = Math.max(0, Math.min(from, size));
     let rest = "";
-    let first = pos > 0; // the first line may start mid-row
+    // The prompt hook records the size at a row's end, so `from` usually starts a whole row; only a cut one is dropped.
+    let cut = pos > 0 && readSync(fd, buf, 0, 1, pos - 1) === 1 && buf[0] !== 0x0a;
     while (pos < size) {
       const n = readSync(fd, buf, 0, Math.min(buf.length, size - pos), pos);
       if (!n) break;
       pos += n;
-      const lines = (rest + buf.toString("utf8", 0, n)).split("\n");
+      const lines = (rest + decoder.write(buf.subarray(0, n))).split("\n");
       rest = lines.pop();
       for (const line of lines) {
-        if (first) { first = false; if (from > 0) continue; }
+        if (cut) { cut = false; continue; }
         if (!line || (keep && !keep(line))) continue;
-        try { rows.push(JSON.parse(line)); } catch { /* partial or corrupt line */ }
+        let row;
+        try { row = JSON.parse(line); } catch { continue; /* partial or corrupt line */ }
+        fn(row);
       }
     }
-    if (rest && !first && (!keep || keep(rest))) { try { rows.push(JSON.parse(rest)); } catch { /* still being written */ } }
+    rest += decoder.end();
+    if (rest && !cut && (!keep || keep(rest))) {
+      let row;
+      try { row = JSON.parse(rest); } catch { /* still being written */ }
+      if (row !== undefined) fn(row);
+    }
   } finally {
     closeSync(fd);
   }
-  return rows;
 }
 
 /** Rows a reader uses: Codex items and metadata, Claude Code messages. Everything else (token counts, reasoning, deltas) is skipped unparsed. */
@@ -61,12 +77,16 @@ export function readRollout(path, { from = 0 } = {}) {
   for (const r of rows) {
     if (r.type !== "event_msg" || r.payload?.type !== "item_completed") continue;
     const it = r.payload.item;
-    if (!it || seen.has(it.id)) continue;
+    if (!it || seen.has(it.id) || !applied(it)) continue;
     seen.add(it.id);
     items.push({ at: r.timestamp, t: Date.parse(r.timestamp), it });
   }
   return { rows, meta, items };
 }
+
+/** A file change that did not happen (a patch that failed, or one the user or a hook refused) is not evidence of an edit. */
+const FAILED = /^(failed|declined|rejected|error|errored|cancell?ed)$/i;
+const applied = (it) => it.type !== "FileChange" || !FAILED.test(String(it.status ?? ""));
 
 const IMAGE_FILE = /\.(png|jpe?g|gif|webp)$/i;
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
@@ -131,7 +151,8 @@ function toItem(call, result, detail) {
     return { type: "CommandExecution", id, command: String(input.command ?? ""), aggregated_output: stdout || output, exit_code: code };
   }
   // The tool name and input ride along so a replay can show Jev the edit exactly as the live hook did.
-  if (EDIT_TOOLS.has(name)) return { type: "FileChange", id, tool: name, input, changes: [{ path: String(input.file_path ?? input.notebook_path ?? "") }] };
+  // An edit that errored (old_string not found, or refused by a hook such as Jevis's own deny) changed nothing.
+  if (EDIT_TOOLS.has(name)) return result?.is_error ? null : { type: "FileChange", id, tool: name, input, changes: [{ path: String(input.file_path ?? input.notebook_path ?? "") }] };
   if (name?.startsWith("mcp__")) {
     const [, server, ...tool] = name.split("__");
     return { type: "McpToolCall", id, server, tool: tool.join("__"), arguments: input };
@@ -210,7 +231,7 @@ function safeList(dir) {
 function readCompletedItems(file) {
   try {
     return readJsonl(file, { keep: (line) => line.includes('"item_completed"') })
-      .filter((r) => r.type === "event_msg" && r.payload?.type === "item_completed" && r.payload.item)
+      .filter((r) => r.type === "event_msg" && r.payload?.type === "item_completed" && r.payload.item && applied(r.payload.item))
       .map((r) => ({ at: r.timestamp, t: Date.parse(r.timestamp), it: r.payload.item }));
   } catch {
     return [];

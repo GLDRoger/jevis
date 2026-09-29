@@ -6,6 +6,7 @@ no: Reading settings, or settings of a throwaway browser profile the agent launc
 unless: Does `request` explicitly ask to change this browser or system setting?
 min: 0.9
 tools: [Bash]
+when: { marks.plain_read: false }
 optional: true
 action: deny
 title: The user's browser security is not a workaround

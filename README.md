@@ -34,7 +34,7 @@ Jevis works at four moments in a session.
 | You send a message | `UserPromptSubmit` | Add a short lesson to the agent's context: "a narrow ask gets a narrow change", "brief before the first edit", "the two default landing pages". |
 | The agent is about to run a command or edit a file | `PreToolUse` | Refuse it with a reason ("this adds gradient-filled headline text"), or add a note. |
 | The agent is about to end its turn | `Stop` | Send it back: "you said it's deployed, but nothing after the deploy checked the live function". |
-| A turn of visual work ends | `Stop` | Render the page (1440 and 390 px) or sample the film, and have Claude or Codex review it as a director who didn't make it. It can send the work back at most twice. |
+| The agent reports visual work done | `Stop` | Render the page (1440 and 390 px) or sample the film, and have Claude or Codex review it as a director who didn't make it. It can send the work back at most twice. |
 
 Nearly everything Jevis knows lives in the `wiki/`: 98 lessons, one per file, each with the yes/no question that decides when it applies. For example:
 
@@ -94,7 +94,7 @@ Read these before you install.
 - **The evaluation is small, and there are no public benchmark numbers.** 36 pairs in the confirmation round, one seed of most tasks, one film brief, and a model as the judge. The judge showed a 5–1 lean on pairs where Jevis did nothing, so single-pair results are noise. The aggregate, and the zero hidden-check regressions, are the signal. We haven't run Jevis against popular coding benchmarks such as SWE-bench or Terminal-Bench: that takes time and model usage we haven't had yet. The best test is your own work, so try it in shadow mode first (see [Install](#install)).
 - **Only two model families have their own lessons.** Some lessons fix a habit of Claude models or of GPT models, and target that family. Any other model, such as Gemini, Grok, or an open model, gets both families' lessons: that fits the shared failures, but nobody has measured it.
 - **Laya doesn't work out of the box yet.** It serves the same API, but the shipped checkpoints don't separate Jevis's questions. Details in [Laya, self-hosted](#laya-self-hosted).
-- **Two harnesses are tested, on macOS.** Codex and Claude Code. Others need an adapter (see [Other agent harnesses](#other-agent-harnesses)). On Linux, the test suite passes in CI, but nobody has run Jevis live in a session there yet. Windows is untested: the installer's options (`--shadow`, `--jev-url`, `--critic`) write `NAME=value` settings in front of the hook command, which cmd and PowerShell don't understand, and the review can't find a running dev server there, so it reviews the changed HTML file instead.
+- **Two harnesses are tested, on macOS.** Codex and Claude Code. Others need an adapter (see [Other agent harnesses](#other-agent-harnesses)). On Linux, the test suite passes in CI, but nobody has run Jevis live in a session there yet. Windows isn't supported yet. There, Claude Code runs hook commands through Git Bash (or PowerShell without it) and Codex through PowerShell, and neither can run the commands the installer writes: Git Bash drops the backslashes in a Windows path, and PowerShell won't run a quoted program path such as the default `C:\Program Files\nodejs\node.exe` without `&`. The review also can't find a running dev server on Windows.
 - **The design review is optional.** It needs Google Chrome and the `claude` or `codex` CLI, and it runs on your own plan with that CLI. Without them, the review is skipped and everything else still works (see [The design review](#the-design-review)).
 
 ## Which coding model to use
@@ -154,9 +154,12 @@ Give Jevis a TypeSafe key (next section), then install the hooks:
 ```sh
 node bin/install.mjs --dry-run # show exactly what changes in ~/.claude/settings.json and ~/.codex/hooks.json
 node bin/install.mjs           # install for both harnesses (your old configs are backed up in ~/.jevis/backups/)
+node bin/jevis.mjs doctor      # check the setup: hooks, settings, key, a live call, recent activity
 ```
 
 The installer adds Jevis's entries next to your existing hooks and leaves every other hook alone. Running it twice gives the same config. The hooks take effect in new sessions, and Codex asks you to approve new hooks once.
+
+Jevis fails open: without a key, with a moved checkout, or with a broken settings file, it steps aside and your agent works as if it weren't there. `doctor` is how you tell that apart from "no lesson applied". It checks each harness's hooks, your settings and where each came from, the key and a live call to the decision model, file permissions, the design review's tools, the lessons, and the last day of the log, and prints the fix for anything wrong.
 
 Try it without an agent:
 
@@ -170,15 +173,16 @@ Other installer options:
 
 ```sh
 node bin/install.mjs --shadow            # Jevis logs what it would do and changes nothing; review with `jevis stats`
+node bin/install.mjs --live              # switch shadow mode off
 node bin/install.mjs --harness codex     # one harness only
 node bin/install.mjs --jev-url URL       # use a self-hosted server instead of TypeSafe
 node bin/install.mjs --critic off        # no design review; every other check still runs (or --critic codex)
 node bin/install.mjs --uninstall         # remove Jevis's hooks
 ```
 
-To try it out, start in shadow mode for a few days, read `node bin/jevis.mjs stats`, and then go live.
+To try it out, start in shadow mode for a few days, read `node bin/jevis.mjs stats`, and then switch it on with `--live`.
 
-Each install writes the options you pass this time, so repeat any you want to keep (`--shadow`, `--jev-url`, `--critic`).
+The options are saved in `~/.jevis/config.json` (see [Configuration](#configuration)), not on the hook commands, so they last until you change them and a plain reinstall keeps them. To go back to a default, pass it: `--live`, `--jev-url typesafe`, or `--critic claude`.
 
 ### The design review
 
@@ -204,7 +208,7 @@ This is what every result above used. Answers typically come back in under half 
 2. Save it where only you can read it:
 
    ```sh
-   mkdir -p ~/.jevis/secrets && chmod 700 ~/.jevis/secrets
+   mkdir -p ~/.jevis/secrets && chmod 700 ~/.jevis ~/.jevis/secrets
    printf '%s' 'YOUR_KEY' > ~/.jevis/secrets/typesafe_api_key && chmod 600 ~/.jevis/secrets/typesafe_api_key
    ```
 
@@ -233,11 +237,17 @@ No key is needed unless you start Laya with `LAYA_API_KEY`. Then set `JEVIS_JEV_
 As shipped, then, Laya-backed Jevis mostly does nothing. Two things would change that:
 
 - **Speed:** a GPU (Laya reports about 7 ms per question batched on a T4), or a higher `JEVIS_TIMEOUT_MS`.
-- **Accuracy:** fine-tuning. Laya's docs report that fine-tuning is where its accuracy jumps. Jevis records every Jev call it makes (the masked state, each question, and the answer probability) in `~/.jevis/jev/calls.jsonl`. So a few weeks on TypeSafe produce a labeled dataset for Laya's [fine-tuning notebook](https://github.com/NandhaKishorM/laya/blob/main/notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb). We haven't done this yet. If you do, rerun `node eval/slop.mjs` and the other batteries against your server before trusting it.
+- **Accuracy:** fine-tuning. Laya's docs report that fine-tuning is where its accuracy jumps. Jevis records every Jev call it makes (the masked state, each question, and the answer probability) in `~/.jevis/jev/calls.jsonl`, so a few weeks on TypeSafe produce a labeled dataset. `node bin/jevis.mjs export` writes it in the row format of Laya's [fine-tuning notebook](https://github.com/NandhaKishorM/laya/blob/main/notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb): gzipped JSON lines of state, questions, and Jev's answers as the gold labels, split into train and test by session. It prints the two lines to change in the notebook. The rows hold your prompts, commands, and file names with only secrets masked, so upload them as a private dataset. We haven't trained on it yet. If you do, rerun `node eval/slop.mjs` and the other batteries against your server before trusting it.
 
 ## Configuration
 
-All settings are environment variables. The simplest way to set them for a harness is on the hook command itself; `--jev-url` and `--shadow` do this for you.
+Every setting below can live in `~/.jevis/config.json`, keyed by its variable name. The installer's options write there, and you can edit it by hand:
+
+```json
+{ "JEVIS_MODE": "shadow", "JEVIS_CRITIC": "codex", "JEVIS_ENABLE": ["safety"] }
+```
+
+The environment wins over the file, so `JEVIS_DISABLE=1` in one terminal still turns Jevis off for that session. The file can't hold `JEVIS_HOME` (the file lives there) or the API key (it belongs in `~/.jevis/secrets/`, where no settings listing prints it). A file with a mistake is ignored rather than breaking your hooks; `node bin/jevis.mjs doctor` names the mistake and shows each setting in effect with where it came from.
 
 | Variable | Default | What it does |
 |---|---|---|
@@ -253,8 +263,9 @@ All settings are environment variables. The simplest way to set them for a harne
 | `JEVIS_CRITIC` | `claude` | Who reviews visual work: `claude`, `codex`, or `off`. The installer's `--critic` sets it. |
 | `JEVIS_CRITIC_MODEL` | the CLI's default | The model the critic uses |
 | `JEVIS_DESIGN_LAW` | `~/.jevis/design-law.md`, else `~/.claude/slop.md` or `~/.codex/slop.md`, if present | A Markdown file of your own design rules. When it exists, the agent is told to read it on visual work, and the critic judges against it. |
-| `JEVIS_WIKI` | `./wiki`, then `~/.jevis/wiki` | Colon-separated lesson folders, later ones winning. Replaces both defaults. |
+| `JEVIS_WIKI` | `./wiki`, then `~/.jevis/wiki`, then a trusted project's `.jevis/wiki` | Colon-separated lesson folders, later ones winning. Replaces all the defaults. |
 | `JEVIS_HOME` | `~/.jevis` | Where sessions, logs, backups, and the key live |
+| `JEVIS_RECORD=off` | on | Keep no record of Jev calls (`~/.jevis/jev/calls.jsonl`, the training data for a local model) |
 
 ## Other agent harnesses
 
@@ -304,7 +315,9 @@ Then:
 
 Two rules keep the cost down. Jevis never blocks the same way twice in a turn, and a review round tells the agent what to check so it doesn't redo a full sweep.
 
-The design and film review runs when a turn of visual work passes the stop checks. For a page, Jevis renders what the agent served (or a dev server running from the project, or the changed HTML file) in headless, muted Chrome at 1440 and 390 px, plus dark mode when the page has one. For a film, it samples frames across the whole runtime, adds a spectrogram and measured loudness of the rendered video, and warns when the video is older than its source. The critic answers "ship" or up to five "Now: A. Instead: X." fixes. The first reviewed turn gets two rounds, and later turns get one.
+Code settles what it can before the decision model is asked. An entry whose facts already fail is left out of the call. A shell command that provably only reads (`ls`, `rg`, `sed -n 1,80p`, `git log`, `gh pr view`, with no redirect, substitution, or credential in sight) skips the call entirely, because every lesson about commands gates on `marks.plain_read: false`. In the maintainer's log, 42% of commands were plain reads. Each had waited about half a second for an answer, and none of those answers ever fired.
+
+The design and film review runs when a turn of visual work passes the stop checks and says the work is done. A progress report ("the workers are still rendering") isn't reviewed, so an agent orchestrating background work isn't sent back over frames its workers haven't finished. For a page, Jevis renders what the agent served (or a dev server running from the project, or the changed HTML file) in headless, muted Chrome at 1440 and 390 px, plus dark mode when the page has one. For a film, it samples frames across the whole runtime, adds a spectrogram and measured loudness of the rendered video, and warns when the video is older than its source. The critic answers "ship" or up to five "Now: A. Instead: X." fixes. The first reviewed turn gets two rounds, and later turns get one.
 
 ## The wiki, and making it yours
 
@@ -339,6 +352,17 @@ Your lessons live in `~/.jevis/wiki/`, in the same format. Jevis loads the shipp
 
 Changes take effect on the next hook call. `node bin/jevis.mjs lint` lists what yours replaced or turned off.
 
+### Lessons for one project
+
+A repository can carry lessons for everyone who works in it, in `.jevis/wiki/` at its root, in the same format. They apply only inside that repository, load after yours, and load only once you trust them:
+
+```sh
+node bin/jevis.mjs trust ~/code/app            # lists what the lessons add, replace, or turn off, then trusts them as they are
+node bin/jevis.mjs trust --remove ~/code/app   # stop loading them
+```
+
+A cloned repository could otherwise slip text into your agent's context or switch off a refusal, so trust is pinned to the files' contents: after a pull or an edit changes any of them, they stop loading until you trust them again. Until you trust a folder, Jevis doesn't read it at all, and it never follows a symlink out of one. A project's lessons can turn off or replace any shipped lesson except the safety ones (force pushes, machine-wide deletes, borrowed credentials); that stays your call, in `~/.jevis/wiki/`. Run `lint` inside the repository to check its lessons before you trust them. `doctor` tells you when the folder you're in has lessons you haven't trusted.
+
 For a style guide of your own, too long and too nuanced for yes/no questions, write it as Markdown in `~/.jevis/design-law.md`. Agents are then told to read it before visual work, and the design review judges against it.
 
 **Or let your agent do it.** `skills/jevis/SKILL.md` teaches any coding agent how to change Jevis. It covers which kind of entry, file, or setting produces which behavior, how to write a question the decision model answers well, and how to prove the change with dry runs before calling it done. Point your agent at it with the change you want:
@@ -355,7 +379,11 @@ ln -s ~/code/jevis/skills/jevis ~/.claude/skills/jevis
 ln -s ~/code/jevis/skills/jevis ~/.codex/skills/jevis
 ```
 
-The best lessons come from your own sessions. `node bin/jevis.mjs replay <session file>` dry-runs a recorded Codex or Claude Code session through the current wiki, which shows what would have fired.
+The best lessons come from your own sessions:
+
+- `node bin/jevis.mjs mine` lists the turns where you corrected the agent, each with what you asked, what it answered, what you said next, and what Jevis did that turn. A habit that repeats across sessions is a lesson, and the skill above turns one into an entry.
+- `node bin/jevis.mjs stats --near` scores each lesson against every recorded answer to its current question. It shows how often the lesson would fire under today's rules, how often it came within 0.1 of its threshold, and how often `unless` or a condition stood it down. Set `min` from that rather than a guess.
+- `node bin/jevis.mjs replay <session file>` dry-runs a recorded Codex or Claude Code session through the current wiki, which shows what would have fired.
 
 ## Evaluating it yourself
 
@@ -369,6 +397,8 @@ node eval/sim-report.mjs <summary.json ...> # the gates: no harm, net good, no l
 node eval/sim-cross.mjs <sim root>          # Codex with Jevis against bare Claude Code
 node eval/gallery.mjs && node eval/films.mjs # browse the pages and films side by side, with a blind mode
 node bin/jevis.mjs stats                    # what fired in your real sessions, and the decision model's latency
+node bin/jevis.mjs stats --near             # each lesson against the recorded answers: fires, near misses, stand-downs
+node bin/jevis.mjs doctor                   # the installation, end to end
 ```
 
 `eval/sim.mjs` runs every agent with a rule against opening windows or playing sound, and enforces it: a Codex rules file and Claude Code deny rules. Its gates are in `eval/sim-report.mjs`:
@@ -388,12 +418,12 @@ The last confirmation round passed every gate except time.
 - **Masking.** Before anything reaches the decision model or the critic, and before anything is written to disk, `src/redact.mjs` masks secrets:
   - private keys (SSH, PEM, PGP);
   - card numbers that pass the Luhn check, and their security codes;
-  - passwords in assignments, JSON, flags, URLs, and headers;
+  - passwords and keys in assignments (a quoted phrase whole), JSON, flags, `config set` commands, URLs, headers, connection strings, and signed URLs;
   - provider tokens.
 
   Variable names stay (`DB_PASSWORD=[redacted]`), so the model can still read the command.
 - **What leaves your machine.** The masked state (your message, the command or the lines an edit adds, the agent's final message, and file names) goes to the decision model. Screenshots, frames, and the request go to the critic (the Claude or Codex CLI you already use).
-- **What stays on your machine.** Sessions, logs, and the call record live in `~/.jevis`, readable only by you.
+- **What stays on your machine.** Sessions, logs, config backups, and the call record live in `~/.jevis`, which Jevis keeps readable only by you (0700). The call record is the largest: in the maintainer's heavy use it grew about 60 MB a day before plain reads stopped calling Jev and answers were stored as bare probabilities, changes that cut each day's record by roughly half. Set `JEVIS_RECORD=off` if you won't train a local model. `jevis export` writes its training set to `~/.jevis/export/` unless you pick another folder, private like the rest.
 
 ## Contributing
 

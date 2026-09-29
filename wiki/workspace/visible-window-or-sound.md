@@ -6,6 +6,7 @@ no: Headless browsers, muted capture, hidden in-app browsers, background process
 unless: Does `request` explicitly ask to open something on the user's own screen (such as "open it in my browser" or "show me") or to play sound out loud? Testing, checking, running, or notifying do not count.
 min: 0.85
 tools: [Bash, "mcp__*"]
+when: { marks.plain_read: false }
 action: deny
 title: Visible windows and sound
 source: |

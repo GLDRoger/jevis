@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
+import { plainRead } from "./shell.mjs";
 import { commandText, readSession } from "./transcript.mjs";
 
 /**
@@ -111,15 +112,17 @@ export function toolInput(tool, input) {
 }
 
 /**
- * Characters a check needs exactly: Jev reads an en dash (–) as an em dash (—)
- * often enough that the em-dash rule gates on this fact instead.
- */
-/**
  * Facts code can compute exactly, so no entry has to ask Jev for them:
- * em_dash, the character itself (Jev confuses it with an en dash), and
- * ran_before, whether this session already ran this exact command.
+ * em_dash, the character itself (Jev confuses it with an en dash);
+ * ran_before, whether this session already ran this exact command; and
+ * plain_read, a shell command that provably only reads (see shell.mjs). An
+ * input clipped for display (it ends in the clip mark) is never a plain read:
+ * the part that was cut is unseen.
  */
-export const inputMarks = (input, { ranBefore = false } = {}) => ({ em_dash: /\u2014/.test(String(input ?? "")), ran_before: ranBefore });
+export const inputMarks = (input, { tool = null, ranBefore = false } = {}) => {
+  const text = String(input ?? "");
+  return { em_dash: /\u2014/.test(text), ran_before: ranBefore, plain_read: tool === "Bash" && !text.endsWith("…") && plainRead(text) };
+};
 
 /** A command's identity for ran_before: whitespace-insensitive, and short enough to keep a session's worth. */
 export const commandKey = (command) => createHash("sha256").update(String(command ?? "").replace(/\s+/g, " ").trim()).digest("hex").slice(0, 16);

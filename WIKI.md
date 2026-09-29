@@ -4,7 +4,7 @@ The wiki is what Jevis knows: one Markdown file per lesson, under `wiki/<area>/<
 
 ## Your own entries
 
-Jevis loads two wikis: the shipped `wiki/` in this repo, then yours in `~/.jevis/wiki/` (under `JEVIS_HOME` if you set it). Put your entries in yours, so pulling a new version of Jevis never touches them.
+Jevis loads the shipped `wiki/` in this repo, then yours in `~/.jevis/wiki/` (under `JEVIS_HOME` if you set it), then, inside a repository that has one and once you trust it, the repository's `.jevis/wiki/`. Put your entries in yours, so pulling a new version of Jevis never touches them.
 - A new id adds a lesson.
 - The same id as a shipped entry replaces it. Copy the shipped file across and edit the copy.
 - A file with only `off: true` in its frontmatter turns the shipped entry with that id off:
@@ -15,12 +15,16 @@ Jevis loads two wikis: the shipped `wiki/` in this repo, then yours in `~/.jevis
   ---
   ```
 
-`node bin/jevis.mjs lint` lists what yours replaced and turned off. A broken replacement leaves the shipped entry in force until lint passes. `JEVIS_WIKI` (colon-separated folders, later ones winning) replaces both defaults.
+`node bin/jevis.mjs lint` lists what yours replaced and turned off. A broken replacement leaves the shipped entry in force until lint passes. `JEVIS_WIKI` (colon-separated folders, later ones winning) replaces all the defaults.
+
+A repository's `.jevis/wiki/` works the same way, for everyone who works in it, with two differences. It loads only after `jevis trust <repo>`, and only as its files were when trusted: any change needs trusting again. And it can't turn off or replace a `safety/` entry: lint reports such a file as broken, and the safety entry stays in force. Run `lint` from inside the repository to check its lessons, trusted or not.
 
 On every hook event, Jevis sends Jev the event's state plus the `ask` (and `unless`) question of every entry for that event, all in one call. Questions in a call are answered in parallel, so the wiki can grow into the hundreds without slowing a hook. An entry fires when three things hold:
 - its `ask` answer clears `min`;
 - its `unless` answer stays under `unless_max`;
 - its `when` conditions hold.
+
+Facts in `when` are known before Jev is asked, so an entry whose facts already fail is left out of the call. When that leaves a tool call with no entry at all, there is no call.
 
 What it does next depends on its `action`.
 
@@ -52,7 +56,7 @@ Instead: pick one concept from the product's own world and let it decide the lay
 | `min` | no | The probability the `ask` answer must reach. Default 0.75. Use 0.85 or more for `deny` and `block`. |
 | `unless` | no | A second yes/no question that stands the entry down, usually "did the user ask for exactly this?". Jev answers each literal question better than a compound one: a deny asked as "is this destructive, when the user did not ask for it?" scored 0.86 on a case it should catch; split into `ask` and `unless`, the same case scored 0.97 and 0.28. |
 | `unless_max` | no | The `unless` answer at or above which the entry stands down. Default 0.5. |
-| `when` | no | Conditions that must also hold: axes (see below) with `">=x"` or `"<x"`, and facts with a literal value (`{ "evidence.checks_after_last_edit": false }`). |
+| `when` | no | Conditions that must also hold: axes (see below) with `">=x"` or `"<x"`, and facts with a literal value (`{ evidence.edited: true }`, `{ marks.plain_read: false }`). |
 | `tools` | tool only | Tool names the entry applies to: `Bash`, `apply_patch` (Codex), `Edit`, `Write`, `MultiEdit`, `mcp__*`. Glob `*` allowed. |
 | `family` | no | `claude` or `gpt`, for a lesson that fixes one family's habit. A model from any other family (Gemini, Grok, an open model), or an unknown one, gets both families' lessons. Leave it out for a lesson every model needs. |
 | `optional` | no | `true` keeps the entry off until `JEVIS_ENABLE` names its id, its area, or `all`. For rules the harness already covers. |
@@ -73,7 +77,12 @@ Instead: pick one concept from the product's own world and let it decide the lay
 - `request`: the user's current message.
 - `tool`: the tool name.
 - `input`: the command (up to 4,000 characters), or for an edit, the file path and only the lines it adds: the removed and unchanged lines of an `apply_patch` are left out, so a check judges what the edit introduces. Secrets are masked before Jev sees any of it (`src/redact.mjs`).
-- `marks`: exact facts about `input` that code checks, because Jev blurs or cannot see them: `marks.em_dash` (it contains U+2014, not an en dash) and `marks.ran_before` (this session already ran this exact command).
+- `marks`: exact facts about `input` that code checks, because Jev blurs or cannot see them:
+  - `marks.em_dash`: it contains U+2014, not an en dash;
+  - `marks.ran_before`: this session already ran this exact command;
+  - `marks.plain_read`: a shell command that provably only reads, such as `ls`, `rg -n x src | head`, `sed -n 1,80p f`, `git log`, or `gh pr view`. Jevis's own read-only commands (`jevis ask`, `lint`, `stats`, `replay` without `--record`, `doctor`, `mine`) count too: the sample they judge is test data. It is false for any redirect into a file, substitution, variable expansion, heredoc, unknown program, or anything that names a credential (`src/shell.mjs`), and for every tool but `Bash`.
+
+  An entry about what a command writes, runs, opens, deletes, or which credential it touches adds `when: { marks.plain_read: false }`. A plain read then asks it nothing, and when every entry is gated that way, the call is skipped. Leave the gate off only for a lesson about reads themselves, such as rereading a file. `jevis lint` notes each Bash entry without it.
 - `workspace`: as above.
 
 **stop**

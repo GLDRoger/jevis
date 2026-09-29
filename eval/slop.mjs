@@ -7,7 +7,7 @@ const only = process.argv[2];
 let ok = 0;
 const rows = await Promise.all(CASES.filter((c) => !only || c.name.includes(only)).map(async (c) => {
   const input = toolInput(c.tool, c.input);
-  const r = await evaluate({ event: "tool", state: { request: c.request, tool: c.tool, input, marks: inputMarks(input), workspace: { git: true, files: [], empty: false } }, tool: c.tool, record: false, timeoutMs: 10000 });
+  const r = await evaluate({ event: "tool", state: { request: c.request, tool: c.tool, input, marks: inputMarks(input, { tool: c.tool }), workspace: { git: true, files: [], empty: false } }, tool: c.tool, record: false, timeoutMs: 10000 });
   if (r.error) return `ERR  ${c.name}: ${r.error}`;
   const got = r.fired.filter((e) => e.action === "deny").map((e) => e.id).sort();
   const want = [...c.want].sort();

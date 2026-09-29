@@ -1,6 +1,7 @@
 ---
 event: tool
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+when: { marks.plain_read: false }
 ask: Does `input` write user-interface content that invents social proof: testimonials with made-up names, customer counts, ratings, uptime or growth figures, or a 'trusted by' row of company logos or names?
 yes: Quotes attributed to invented people, figures like '10,000+ teams', '4.9/5', '99.9% uptime', '3x faster', gradient-circle initials standing in for customer photos, or logo strips of companies the user never mentioned
 no: Figures and quotes the user supplied, real data the app computes, or clearly marked placeholder slots such as [Customer quote]. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

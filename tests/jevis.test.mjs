@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -17,9 +17,9 @@ const { setJevTransport, questionsVersion, hedged } = await import("../src/jev.m
 const { redact } = await import("../src/redact.mjs");
 const { parseEntry, validateEntry, conditionsHold, candidates, enabled, loadWiki, WIKI_ROOT } = await import("../src/wiki.mjs");
 const { evaluate } = await import("../src/engine.mjs");
-const { onPrompt, onTool, onStop, onSession, MAX_STOP_BLOCKS } = await import("../src/hooks.mjs");
+const { onPrompt, onTool, onStop, onSession, inScope, MAX_STOP_BLOCKS } = await import("../src/hooks.mjs");
 const { turnEvidence, harnessWritten, originOf, requestText, attachmentNames } = await import("../src/context.mjs");
-const { loadSession } = await import("../src/state.mjs");
+const { ensureDir, loadSession, readLog, saveSession } = await import("../src/state.mjs");
 
 /** A test wiki on disk: entries written as the authoring guide describes. */
 const wikiDir = mkdtempSync(join(tmpdir(), "jevis-wiki-"));
@@ -36,6 +36,7 @@ entry("safety/force", { event: "tool", ask: "Does `input` force-push?", unless: 
 entry("slop/glow", { event: "tool", ask: "Does `input` add glow blobs?", unless: "Does `request` ask for glow?", tools: "[Write, apply_patch]", min: 0.85, action: "deny", title: "Glow blobs", source: "test" }, "Show the product instead.");
 entry("slop/gradient", { event: "tool", ask: "Does `input` add gradient text?", unless: "Does `request` ask for gradient text?", tools: "[Write, apply_patch]", min: 0.85, action: "deny", title: "Gradient text", source: "test" }, "Use one solid color.");
 entry("workflow/poll", { event: "tool", ask: "Does `input` sleep in a loop?", tools: "[Bash]", action: "context", title: "Polling", source: "test" }, "Wait on the process instead.");
+entry("slop/shell-glow", { event: "tool", ask: "Does `input` write glow blobs into a page?", unless: "Does `request` ask for glow?", tools: "[Bash]", when: "{ marks.plain_read: false }", min: 0.85, action: "deny", title: "Shell glow", source: "test" }, "Show the product instead.");
 entry("workflow/rerun", { event: "tool", ask: "Does `input` run the whole test suite?", when: "{ marks.ran_before: true }", tools: "[Bash]", action: "context", title: "Rerun", source: "test" }, "Run the focused test.");
 entry("verification/unseen", { event: "stop", ask: "Does `final_message` claim a check that `evidence` does not show?", min: 0.85, when: "{ evidence.edited: true }", action: "block", title: "Unseen claim", source: "test" }, "Run it, then report.");
 entry("verification/second", { event: "stop", ask: "Does `final_message` skip something?", action: "block", title: "Second", source: "test" });
@@ -192,6 +193,40 @@ test("a tool call with no possible entry costs no call", async () => {
   assert.equal(calls.length, 0);
 });
 
+test("an entry whose facts already fail is not asked, and a plain read gated out of every entry costs no call", async () => {
+  reset();
+  await evaluate({ event: "tool", state: { request: "x", tool: "Bash", input: "npm test", marks: { ran_before: false, plain_read: false } }, tool: "Bash", record: false });
+  const asked = Object.keys(calls[0].questions);
+  assert.ok(asked.includes("slop/shell-glow") && !asked.includes("workflow/rerun"), "rerun needs ran_before, so it is not asked");
+  // In the test wiki, two Bash entries are not gated on plain_read, so a plain read still asks them and nothing else.
+  reset();
+  await evaluate({ event: "tool", state: { request: "x", tool: "Bash", input: "rg -n TODO src | head" }, tool: "Bash", record: false });
+  assert.ok(!Object.keys(calls[0].questions).includes("slop/shell-glow"));
+  const { entries } = loadWiki();
+  const gated = { entries: entries.filter((e) => e.id === "slop/shell-glow") };
+  reset();
+  const r = await evaluate({ event: "tool", state: { request: "x", tool: "Bash", input: "rg -n TODO src | head" }, tool: "Bash", record: false, wiki: gated });
+  assert.equal(r.skipped, "no entries");
+  assert.equal(calls.length, 0);
+  // A write through the shell is still judged.
+  reset({ "slop/shell-glow": 0.95 });
+  const w = await evaluate({ event: "tool", state: { request: "x", tool: "Bash", input: "cat > Hero.tsx <<'EOF'\n<div/>\nEOF" }, tool: "Bash", record: false, wiki: gated });
+  assert.deepEqual(w.fired.map((e) => e.id), ["slop/shell-glow"]);
+});
+
+test("a tool call without marks gets the hook's marks, so dry runs and batteries judge it as a live session would", async () => {
+  reset();
+  await evaluate({ event: "tool", state: { request: "x", tool: "Write", input: `Write a.html\nFast ${String.fromCharCode(0x2014)} friendly` }, tool: "Write", record: false });
+  assert.deepEqual(calls[0].state.marks, { em_dash: true, ran_before: false, plain_read: false });
+  reset();
+  await evaluate({ event: "tool", state: { request: "x", tool: "Bash", input: `rg x ${"a".repeat(4000)}…` }, tool: "Bash", record: false });
+  assert.equal(calls[0].state.marks.plain_read, false, "a clipped command hides its tail, so it is never a plain read");
+  // Marks a caller leaves out are still computed: an older caller's partial marks cannot silence the gated entries.
+  reset({ "slop/shell-glow": 0.95 });
+  const partial = await evaluate({ event: "tool", state: { request: "x", tool: "Bash", input: "cat > Hero.tsx <<'EOF'\n<div/>\nEOF", marks: { em_dash: false } }, tool: "Bash", record: false });
+  assert.ok(partial.fired.some((e) => e.id === "slop/shell-glow"));
+});
+
 test("Jev failing means Jevis does nothing", async () => {
   setJevTransport(async () => {
     throw new Error("boom");
@@ -240,10 +275,13 @@ test("prompt: shadow mode logs but never injects", async () => {
 
 test("prompt: JEVIS_SCOPE and JEVIS_DISABLE keep Jevis out", async () => {
   reset({ "design/open-page": 0.9, "axis.wants_change": 0.9 });
-  process.env.JEVIS_SCOPE = "/tmp/pilot-";
+  process.env.JEVIS_SCOPE = "/tmp/pilot:/home/x/app/";
   try {
     assert.equal(await onPrompt({ session_id: newSession(), cwd: "/home/x/code", prompt: "make me a landing page" }), null);
     assert.equal(calls.length, 0);
+    // A scope is a folder and everything inside it, never a string prefix.
+    assert.deepEqual(["/tmp/pilot", "/tmp/pilot/a/b", "/private/tmp/pilot/a", "/home/x/app", "/home/x/app/src"].map(inScope), [true, true, true, true, true]);
+    assert.deepEqual(["/tmp/pilot-2", "/tmp/pilotx", "/home/x/application", "/home/x", undefined].map(inScope), [false, false, false, false, false]);
   } finally {
     delete process.env.JEVIS_SCOPE;
   }
@@ -297,6 +335,42 @@ test("tool: a context note is added once per session", async () => {
   const first = await onTool({ session_id: id, cwd: "/tmp", tool_name: "Bash", tool_input: { command: "while true; do sleep 5; done" } });
   assert.match(first.hookSpecificOutput.additionalContext, /Polling\.\*\* Wait on the process instead\./);
   assert.equal(await onTool({ session_id: id, cwd: "/tmp", tool_name: "Bash", tool_input: { command: "sleep 30" } }), null);
+});
+
+test("tool: a plain read no entry asks about is counted in the log, without its input", async () => {
+  const id = newSession();
+  reset();
+  const saved = process.env.JEVIS_WIKI;
+  // Only the gated entry applies to Bash here.
+  const only = mkdtempSync(join(tmpdir(), "jevis-wiki-gated-"));
+  mkdirSync(join(only, "slop"));
+  writeFileSync(join(only, "slop", "shell-glow.md"), `---\nevent: tool\nask: Does \`input\` write glow blobs?\nunless: Does \`request\` ask for glow?\ntools: [Bash]\nwhen: { marks.plain_read: false }\naction: deny\ntitle: Shell glow\nsource: test\n---\nShow the product.\n`);
+  process.env.JEVIS_WIKI = only;
+  try {
+    assert.equal(await onTool({ session_id: id, cwd: "/tmp", tool_name: "Bash", tool_input: { command: "git log --oneline -3" } }), null);
+    assert.equal(calls.length, 0);
+    const row = readLog().filter((r) => r.sessionId === id).at(-1);
+    assert.equal(row.skipped, "no entries");
+    assert.equal(row.plain_read, true);
+    assert.equal(row.input, undefined);
+  } finally {
+    process.env.JEVIS_WIKI = saved;
+  }
+});
+
+test("tool: a note saved after Jev answers keeps what other hooks of the session saved meanwhile", async () => {
+  const id = newSession();
+  // While Jev answers this call, a parallel hook of the same session records a command.
+  script = (key) => {
+    if (key === "workflow/poll") saveSession(id, { ...loadSession(id), commands: [...(loadSession(id).commands ?? []), "parallel"] });
+    return key === "workflow/poll" ? 0.9 : 0.05;
+  };
+  calls = [];
+  const out = await onTool({ session_id: id, cwd: "/tmp", tool_name: "Bash", tool_input: { command: "while true; do sleep 5; done" } });
+  assert.match(out.hookSpecificOutput.additionalContext, /Polling/);
+  const saved = loadSession(id);
+  assert.ok(saved.commands.includes("parallel"), "the parallel hook's write survives");
+  assert.ok(saved.shown["workflow/poll"] !== undefined, "and the note is recorded as shown");
 });
 
 test("tool: marks.ran_before is a code fact, so a rerun note waits for the second identical command", async () => {
@@ -432,16 +506,73 @@ test("the log reader handles any size, reads from an offset, and skips a cut fir
   assert.deepEqual([all[0].i, all.at(-1).i], [0, 11999]);
   let from = 0;
   for (let i = 0; i < 100; i += 1) from += Buffer.byteLength(`${line(i)}\n`);
+  // At a row's end (what the prompt hook records), the next row is whole and kept.
+  assert.equal(readJsonl(file, { from })[0].i, 100);
   from += 5; // five bytes into row 100: that cut row is skipped
   const tail = readJsonl(file, { from });
   assert.equal(tail[0].i, 101);
+  // A multibyte character split by the 8 MB chunk boundary is decoded whole.
+  const wide = join(dir, "wide.jsonl");
+  const head = JSON.stringify({ pad: "x".repeat(8 * 1024 * 1024 - 11) }).length;
+  writeFileSync(wide, `${JSON.stringify({ pad: "x".repeat(8 * 1024 * 1024 - 11) })}\n${JSON.stringify({ s: "ab\u{1F600}" })}\n`);
+  assert.ok(head < 8 * 1024 * 1024, "the second row starts before the boundary");
+  assert.equal(readJsonl(wide).at(-1).s, "ab\u{1F600}");
   assert.equal(readJsonl(file, { keep: (l) => l.includes('"i":7,') }).length, 1);
+});
+
+test("an edit that failed or was refused is not evidence of a change, in either harness", async () => {
+  const { readClaudeTranscript, readRollout } = await import("../src/transcript.mjs");
+  const at = new Date().toISOString();
+  const call = (id, file) => ({ type: "assistant", timestamp: at, uuid: `a${id}`, message: { model: "claude-opus-5-5", content: [{ type: "tool_use", id, name: "Edit", input: { file_path: `/p/${file}`, old_string: "a", new_string: "b" } }] } });
+  const result = (id, is_error) => ({ type: "user", timestamp: at, uuid: `u${id}`, message: { content: [{ type: "tool_result", tool_use_id: id, is_error, content: is_error ? "Jevis stopped this call." : "ok" }] } });
+  const claude = turnEvidence(readClaudeTranscript([call("t1", "refused.html"), result("t1", true), call("t2", "kept.html"), result("t2", false)]).items, { cwd: "/p" });
+  assert.deepEqual(claude.files_changed, ["kept.html"]);
+  const dir = mkdtempSync(join(tmpdir(), "jevis-codex-"));
+  const rollout = join(dir, "rollout.jsonl");
+  const change = (id, status, path) => JSON.stringify({ timestamp: at, type: "event_msg", payload: { type: "item_completed", item: { type: "FileChange", id, status, changes: { [path]: { type: "update" } } } } });
+  writeFileSync(rollout, [change("c1", "failed", "/p/bad.css"), change("c2", "completed", "/p/good.css")].join("\n"));
+  assert.deepEqual(turnEvidence(readRollout(rollout).items, { cwd: "/p" }).files_changed, ["good.css"]);
 });
 
 test("secrets are masked before they leave the machine", () => {
   const out = redact("key sk-abcdefghijklmnopqrstuv and postgres://u:hunter22@db/x and token=abcdef123456 and apikey_ABCDEFGHIJKLMNOPQRST");
   assert.doesNotMatch(out, /abcdefghijklmnop|hunter22|abcdef123456|ABCDEFGHIJKLMNOPQRST/);
   assert.match(out, /postgres:\/\/u:\[redacted\]@db/);
+});
+
+test("the call record keeps each answer as its probability, and JEVIS_RECORD=off keeps none", async () => {
+  const file = join(process.env.JEVIS_HOME, "jev", "calls.jsonl");
+  const lines = () => (existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").length : 0);
+  reset({ "design/open-page": 0.9 });
+  const before = lines();
+  await evaluate({ event: "prompt", state: { request: "make a page" }, model: "gpt-6-sol" });
+  assert.equal(lines(), before + 1);
+  const row = JSON.parse(readFileSync(file, "utf8").trim().split("\n").at(-1));
+  assert.equal(row.answers["design/open-page"], 0.9);
+  assert.ok(Object.values(row.answers).every((a) => typeof a === "number"));
+  const version = JSON.parse(readFileSync(join(process.env.JEVIS_HOME, "jev", "questions", `${row.version}.json`), "utf8"));
+  assert.equal(version["design/open-page"].type, "noul", "each answer's type is in its question set");
+  process.env.JEVIS_RECORD = "off";
+  try {
+    await evaluate({ event: "prompt", state: { request: "make a page" }, model: "gpt-6-sol" });
+    assert.equal(lines(), before + 1);
+  } finally {
+    delete process.env.JEVIS_RECORD;
+  }
+});
+
+test("Jevis's home is private (0700) even when something else created it open", () => {
+  const saved = process.env.JEVIS_HOME;
+  const open = mkdtempSync(join(tmpdir(), "jevis-open-home-"));
+  chmodSync(open, 0o755);
+  process.env.JEVIS_HOME = open;
+  try {
+    ensureDir("sessions");
+    assert.equal(statSync(open).mode & 0o777, 0o700);
+    assert.equal(statSync(join(open, "sessions")).mode & 0o777, 0o700);
+  } finally {
+    process.env.JEVIS_HOME = saved;
+  }
 });
 
 test("a question set's version changes with its questions, not their order", () => {

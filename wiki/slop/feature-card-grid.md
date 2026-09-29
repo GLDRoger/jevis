@@ -1,6 +1,7 @@
 ---
 event: tool
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+when: { marks.plain_read: false }
 ask: Does `input` write user-interface markup that lays out a row or grid of three or more look-alike cards, each with an icon, a short title, and a one-line blurb, to list features, benefits, or values?
 yes: A features, benefits, or 'why us' section built as identical icon + title + sentence cards in a 3, 4, or 6 column grid
 no: Cards holding real distinct content (products with prices and photos, articles, records in an app), a list, or a table. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

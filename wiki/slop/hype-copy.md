@@ -1,6 +1,7 @@
 ---
 event: tool
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+when: { marks.plain_read: false }
 ask: Does `input` write visible interface copy (headings, taglines, buttons) built on generic hype words: unlock, elevate, supercharge, seamless, effortless, empower, revolutionize, transform your, next-generation, game-changing, or 'the future of'?
 yes: Headlines or buttons such as 'Unlock the power of your data', 'Elevate your workflow', 'Seamless integration', 'Supercharge your team'
 no: Plain descriptive copy, words in code identifiers or comments, or copy the user supplied. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

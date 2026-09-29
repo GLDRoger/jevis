@@ -1,16 +1,34 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { redactDeep } from "./redact.mjs";
+import { eachJsonl } from "./transcript.mjs";
 
 /** Where Jevis keeps session memory, its decision log, and the Jev call record. Private to this user: it holds prompts. */
 export const jevisHome = () => process.env.JEVIS_HOME || join(homedir(), ".jevis");
 
+/**
+ * A folder under Jevis's home, created private. An existing one is made
+ * private too: `mkdir -p ~/.jevis/secrets` creates the home world-readable,
+ * an older install made backups/ that way, and they hold prompts, the call
+ * record, and config backups. Checked once per folder per process.
+ */
 export function ensureDir(...parts) {
-  const dir = join(jevisHome(), ...parts);
+  const root = jevisHome();
+  const dir = join(root, ...parts);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
+  for (const d of [root, ...parts.map((_, i) => join(root, ...parts.slice(0, i + 1)))]) {
+    if (checked.has(d)) continue;
+    try {
+      if (statSync(d).mode & 0o077) chmodSync(d, 0o700);
+    } catch {
+      /* not ours to change; the files inside are still 0600 */
+    }
+    checked.add(d);
+  }
   return dir;
 }
+const checked = new Set();
 
 const sessionFile = (id) => join(ensureDir("sessions"), `${String(id).replace(/[^\w.-]/g, "_")}.json`);
 
@@ -43,14 +61,11 @@ export function log(event) {
   }
 }
 
+/** Each row of the decision log in turn: the log grows by megabytes a day, past what one string can hold. */
+export const eachLog = (fn) => eachJsonl(join(jevisHome(), "log.jsonl"), fn);
+
 export function readLog() {
-  const file = join(jevisHome(), "log.jsonl");
-  if (!existsSync(file)) return [];
-  return readFileSync(file, "utf8").split("\n").filter(Boolean).flatMap((l) => {
-    try {
-      return [JSON.parse(l)];
-    } catch {
-      return [];
-    }
-  });
+  const rows = [];
+  eachLog((row) => rows.push(row));
+  return rows;
 }

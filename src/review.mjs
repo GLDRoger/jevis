@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 import { ensureDir, jevisHome } from "./state.mjs";
 import { redact } from "./redact.mjs";
-import { loadWiki } from "./wiki.mjs";
+import { loadWiki, wikiFor } from "./wiki.mjs";
 
 /**
  * The reviewers: when a turn ends on visual work, Jevis renders what the agent
@@ -109,10 +109,14 @@ export async function renderTargets({ files = [], cwd, texts = [] }) {
 
 const slug = (url) => url.replace(/^\w+:\/\//, "").replace(/[^\w.-]+/g, "_").slice(-60);
 
-async function launch() {
+/**
+ * Headless and muted: no window takes focus and nothing plays aloud while the
+ * user works. WebGL renders in software (SwiftShader) unless `gpu`: a scene
+ * too heavy for software is retried on the machine's GPU (see capture).
+ */
+async function launch({ gpu = false } = {}) {
   const { chromium } = await import("playwright-core");
-  // Headless and muted: no window takes focus and nothing plays aloud while the user works.
-  return chromium.launch({ channel: "chrome", headless: true, args: ["--mute-audio", "--autoplay-policy=no-user-gesture-required", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
+  return chromium.launch({ channel: "chrome", headless: true, args: ["--mute-audio", "--autoplay-policy=no-user-gesture-required", ...(gpu ? [] : ["--use-angle=swiftshader"]), "--enable-unsafe-swiftshader"] });
 }
 
 function watch(page, errors) {
@@ -337,14 +341,32 @@ export function filmSound({ cwd, dir, files = [] }) {
   return { shots, facts };
 }
 
-/** Render every target into `dir`. Returns the screenshots with captions and the facts the critic should know. */
+/**
+ * Render every target into `dir`. Returns the screenshots with captions and
+ * the facts the critic should know.
+ *
+ * A target whose render times out in software is tried once more on the GPU.
+ * Software WebGL is about ten times slower (Sep 29 2026, Apple M4 Pro: one
+ * shader frame took 5.9 s in SwiftShader and 0.6 s on Metal), and two of seven
+ * film reviews in the maintainer's log failed on a 30 s screenshot timeout.
+ */
 export async function capture(targets, { dir, film = false }) {
   const browser = await launch();
+  let gpu = null;
   try {
     const out = { shots: [], facts: [] };
     for (const [i, url] of targets.entries()) {
+      const one = (b) => (film ? captureFilm(b, url, dir) : capturePage(b, url, dir, i));
       try {
-        const r = film ? await captureFilm(browser, url, dir) : await capturePage(browser, url, dir, i);
+        let r;
+        try {
+          r = await one(browser);
+        } catch (e) {
+          if (e?.name !== "TimeoutError" && !/Timeout \d+ms exceeded/.test(e?.message ?? "")) throw e;
+          gpu ??= await launch({ gpu: true });
+          r = await one(gpu);
+          r.facts.push("Rendered on the GPU: software rendering timed out.");
+        }
         out.shots.push(...r.shots);
         out.facts.push(...r.facts);
       } catch (e) {
@@ -354,6 +376,7 @@ export async function capture(targets, { dir, film = false }) {
     return out;
   } finally {
     await browser.close();
+    await gpu?.close();
   }
 }
 
@@ -506,7 +529,7 @@ export async function review({ kind = "page", sessionId, turn, round, of = REVIE
     const sound = filmSound({ cwd, dir, files });
     seen = { shots: [...seen.shots, ...sound.shots], facts: [...seen.facts, ...sound.facts] };
   }
-  const wiki = loadWiki();
+  const wiki = wikiFor(cwd);
   // The critic is a model call off this machine: the request passes through the same mask as Jev's state.
   const prompt = redact(criticPrompt({ kind, request, firstRequest, targets, shots: seen.shots, facts: seen.facts, files, telltales: telltales(wiki), lessons: lessonsShown(shown, wiki), round, of }));
   const t = Date.now();

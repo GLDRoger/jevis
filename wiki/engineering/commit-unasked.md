@@ -6,6 +6,7 @@ yes: git add -A && git commit after a request like "take those on please" or "ad
 no: '`request` asks to commit, push, deploy, or "commit whenever it makes sense"; commits inside a throwaway worktree or /tmp scratch repo'
 min: 0.8
 tools: [Bash]
+when: { marks.plain_read: false }
 action: context
 title: Commit when asked
 source: |

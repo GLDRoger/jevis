@@ -118,6 +118,16 @@ export const jevAvailable = () => process.env.JEVIS_JEV !== "off" && (transport 
 /** A question set's version: recorded answers are only comparable within one version. */
 export const questionsVersion = (questions) => createHash("sha256").update(JSON.stringify(Object.keys(questions).sort().map((k) => [k, questions[k]]))).digest("hex").slice(0, 12);
 
+/**
+ * Answers are recorded as { id: probability }: each question's type is in
+ * questions/<version>.json, and the full answer objects were over half of
+ * every record. An answer that is not a noul is kept whole.
+ */
+export const compactAnswers = (answers) => answers && Object.fromEntries(Object.entries(answers).map(([k, a]) => [k, typeof a?.noul === "number" ? a.noul : a]));
+
+/** JEVIS_RECORD=off keeps no call record at all. */
+const recording = () => process.env.JEVIS_RECORD?.trim().toLowerCase() !== "off";
+
 function record(entry, questions) {
   try {
     const dir = ensureDir("jev");
@@ -166,6 +176,6 @@ export async function askJev({ state, questions, event, sessionId = null, harnes
   }
   const ms = Date.now() - started;
   const version = questionsVersion(questions);
-  if (keep) record({ at: new Date(started).toISOString(), event, version, sessionId, harness, model, ms, state: clean, answers, usage, error }, questions);
+  if (keep && recording()) record({ at: new Date(started).toISOString(), event, version, sessionId, harness, model, ms, state: clean, answers: compactAnswers(answers), usage, error }, questions);
   return { answers, ms, error };
 }
