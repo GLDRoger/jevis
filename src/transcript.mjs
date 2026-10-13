@@ -80,7 +80,7 @@ export function readRollout(path, { from = 0 } = {}) {
     const it = r.payload.item;
     if (!it || seen.has(it.id) || !applied(it)) continue;
     seen.add(it.id);
-    items.push({ at: r.timestamp, t: Date.parse(r.timestamp), it });
+    items.push({ at: r.timestamp, t: Date.parse(r.timestamp), execution: { start: r.payload.started_at_ms ?? null, end: r.payload.completed_at_ms ?? Date.parse(r.timestamp) }, it });
   }
   return { rows, meta, items };
 }
@@ -131,7 +131,7 @@ export function readClaudeTranscript(rows, { sidechain = false } = {}) {
       if (!call) continue;
       pending.delete(block.tool_use_id);
       const it = toItem(call.block, block, r.toolUseResult);
-      if (it) push(r.timestamp, it);
+      if (it) items.push({ at: r.timestamp, t: Date.parse(r.timestamp), execution: { start: Date.parse(call.at), end: Date.parse(r.timestamp) }, it });
     }
   }
   // Calls still running at Stop count from when they were made.
@@ -233,7 +233,7 @@ function readCompletedItems(file) {
   try {
     return readJsonl(file, { keep: (line) => line.includes('"item_completed"') })
       .filter((r) => r.type === "event_msg" && r.payload?.type === "item_completed" && r.payload.item && applied(r.payload.item))
-      .map((r) => ({ at: r.timestamp, t: Date.parse(r.timestamp), it: r.payload.item }));
+      .map((r) => ({ at: r.timestamp, t: Date.parse(r.timestamp), execution: { start: r.payload.started_at_ms ?? null, end: r.payload.completed_at_ms ?? Date.parse(r.timestamp) }, it: r.payload.item }));
   } catch {
     return [];
   }

@@ -3,6 +3,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { join } from "node:path";
 import { redactDeep } from "./redact.mjs";
 import { ensureDir, jevisHome } from "./state.mjs";
+import { errorClass, errorMessage, recordHealth } from "./health.mjs";
 
 /**
  * TypeSafe's Jev: typed yes/no, choice, and score answers with calibrated
@@ -49,8 +50,10 @@ async function httpTransport(body, timeoutMs, signal) {
     body: JSON.stringify(body),
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
   });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${String(json?.error?.message ?? json?.detail ?? json?.error ?? "").slice(0, 200)}`);
+  const raw = await res.text();
+  let json;
+  try { json = JSON.parse(raw); } catch { json = { detail: raw.trim() || res.statusText }; }
+  if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}: ${errorMessage(json, res.statusText)}`), { status: res.status });
   return json;
 }
 
@@ -165,17 +168,19 @@ export async function askJev({ state, questions, event, sessionId = null, harnes
     const responses = await Promise.all(chunks(questions).map((qs) => hedged(transport ?? httpTransport, { state: clean, ...(jevModel() ? { model: jevModel() } : {}), questions: qs }, timeoutMs, transport || !needsKey() ? [] : HEDGES)));
     answers = {};
     for (const r of responses) {
-      if (!r?.answers) throw new Error(String(r?.error?.message ?? r?.error ?? "no answers").slice(0, 200));
+      if (!r?.answers) throw new Error(errorMessage(r?.error, "no answers"));
       Object.assign(answers, r.answers);
       usage.input_tokens += r.usage?.input_tokens ?? 0;
       usage.output_tokens += r.usage?.output_tokens ?? 0;
     }
   } catch (e) {
     answers = null;
-    error = e?.name === "TimeoutError" ? `timeout after ${timeoutMs} ms` : String(e?.message ?? e).split("\n")[0].slice(0, 200);
+    error = e?.name === "TimeoutError" ? `timeout after ${timeoutMs} ms` : errorMessage(e);
   }
   const ms = Date.now() - started;
   const version = questionsVersion(questions);
-  if (keep && recording()) record({ at: new Date(started).toISOString(), event, version, sessionId, harness, model, ms, state: clean, answers: compactAnswers(answers), usage, error }, questions);
-  return { answers, ms, error };
+  const failureClass = error ? errorClass(error) : null;
+  if (keep) recordHealth(error);
+  if (keep && recording()) record({ at: new Date(started).toISOString(), event, version, sessionId, harness, model, ms, state: clean, answers: compactAnswers(answers), usage, error, errorClass: failureClass }, questions);
+  return { answers, ms, error, errorClass: failureClass };
 }

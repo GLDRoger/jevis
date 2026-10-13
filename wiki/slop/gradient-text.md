@@ -1,7 +1,8 @@
 ---
 event: tool
+decide: gradient_text
 tools: [Write, Edit, MultiEdit, apply_patch, Bash]
-when: { marks.plain_read: false }
+when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write user-interface code that fills text with a gradient (background-clip: text or -webkit-background-clip: text with a gradient, Tailwind bg-clip-text with text-transparent)?
 yes: A heading, word, or number is painted with a gradient through background-clip text
 no: Solid-colored text, or a gradient used on a non-text background. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

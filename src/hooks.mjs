@@ -1,18 +1,20 @@
-import { attachmentNames, clip, commandKey, harnessOf, harnessWritten, inputMarks, lastAgentMessage, lastUserMessageAt, originOf, requestText, sessionItems, toolInput, transcriptSize, turnEvidence, turnTexts, withTouched, workspaceOf } from "./context.mjs";
+import { attachmentNames, clip, commandKey, harnessOf, harnessWritten, hookItem, inputMarks, lastAgentMessage, lastUserMessageAt, mergeToolResults, museTool, originOf, requestText, sessionItems, toolInput, transcriptSize, turnEvidence, turnTexts, withTouched, workspaceOf } from "./context.mjs";
 import { evaluate } from "./engine.mjs";
-import { redact } from "./redact.mjs";
+import { redact, redactDeep } from "./redact.mjs";
 import { criticBackend, designLaw, formatReview, review, roundsFor } from "./review.mjs";
-import { freshSession, loadSession, log, saveSession } from "./state.mjs";
+import { loadSession, log, saveSession } from "./state.mjs";
 import { wikiFor } from "./wiki.mjs";
 import { insideFolder, splitFolders } from "./paths.mjs";
+import { outageLine } from "./health.mjs";
+import { RESULT_MEMORY, toolResult } from "./post.mjs";
 
 /**
- * The four hooks. Every one fails open: no Jev, no key, a timeout, or a bug
+ * The hooks. Every one fails open: no Jev, no key, a timeout, or a bug
  * means the agent carries on untouched.
  *
  * Limits learned from an earlier hook system, which once held a session for hours over one wrong block:
  * - a context note is given once per session (again after the context is compacted);
- * - a stop block names an entry at most once per turn, and a turn is blocked at most MAX_STOP_BLOCKS times;
+ * - a stop block names an entry at most once per turn, with at most MAX_STOP_BLOCKS distinct lessons per turn;
  * - every note says the user's instructions win.
  */
 
@@ -24,6 +26,12 @@ export const MAX_DENIES = 3;
 export const CLAUDE_UNKNOWN = "claude-unknown";
 /** How many distinct commands a session remembers for marks.ran_before. */
 export const COMMAND_MEMORY = 60;
+// Tool calls kept per turn for harnesses without a transcript.
+export const HOOK_ITEM_MEMORY = 200;
+export const HOOK_ITEM_CLIP = 4000;
+/** How many earlier messages a tool check can read, and how much of each. */
+const EARLIER_MEMORY = 8;
+const EARLIER_CLIP = 400;
 export const TIMEOUTS = { prompt: 3000, tool: 1500, stop: 3000 };
 
 const timeout = (event) => Number(process.env.JEVIS_TIMEOUT_MS) || TIMEOUTS[event];
@@ -41,7 +49,14 @@ export function inScope(cwd, { platform = process.platform, delimiter = platform
   return splitFolders(scope, delimiter).map((p) => p.replace(/\/+$/, "")).some((p) => within(p) || within(`/private${p}`));
 }
 
-const summary = (r) => ({ ms: r.ms, error: r.error ?? undefined, skipped: r.skipped ?? undefined, pool: r.pool, profile: r.profile, fired: r.fired.map((e) => ({ id: e.id, p: r.scores[e.id] })) });
+const summary = (r) => ({ ms: r.ms, error: r.error ?? undefined, errorClass: r.errorClass ?? undefined, skipped: r.skipped ?? undefined, pool: r.pool, profile: r.profile, code: r.code, jevQuestions: r.jevQuestions, fired: r.fired.map((e) => ({ id: e.id, p: r.scores[e.id] })) });
+
+function sessionOutage(session) {
+  if (session.outageShown) return null;
+  const line = outageLine();
+  if (line) session.outageShown = true;
+  return line;
+}
 
 /** Notes that fit the budget, strongest first, each at most once per session. */
 function pickNotes(fired, session, limit = MAX_NOTES) {
@@ -65,22 +80,29 @@ export async function onPrompt(input) {
   if (!inScope(cwd) || harnessWritten(prompt)) return null;
   const { harness, model } = harnessOf(input);
   const session = loadSession(sessionId);
+  const outage = sessionOutage(session);
   // Stored masked: session files sit on disk, and everything downstream reads the request from here.
   const request = clip(redact(requestText(prompt)), 2000);
   Object.assign(session, {
     previousRequest: session.request,
+    // Permission given a few messages back ("commit whenever it makes sense") still holds: tool checks read these.
+    earlierRequests: session.request ? [...(session.earlierRequests ?? []), clip(session.request, EARLIER_CLIP)].slice(-EARLIER_MEMORY) : session.earlierRequests ?? [],
     request,
     // The design review judges a follow-up against what the conversation set out to build.
     firstRequest: session.firstRequest ?? request,
     turn: session.turn + 1,
     turnStartedAt: Date.now(),
+    // Harnesses without a transcript (Muse Code): this turn's tool calls, recorded by the tool hook.
+    hookItems: [],
+    hookResults: [],
+    turnId: input.turn_id ?? null,
     // Where this turn begins in the transcript: the Stop hook reads from here, not the whole log.
     transcriptOffset: transcriptSize(input.transcript_path),
     // Claude Code's hooks never name the model, and its transcript has none before the first reply.
     // It runs Claude models, so claude-family entries still apply on a session's first turn.
     model: model ?? session.model ?? (harness === "Claude Code" ? CLAUDE_UNKNOWN : null),
   });
-  saveSession(sessionId, session);
+  if (!saveSession(sessionId, session)) return null;
   const state = {
     request: session.request,
     previous_request: session.previousRequest ? clip(session.previousRequest, 600) : null,
@@ -93,14 +115,14 @@ export async function onPrompt(input) {
   const result = await evaluate({ event: "prompt", state, model: session.model, harness, sessionId, timeoutMs: timeout("prompt"), wiki: wikiFor(cwd) });
   const notes = pickNotes(result.fired, session);
   log({ event: "prompt", sessionId, harness, model: session.model, origin: state.agent.origin, turn: session.turn, cwd, request: clip(session.request, 200), ...summary(result), acted: notes.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
-  if (!notes.length || shadow()) return null;
+  if ((!notes.length && !outage) || shadow()) return null;
   const now = loadSession(sessionId);
   for (const e of notes) now.shown[e.id] = session.turn;
-  saveSession(sessionId, now);
+  if (!saveSession(sessionId, now)) return null;
   return {
     hookSpecificOutput: {
       hookEventName: "UserPromptSubmit",
-      additionalContext: formatNotes(notes, "Jevis: lessons from past sessions where requests like this went wrong. Use what fits; where the user's instructions differ, theirs win."),
+      additionalContext: [outage, notes.length ? formatNotes(notes, "Jevis: lessons from past sessions where requests like this went wrong. Use what fits; where the user's instructions differ, theirs win.") : null].filter(Boolean).join("\n\n"),
     },
   };
 }
@@ -113,22 +135,66 @@ function denyReason(denies) {
   return lines.join("\n");
 }
 
+/** Pre-tool hooks know permission, not execution success. Keep only allowed
+ * calls as fallback evidence; redact before bounding, independently of RECORD.
+ */
+function rememberAllowedTool(input, tool, rawInput, key) {
+  const now = loadSession(input.session_id);
+  let changed = false;
+  if (!input.transcript_path) {
+    const item = redactDeep(hookItem(tool, rawInput ?? {}));
+    if (item) {
+      if (item.type === "CommandExecution") item.command = clip(item.command, HOOK_ITEM_CLIP);
+      if (item.type === "FileChange") item.changes = item.changes.slice(0, 20).map((c) => ({ path: clip(c.path, 200) }));
+      if (item.type === "McpToolCall") {
+        item.server = clip(item.server, 100);
+        item.tool = clip(item.tool, 100);
+        const args = JSON.stringify(item.arguments);
+        if (args.length > HOOK_ITEM_CLIP) item.arguments = { code: clip(args, HOOK_ITEM_CLIP) };
+      }
+      Object.assign(item, { attempted: true, id: input.tool_use_id ?? undefined });
+      now.hookItems = [...(now.hookItems ?? []), { t: Date.now(), it: item }].slice(-HOOK_ITEM_MEMORY);
+      changed = true;
+    }
+  }
+  if (key && !(now.commands ?? []).includes(key)) {
+    now.commands = [...(now.commands ?? []), key].slice(-COMMAND_MEMORY);
+    changed = true;
+  }
+  if (changed) saveSession(input.session_id, now);
+}
+
+/** PostToolUse (and Claude's PostToolUseFailure): local, bounded facts only.
+ * No network or wiki loading, no output/decision, including on disk failure.
+ */
+export function onPost(input) {
+  try {
+    if (!input.session_id || !inScope(input.cwd)) return null;
+    const row = toolResult(input);
+    if (!row) return null;
+    const session = loadSession(input.session_id);
+    if (row.turnId && session.turnId && row.turnId !== session.turnId) return null;
+    const prior = session.hookResults ?? [];
+    session.hookResults = mergeToolResults(prior, [row]).slice(-RESULT_MEMORY);
+    saveSession(input.session_id, session);
+  } catch { /* post hooks always fail open */ }
+  return null;
+}
+
 /** PreToolUse: refuse a call a deny entry matches; otherwise add a note the first time one applies. */
 export async function onTool(input) {
-  const { session_id: sessionId, cwd, tool_name: tool } = input;
+  const { session_id: sessionId, cwd } = input;
+  const { harness } = harnessOf(input, { withModel: false });
+  const { tool, input: rawInput } = harness === "Muse Code" ? museTool(input.tool_name, input.tool_input) : { tool: input.tool_name, input: input.tool_input };
   if (!inScope(cwd) || !tool) return null;
   const session = loadSession(sessionId);
-  const { harness } = harnessOf(input, { withModel: false });
-  const shown = toolInput(tool, input.tool_input);
+  const shown = toolInput(tool, rawInput);
   const key = tool === "Bash" ? commandKey(shown) : null;
   const commands = session.commands ?? [];
-  const state = { request: session.request ?? "", tool, input: shown, marks: inputMarks(shown, { tool, ranBefore: key !== null && commands.includes(key) }), workspace: workspaceOf(cwd) };
-  if (key && !commands.includes(key)) {
-    session.commands = [...commands, key].slice(-COMMAND_MEMORY);
-    saveSession(sessionId, session);
-  }
+  const state = { request: session.request ?? "", earlier_requests: session.earlierRequests ?? [], tool, input: shown, marks: inputMarks(shown, { tool, ranBefore: key !== null && commands.includes(key) }), workspace: workspaceOf(cwd) };
   const result = await evaluate({ event: "tool", state, tool, model: session.model, harness, sessionId, timeoutMs: timeout("tool"), wiki: wikiFor(cwd) });
   if (result.skipped) {
+    rememberAllowedTool(input, tool, rawInput, key);
     // Logged without the input: a skipped call is counted by `jevis stats`, not judged.
     log({ event: "tool", sessionId, harness, turn: session.turn, tool, skipped: result.skipped, plain_read: state.marks.plain_read || undefined });
     return null;
@@ -137,15 +203,19 @@ export async function onTool(input) {
   const denies = result.fired.filter((e) => e.action === "deny").slice(0, MAX_DENIES);
   const notes = denies.length ? [] : pickNotes(result.fired, session, 2);
   log({ event: "tool", sessionId, harness, turn: session.turn, tool, input: clip(state.input, 200), subagent: input.agent_id ? true : undefined, ...summary(result), acted: denies.length ? denies.map((e) => e.id) : notes.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
-  if (shadow()) return null;
+  if (shadow()) {
+    rememberAllowedTool(input, tool, rawInput, key);
+    return null;
+  }
   if (denies.length) {
     return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: denyReason(denies) } };
   }
+  rememberAllowedTool(input, tool, rawInput, key);
   if (!notes.length) return null;
   // Re-read before writing: other hooks of this session (parallel tool calls, subagents) may have saved while Jev answered.
   const now = loadSession(sessionId);
   for (const e of notes) now.shown[e.id] = session.turn;
-  saveSession(sessionId, now);
+  if (!saveSession(sessionId, now)) return null;
   return { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: formatNotes(notes, "Jevis, before this call:") } };
 }
 
@@ -160,19 +230,22 @@ export async function onStop(input) {
   if (wikiSpent && session.stop.reviews >= roundsFor(session)) return null;
   // Only this turn's bytes: logs reach gigabytes. Without a recorded offset, the last 64 MB.
   const from = session.transcriptOffset ?? Math.max(0, transcriptSize(input.transcript_path) - 64 * 1024 * 1024);
-  const items = sessionItems(input.transcript_path, { from, since: session.turnStartedAt ?? 0 });
+  const items = mergeToolResults(sessionItems(input.transcript_path, { from, since: session.turnStartedAt ?? 0 }) ?? session.hookItems ?? [], session.hookResults ?? []);
   const final = input.last_assistant_message ?? lastAgentMessage(items);
   if (!final) return null;
   const { harness } = harnessOf(input, { withModel: false });
   const since = session.turnStartedAt ?? lastUserMessageAt(items);
-  const state = { request: session.request ?? "", final_message: clip(final, 3000), evidence: withTouched(turnEvidence(items ?? [], { since, cwd }), cwd, session.turnStartedAt) };
+  const state = { request: session.request ?? "", final_message: clip(final, 3000), evidence: withTouched(turnEvidence(items ?? [], { since, cwd }), cwd, session.turnStartedAt, items) };
   const result = await evaluate({ event: "stop", state, model: session.model, harness, sessionId, timeoutMs: timeout("stop"), wiki: wikiFor(cwd) });
-  const blocks = wikiSpent ? [] : result.fired.filter((e) => e.action === "block" && !session.stop.blocked.includes(e.id)).slice(0, 2);
+  const blocks = wikiSpent ? [] : result.fired.filter((e) => e.action === "block" && !session.stop.blocked.includes(e.id)).slice(0, MAX_STOP_BLOCKS - session.stop.blocked.length);
   log({ event: "stop", sessionId, harness, turn: session.turn, final: clip(final, 200), evidence: { edited: state.evidence.edited, files: state.evidence.files_changed_count, ui_files: state.evidence.ui_files_changed.length, after: state.evidence.actions_after_last_edit.length }, ...summary(result), acted: blocks.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
   if (!blocks.length) return reviewTurn({ input, session, sessionId, cwd, harness, state, profile: result.profile, items, since, final });
   if (shadow()) return null;
   session.stop.blocked.push(...blocks.map((e) => e.id));
-  saveSession(sessionId, session);
+  const now = loadSession(sessionId);
+  if (now.turn !== session.turn) return null;
+  now.stop = session.stop;
+  if (!saveSession(sessionId, now)) return null;
   return {
     decision: "block",
     reason: [
@@ -226,22 +299,22 @@ async function reviewTurn({ input, session, sessionId, cwd, harness, state, prof
   const now = loadSession(sessionId);
   now.stop = { ...session.stop, reviews: round };
   now.firstReviewTurn ??= session.turn;
-  saveSession(sessionId, now);
+  if (!saveSession(sessionId, now)) return null;
   if (r.error || r.verdict?.verdict !== "fix") return null;
   return { decision: "block", reason: formatReview(r, round, rounds) };
 }
 
 /** SessionStart and PostCompact: after a compaction or a clear, earlier notes are gone from the agent's context, so they may be given again. */
 export function onSession(input) {
-  const { session_id: sessionId } = input;
+  const { session_id: sessionId, cwd } = input;
   const source = input.source ?? (input.hook_event_name === "PostCompact" ? "compact" : "startup");
-  if (!sessionId) return null;
+  if (!sessionId || !inScope(cwd)) return null;
   const session = loadSession(sessionId);
   if (source === "compact" || source === "clear") {
-    saveSession(sessionId, { ...session, shown: {} });
+    session.shown = {};
     log({ event: "session", sessionId, source, reset: true });
-  } else if (source === "startup" && session.turn === 0) {
-    saveSession(sessionId, freshSession());
   }
-  return null;
+  const outage = input.hook_event_name === "PostCompact" ? null : sessionOutage(session);
+  if (!saveSession(sessionId, session) || !outage) return null;
+  return { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: outage } };
 }

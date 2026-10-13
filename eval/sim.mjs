@@ -10,6 +10,7 @@
  *
  *   node eval/sim.mjs [scenario ...]
  *   SIM_HARNESS=codex,claude SIM_SEEDS=1,2 SIM_POOL=6 SIM_ROOT=/tmp/jevproof node eval/sim.mjs
+ *   SIM_JUDGE_VOTES=3 SIM_RUNS=1 ...   2 × votes × runs judge calls per scenario/harness/seed
  *   SIM_REUSE=1 ...   keeps finished sessions (result.json) and runs only what is missing
  *
  * Costs real Codex and Claude usage. Every browser is headless and muted.
@@ -23,6 +24,7 @@ import { capture } from "../src/review.mjs";
 import { CHECK_END, CHECK_PRELUDE, SCENARIOS } from "./sim-scenarios.mjs";
 import { report } from "./sim-report.mjs";
 import { claude as claudeCall, compare, sh } from "./sim-judge.mjs";
+import { positiveInt } from "./sim-stats.mjs";
 
 const ROOT = process.env.SIM_ROOT ?? "/tmp/jevproof";
 const ARMS = (process.env.SIM_ARMS ?? "base,jevis").split(",");
@@ -31,6 +33,8 @@ const SEEDS = (process.env.SIM_SEEDS ?? "1").split(",").map(Number);
 const POOL = Number(process.env.SIM_POOL ?? 6);
 const REUSE = process.env.SIM_REUSE === "1";
 const MAX_TURNS = Number(process.env.SIM_TURNS ?? 3);
+const RUNS = positiveInt(process.env.SIM_RUNS ?? 1, "SIM_RUNS");
+const JUDGE_VOTES = positiveInt(process.env.SIM_JUDGE_VOTES ?? 3, "SIM_JUDGE_VOTES");
 const JEVIS = join(dirname(fileURLToPath(import.meta.url)), "..");
 const NODE = process.execPath;
 const KEY = join(homedir(), ".jevis", "secrets", "typesafe_api_key");
@@ -125,7 +129,10 @@ async function codexTurn({ proj, base, turn, thread, message, timeoutMs }) {
   const t = Date.now();
   const r = await sh("codex", args, { cwd: proj, env: {}, log, timeoutMs });
   const id = thread ?? r.out.match(/"thread_id":"([^"]+)"/)?.[1] ?? null;
-  return { thread: id, final: existsSync(last) ? readFileSync(last, "utf8") : "", ms: Date.now() - t, code: r.code, err: r.err.slice(-400) };
+  const final = existsSync(last) ? readFileSync(last, "utf8") : "";
+  // A run that exits with an error and leaves no final message never worked; grading it would score untouched fixtures.
+  const failed = r.code && !final.trim() ? r.err.slice(-200) || `exit ${r.code}` : null;
+  return { thread: id, final, ms: Date.now() - t, code: r.code, err: r.err.slice(-400), failed };
 }
 
 async function claudeTurn({ proj, base, turn, thread, message, settings, timeoutMs }) {
@@ -143,7 +150,9 @@ async function claudeTurn({ proj, base, turn, thread, message, settings, timeout
   const result = events.findLast((e) => e.type === "result");
   const final = result?.result ?? events.filter((e) => e.type === "assistant").flatMap((e) => e.message?.content ?? []).filter((c) => c.type === "text").map((c) => c.text).at(-1) ?? "";
   writeFileSync(join(base, `turn${turn}-final.md`), final);
-  return { thread: result?.session_id ?? events.find((e) => e.session_id)?.session_id ?? thread, final, ms: Date.now() - t, code: r.code, err: r.err.slice(-400) };
+  // Claude reports auth, quota, and API failures as a result with is_error (e.g. "Not logged in"); those runs did no work.
+  const failed = result?.is_error ? String(result.result ?? result.subtype ?? "error").slice(0, 200) : !result && r.code ? r.err.slice(-200) || `exit ${r.code}` : null;
+  return { thread: result?.session_id ?? events.find((e) => e.session_id)?.session_id ?? thread, final, ms: Date.now() - t, code: r.code, err: r.err.slice(-400), failed };
 }
 
 async function look(proj, dir) {
@@ -294,7 +303,7 @@ async function runArm(run, progress) {
   }
   const s = SCENARIOS[run.name];
   const { proj, home, settings } = setup(run);
-  const label = `${run.name}/${run.harness}/s${run.seed}/${run.arm}`;
+  const label = `${run.name}/${run.harness}/s${run.seed}/r${run.repeat}/${run.arm}`;
   const history = [];
   const turns = [];
   let thread = null;
@@ -310,6 +319,12 @@ async function runArm(run, progress) {
     if (run.arm === "jevis" && turn === 1 && !existsSync(join(home, "log.jsonl"))) {
       progress(`${label}: Jevis hooks never ran; session invalid`);
       const bad = { ...run, invalid: "Jevis hooks never ran", turns: [] };
+      writeFileSync(file, JSON.stringify(bad, null, 1));
+      return bad;
+    }
+    if (r.failed) {
+      progress(`${label} turn ${turn}: agent failed (${r.failed.split("\n")[0].slice(0, 80)}); session invalid`);
+      const bad = { ...run, invalid: `agent failed: ${r.failed}`, turns: [] };
       writeFileSync(file, JSON.stringify(bad, null, 1));
       return bad;
     }
@@ -357,11 +372,11 @@ async function runArm(run, progress) {
 }
 
 async function judge(pair, base, jevis) {
-  // Blind: which arm is "A" varies with the scenario, harness, and seed.
+  // Both orders are always judged; vary which goes first across pairs.
   const flip = (pair.name.length + pair.seed + (pair.harness === "claude" ? 1 : 0)) % 2 === 0;
-  const v = await compare(pair.name, base, jevis, { flip, root: ROOT });
+  const v = await compare(pair.name, base, jevis, { identity: pair, flip, root: ROOT, votes: JUDGE_VOTES });
   if (v.error) return v;
-  return { winner: { a: "base", b: "jevis", tie: "tie" }[v.winner], margin: v.margin, problems_base: v.problems_a, problems_jevis: v.problems_b, why: v.why };
+  return { ...v, winner: { a: "base", b: "jevis", tie: "tie" }[v.winner], margin: v.margin, problems_base: v.problems_a, problems_jevis: v.problems_b, why: v.why };
 }
 
 /** Limits how many agent sessions run at once. */
@@ -387,12 +402,14 @@ const progressFile = join(ROOT, "progress.log");
 const progress = (m) => appendFileSync(progressFile, `${new Date().toISOString().slice(11, 19)} ${m}\n`);
 const slot = pool(POOL);
 const judgeSlot = pool(3);
-const pairs = SEEDS.flatMap((seed) => HARNESSES.flatMap((harness) => names.map((name) => ({ name, harness, seed }))));
-progress(`start: ${pairs.length} pairs (${names.join(", ")} × ${HARNESSES.join(", ")} × seeds ${SEEDS.join(", ")}), pool ${POOL}`);
+const pairs = SEEDS.flatMap((seed) => HARNESSES.flatMap((harness) => names.flatMap((name) => Array.from({ length: RUNS }, (_, i) => ({ name, harness, seed, repeat: i + 1 })))));
+progress(`start: ${pairs.length} pairs (${names.join(", ")} × ${HARNESSES.join(", ")} × seeds ${SEEDS.join(", ")}), ${RUNS} runs per arm, ${JUDGE_VOTES} votes per order, pool ${POOL}`);
 
 const results = await Promise.all(pairs.map(async (pair) => {
+  // Keep the original paths for repeat 1 so recorded sessions remain reusable.
+  const suffix = pair.repeat === 1 ? "" : `-r${pair.repeat}`;
   const arms = await Promise.all(["base", "jevis"].map((arm) => {
-    const run = { ...pair, arm, base: join(ROOT, `${pair.name}-${pair.harness}-s${pair.seed}-${arm}`) };
+    const run = { ...pair, arm, base: join(ROOT, `${pair.name}-${pair.harness}-s${pair.seed}${suffix}-${arm}`) };
     if (!ARMS.includes(arm)) {
       const file = join(run.base, "result.json");
       return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : { ...run, invalid: "not run" };
@@ -400,16 +417,15 @@ const results = await Promise.all(pairs.map(async (pair) => {
     return slot(() => runArm(run, progress)).then((r) => (r instanceof Error ? { ...run, invalid: `crashed: ${r.message}` } : r));
   }));
   const [base, jevis] = arms;
-  const tag = `${pair.name}/${pair.harness}/s${pair.seed}`;
+  const tag = `${pair.name}/${pair.harness}/s${pair.seed}/r${pair.repeat}`;
   if (base.invalid || jevis.invalid) return { ...pair, base, jevis, verdict: { error: base.invalid ?? jevis.invalid } };
-  const verdictFile = join(ROOT, `${pair.name}-${pair.harness}-s${pair.seed}-verdict.json`);
-  let verdict = REUSE && existsSync(verdictFile) ? JSON.parse(readFileSync(verdictFile, "utf8")) : null;
-  if (!verdict?.winner) {
-    progress(`${tag}: judging`);
-    verdict = await judgeSlot(() => judge(pair, base, jevis));
-    if (verdict instanceof Error) verdict = { error: verdict.message };
-    writeFileSync(verdictFile, JSON.stringify(verdict, null, 1));
-  }
+  const verdictFile = join(ROOT, `${pair.name}-${pair.harness}-s${pair.seed}${suffix}-verdict.json`);
+  // Always recompute the aggregate from sample-and-content-keyed votes. Legacy single-vote verdicts
+  // cannot bypass the balanced rule; cached votes themselves never re-call the model.
+  progress(`${tag}: judging (cached votes reused)`);
+  let verdict = await judgeSlot(() => judge(pair, base, jevis));
+  if (verdict instanceof Error) verdict = { error: verdict.message };
+  writeFileSync(verdictFile, JSON.stringify(verdict, null, 1));
   progress(`${tag}: ${verdict.winner ?? verdict.error}`);
   return { ...pair, base, jevis, verdict };
 }));

@@ -9,6 +9,7 @@ import { eachJsonl } from "./transcript.mjs";
 import { redact } from "./redact.mjs";
 import { projectStatus, wikiFor } from "./wiki.mjs";
 import { isQualifiedPath, samePath, splitFolders } from "./paths.mjs";
+import { errorClass } from "./health.mjs";
 
 /**
  * `jevis doctor`: every way Jevis can be installed but silently doing
@@ -21,7 +22,7 @@ import { isQualifiedPath, samePath, splitFolders } from "./paths.mjs";
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "jevis.mjs");
 const HARNESS = { claude: "Claude Code", codex: "Codex" };
-const HANDLERS = { UserPromptSubmit: "prompt", PreToolUse: "tool", Stop: "stop", SessionStart: "session", PostCompact: "session" };
+const HANDLERS = { UserPromptSubmit: "prompt", PreToolUse: "tool", PostToolUse: "post", PostToolUseFailure: "post", Stop: "stop", SessionStart: "session", PostCompact: "session" };
 const DAY = 24 * 60 * 60 * 1000;
 /** The log's last 32 MB covers well over a day of hooks; older rows are not needed for a health check. */
 const LOG_TAIL = 32 * 1024 * 1024;
@@ -122,11 +123,11 @@ export async function jevChecks({ env = process.env, offline = false, timeoutMs 
   const url = jevUrl();
   const typesafe = url === TYPESAFE_URL;
   const out = [];
+  if (env.JEVIS_JEV === "off") return [warn("decision model", "JEVIS_JEV=off: no calls are made", "unset JEVIS_JEV")];
   const source = keySource(env);
   if (typesafe && !source) return [fail("decision model", `TypeSafe at ${url}, but no API key: every hook does nothing`, "put the key in ~/.jevis/secrets/typesafe_api_key (chmod 600), or point --jev-url at a Laya server")];
   if (process.platform !== "win32" && source && isAbsolute(source) && modeOf(source) & 0o077) out.push(warn("api key", `${source} is readable by others (mode ${modeOf(source).toString(8)})`, `chmod 600 ${source}`));
   if (offline) return [...out, info("decision model", `${shown(url)}${source ? `, key from ${source}` : ""}; not called (--offline)`)];
-  if (env.JEVIS_JEV === "off") return [...out, warn("decision model", "JEVIS_JEV=off: no calls are made", "unset JEVIS_JEV")];
   const r = await askJev({ state: { request: "jevis doctor checking the connection" }, questions: { doctor: { type: "noul", instructions: "Does `request` mention a connection check?" } }, event: "doctor", timeoutMs, record: false });
   if (!r.answers) return [...out, fail("decision model", `${shown(url)} did not answer: ${r.error}`, typesafe ? "check the key and the network (https://api.typesafe.ai)" : "check that the server is running and speaks POST /v1/systemone")];
   return [...out, ok("decision model", `${shown(url)} answered in ${r.ms} ms${source ? `, key from ${source}` : ""}`)];
@@ -171,6 +172,9 @@ export function activityChecks({ now = Date.now(), file = join(jevisHome(), "log
   const last = {};
   let lastAt = null;
   let lastHookError = null;
+  const classes = {};
+  const streaks = [];
+  let streak = null;
   eachJsonl(file, (r) => {
     const at = Date.parse(r.at);
     if (!Number.isFinite(at)) return;
@@ -188,9 +192,21 @@ export function activityChecks({ now = Date.now(), file = join(jevisHome(), "log
     if (r.error) {
       n.errors += 1;
       if (/timeout/.test(r.error)) n.timeouts += 1;
+      const kind = r.errorClass ?? errorClass(r.error);
+      classes[kind] = (classes[kind] ?? 0) + 1;
+      streak ??= { from: r.at, to: r.at, count: 0, classes: {} };
+      streak.to = r.at;
+      streak.count += 1;
+      streak.classes[kind] = (streak.classes[kind] ?? 0) + 1;
+    } else if (r.jevQuestions !== 0 && (r.ms > 0 || r.pool > 0)) {
+      if (streak) streaks.push(streak);
+      streak = null;
     }
   }, { from: Math.max(0, statSync(file).size - LOG_TAIL) });
   const out = [];
+  if (streak) streaks.push(streak);
+  const counts = (by) => Object.entries(by).map(([kind, count]) => `${kind} ${count}`).join(", ");
+  if (n.errors) out.push(warn("recent Jev failures", `${n.errors} in ${new Date(since).toISOString()} to ${new Date(now).toISOString()} (${counts(classes)}); failure streaks: ${streaks.slice(-5).map((s) => `${s.count} calls, ${s.from} to ${s.to} (${counts(s.classes)})`).join("; ")}`, "hooks fail open; check billing/auth, rate limits, and connectivity"));
   if (!n.rows) out.push(warn("activity", `nothing in the last 24 h${lastAt ? `; last event ${lastAt}` : ""}`, "start a new session in a folder Jevis covers; jevis ask checks one event by hand"));
   else out.push(ok("activity", `${n.rows} events in 24 h; last from ${Object.entries(last).map(([h, at]) => `${h} ${ago(now - Date.parse(at))}`).join(", ") || "no harness"}`));
   if (n.hookErrors) out.push(warn("hook errors", `${n.hookErrors} in 24 h (Jevis stepped aside each time); latest in ${lastHookError.hook ?? "a"} hook: ${String(lastHookError.error).split("\n")[0].slice(0, 160)}`, "the full trace is in ~/.jevis/log.jsonl (event hook-error)"));

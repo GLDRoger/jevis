@@ -42,6 +42,7 @@ entry("workflow/rerun", { event: "tool", ask: "Does `input` run the whole test s
 entry("verification/unseen", { event: "stop", ask: "Does `final_message` claim a check that `evidence` does not show?", min: 0.85, when: "{ evidence.edited: true }", action: "block", title: "Unseen claim", source: "test" }, "Run it, then report.");
 entry("verification/second", { event: "stop", ask: "Does `final_message` skip something?", action: "block", title: "Second", source: "test" });
 entry("verification/third", { event: "stop", ask: "Does `final_message` skip another thing?", action: "block", title: "Third", source: "test" });
+entry("verification/fourth", { event: "stop", ask: "Does `final_message` miss one more thing?", action: "block", title: "Fourth", source: "test" });
 process.env.JEVIS_WIKI = wikiDir;
 
 /** Scripted Jev: answers by question key, from a table the test sets. */
@@ -218,7 +219,7 @@ test("an entry whose facts already fail is not asked, and a plain read gated out
 test("a tool call without marks gets the hook's marks, so dry runs and batteries judge it as a live session would", async () => {
   reset();
   await evaluate({ event: "tool", state: { request: "x", tool: "Write", input: `Write a.html\nFast ${String.fromCharCode(0x2014)} friendly` }, tool: "Write", record: false });
-  assert.deepEqual(calls[0].state.marks, { em_dash: true, ran_before: false, plain_read: false });
+  assert.deepEqual(calls[0].state.marks, { em_dash: true, ran_before: false, plain_read: false, git_write: null, writes_file: true, runs_tests: null, opens_app: null, uses_credentials: null });
   reset();
   await evaluate({ event: "tool", state: { request: "x", tool: "Bash", input: `rg x ${"a".repeat(4000)}…` }, tool: "Bash", record: false });
   assert.equal(calls[0].state.marks.plain_read, false, "a clipped command hides its tail, so it is never a plain read");
@@ -319,6 +320,29 @@ test("tool: a deny entry refuses the call with its reason, and reads the user's 
   assert.equal(await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "git push --force origin main" } }), null);
 });
 
+test("tool: checks read the session's earlier messages, so permission given a few turns back still holds", async () => {
+  const id = newSession();
+  reset({});
+  await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "commit locally whenever it makes sense", model: "gpt-6-sol" });
+  await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "now fix the header", model: "gpt-6-sol" });
+  await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "git commit -m 'fix: header'" } });
+  assert.equal(calls.at(-1).state.request, "now fix the header");
+  assert.deepEqual(calls.at(-1).state.earlier_requests, ["commit locally whenever it makes sense"]);
+});
+
+test("prompt: lessons about a person's habits skip briefs another agent wrote", async () => {
+  const habits = ["workflow/subagent-cost", "verification/account-for-every-item", "communication/name-the-scope-of-numbers"];
+  reset((key) => (habits.includes(key) || key === "axis.wants_change" ? 0.95 : 0.05));
+  const state = (origin) => ({ request: "Round 4: fix every item below and report the totals.", previous_request: null, attachments: [], workspace: {}, agent: { harness: "Codex", model: "gpt-6-sol", origin } });
+  const fired = async (origin) => (await evaluate({ event: "prompt", state: state(origin), model: "gpt-6-sol", record: false, wiki: loadWiki([WIKI_ROOT]) })).fired.map((e) => e.id);
+  const person = await fired("person");
+  const agent = await fired("agent");
+  for (const id of habits) {
+    assert.ok(person.includes(id), `${id} fires on a person's message`);
+    assert.ok(!agent.includes(id), `${id} skips an agent's brief`);
+  }
+});
+
 test("tool: an edit shows Jev only what it adds, and every matching deny goes back in one reason", async () => {
   const id = newSession();
   reset({ "slop/glow": 0.95, "slop/gradient": 0.93 });
@@ -384,7 +408,7 @@ test("tool: marks.ran_before is a code fact, so a rerun note waits for the secon
   assert.match(again.hookSpecificOutput.additionalContext, /Rerun\.\*\* Run the focused test\./, "whitespace does not make a new command");
 });
 
-test("stop: blocks once per entry per turn, at most MAX_STOP_BLOCKS times, and resets on the next request", async () => {
+test("stop: caps distinct lessons per turn at MAX_STOP_BLOCKS, and resets on the next request", async () => {
   const id = newSession();
   // A private, empty project: in a shared /tmp, other processes' writes count as this turn's edits.
   const cwd = mkdtempSync(join(tmpdir(), "jevis-stop-"));
@@ -403,6 +427,21 @@ test("stop: blocks once per entry per turn, at most MAX_STOP_BLOCKS times, and r
   assert.equal(await onStop(stop), null);
   await onPrompt({ session_id: id, cwd, prompt: "now the header", model: "gpt-6-sol" });
   assert.ok(await onStop(stop));
+});
+
+test("stop: a second blocking output cannot exceed the remaining distinct-lesson budget", async () => {
+  const id = newSession();
+  const cwd = mkdtempSync(join(tmpdir(), "jevis-stop-budget-"));
+  reset({ "verification/second": 0.95 });
+  await onPrompt({ session_id: id, cwd, prompt: "fix it", model: "gpt-6-sol" });
+  const input = { session_id: id, cwd, last_assistant_message: "Done" };
+  assert.match((await onStop(input)).reason, /Second/);
+  reset({ "verification/third": 0.95, "verification/fourth": 0.9 });
+  const next = await onStop(input);
+  assert.match(next.reason, /Third/);
+  assert.doesNotMatch(next.reason, /Fourth/);
+  assert.equal(loadSession(id).stop.blocked.length, MAX_STOP_BLOCKS);
+  assert.equal(await onStop(input), null);
 });
 
 test("stop: the evidence comes from the session log, and an entry never blocks twice in a turn", async () => {

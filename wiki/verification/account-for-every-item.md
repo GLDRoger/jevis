@@ -5,6 +5,7 @@ yes: A sweep, or several separate items to handle
 no: A single change in one place, or a code migration or refactor (converting code to a new pattern, renaming, upgrading an API), where the diff and the tests account for every site
 min: 0.85
 family: gpt
+when: { agent.origin: person }
 action: context
 title: Close every item the user queued
 source: |

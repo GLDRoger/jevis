@@ -3,17 +3,19 @@ import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { plainRead } from "./shell.mjs";
+import { BASH_FACTS, bashFacts } from "./bash-facts.mjs";
 import { insideFolder, samePath } from "./paths.mjs";
 import { commandText, readSession } from "./transcript.mjs";
 
 /**
  * Turns a hook's input into the state Jev reads. Only facts live here:
  * parsing, file listings, and the session log. Every judgement about what a
- * request or a command means is Jev's.
+ * request or a command means is Jev's, except the explicit rules in rules.mjs.
  */
 
 /** Codex puts the model in the hook input; Claude Code only records it in the transcript. */
 export function harnessOf(input, { withModel = true } = {}) {
+  if (input.model_provider === "meta") return { harness: "Muse Code", model: input.model ? String(input.model) : null };
   if (input.model) return { harness: "Codex", model: String(input.model) };
   const claude = /[\\/]\.claude[\\/]projects[\\/]/.test(input.transcript_path ?? "") || "permission_mode" in input;
   return { harness: claude ? "Claude Code" : "Codex", model: claude && withModel ? tailModel(input.transcript_path) : null };
@@ -118,11 +120,17 @@ export function toolInput(tool, input) {
  * ran_before, whether this session already ran this exact command; and
  * plain_read, a shell command that provably only reads (see shell.mjs). An
  * input clipped for display (it ends in the clip mark) is never a plain read:
- * the part that was cut is unseen.
+ * the part that was cut is unseen. Bash effect marks are true/false/null;
+ * only a proven false may gate a relevant lesson out (see bash-facts.mjs).
  */
 export const inputMarks = (input, { tool = null, ranBefore = false } = {}) => {
   const text = String(input ?? "");
-  return { em_dash: /\u2014/.test(text), ran_before: ranBefore, plain_read: tool === "Bash" && !text.endsWith("…") && plainRead(text) };
+  const facts = tool === "Bash" ? bashFacts(text) : Object.fromEntries(BASH_FACTS.map((key) => [key, key === "writes_file" && ["Write", "Edit", "MultiEdit", "NotebookEdit", "apply_patch"].includes(tool) ? true : null]));
+  // A Bash script or copy can write unseen/generated characters even when
+  // its source has none. Absence in command text is not absence in output.
+  const emDash = /\u2014/.test(text) ? true : text.endsWith("…") || tool === "Bash" && facts.writes_file !== false ? null : false;
+  return { em_dash: emDash, ran_before: ranBefore,
+    plain_read: tool === "Bash" && !text.endsWith("…") && plainRead(text) && BASH_FACTS.every((key) => facts[key] === false), ...facts };
 };
 
 /** A command's identity for ran_before: whitespace-insensitive, and short enough to keep a session's worth. */
@@ -142,7 +150,7 @@ const UI_FILE = /\.(tsx|jsx|vue|svelte|astro|html|css|scss)$/;
 const TEST_PATH = /(\.(test|spec|stories)\.[cm]?[jt]sx?$|(^|\/)(__tests__|tests?|__mocks__|e2e)\/)/;
 
 function describe(it, cwd) {
-  if (it.type === "CommandExecution") return `exit ${it.exit_code ?? "?"}: ${clip(commandText(it).replace(/\s+/g, " "), 180)}`;
+  if (it.type === "CommandExecution") return `${it.attempted ? "attempted, " : it.completed === false ? "running, " : it.success === true && it.exit_code == null ? "succeeded, " : it.success === false ? "failed, " : ""}exit ${it.exit_code ?? "?"}: ${clip(commandText(it).replace(/\s+/g, " "), 180)}`;
   if (it.type === "McpToolCall") {
     const args = it.arguments && typeof it.arguments === "object" ? it.arguments : {};
     const what = [args.title, args.code ?? args.url ?? args.command ?? args.query].filter(Boolean).map(String).join(": ");
@@ -150,7 +158,7 @@ function describe(it, cwd) {
   }
   if (it.type === "ImageView") return `viewed image ${basename(it.path ?? "")}`;
   if (it.type === "SubAgentActivity" || it.type === "CollabAgentToolCall") return `ran a subagent${it.agent_type ? ` (${it.agent_type})` : ""}`;
-  if (it.type === "FileChange") return `edited ${changedPaths(it, cwd).join(", ")}`;
+  if (it.type === "FileChange") return `${it.success === false ? "failed edit" : it.attempted ? "attempted edit" : "edited"} ${changedPaths(it, cwd).join(", ")}`;
   return null;
 }
 
@@ -163,30 +171,73 @@ function changedPaths(it, cwd) {
   });
 }
 
-/**
- * What this turn did, from the session log (subagents included): the files it
- * changed and the actions after its last edit. Facts only; Jev decides whether
- * they back what the final message claims.
+/** Execution time is never the post-handler receipt time. Legacy transcript
+ * rows have a completion point but no start; that alone cannot prove a check
+ * did not overlap a later edit. Hook attempts provide a start lower bound.
  */
-export function turnEvidence(items, { since = 0, cwd = null } = {}) {
-  const turn = items.filter(({ t }) => !since || (t || 0) >= since);
-  let lastEdit = -1;
-  turn.forEach(({ it }, i) => {
-    if (it.type === "FileChange") lastEdit = i;
-  });
-  const files = [...new Set(turn.filter(({ it }) => it.type === "FileChange").flatMap(({ it }) => changedPaths(it, cwd)))];
-  const actions = (list) => list.map(({ it }) => describe(it, cwd)).filter(Boolean);
-  const after = lastEdit >= 0 ? actions(turn.slice(lastEdit + 1).filter(({ it }) => it.type !== "FileChange")) : [];
+function executionTime(row) {
+  const time = (value) => Number.isFinite(value) && value >= 0 ? value : null;
   return {
-    edited: lastEdit >= 0,
+    start: time(row.execution?.start ?? (row.it.attempted ? row.t : null)),
+    end: time(row.execution?.end ?? (!row.it.attempted && row.it.completed !== false && row.receivedAt == null ? row.t : null)),
+  };
+}
+
+/** What this turn edited and checked, ordered by execution rather than receipt. */
+export function turnEvidence(items, { since = 0, cwd = null } = {}) {
+  const turn = items.filter((row) => !since || Math.max(row.t ?? 0, row.receivedAt ?? 0, executionTime(row).end ?? 0) >= since);
+  const edits = turn.filter(({ it }) => it.type === "FileChange" && it.success !== false && it.completed !== false);
+  const editTimes = edits.map((row) => executionTime(row).end);
+  const lastEditAt = edits.length && editTimes.every((t) => t !== null) ? Math.max(...editTimes) : null;
+  const files = [...new Set(edits.flatMap(({ it }) => changedPaths(it, cwd)))];
+  const actions = (list) => list.map(({ it }) => describe(it, cwd)).filter(Boolean);
+  const after = lastEditAt === null ? [] : turn.filter((row) => row.it.type !== "FileChange" && (executionTime(row).start ?? executionTime(row).end ?? -1) > lastEditAt);
+  return {
+    edited: edits.length > 0,
+    last_edit_at: lastEditAt,
     files_changed: files.slice(0, 20),
     files_changed_count: files.length,
     ui_files_changed: files.filter((f) => UI_FILE.test(f) && !TEST_PATH.test(f)).slice(0, 10),
-    actions_after_last_edit: after.slice(-15),
+    actions_after_last_edit: actions(after).slice(-15),
     recent_actions: actions(turn).slice(-12),
     commands_run: turn.filter(({ it }) => it.type === "CommandExecution").length,
+    checks_after_last_edit: !edits.length ? [] : checkEvidence(turn, lastEditAt),
     used_subagents: turn.some(({ it }) => it.type === "SubAgentActivity" || it.type === "CollabAgentToolCall"),
   };
+}
+
+function checkEvidence(items, lastEditAt) {
+  return items.filter((row) => row.it.type === "CommandExecution" && inputMarks(commandText(row.it), { tool: "Bash" }).runs_tests === true && (lastEditAt === null || executionTime(row).end === null || executionTime(row).end > lastEditAt)).slice(-15).map((row) => {
+    const { it } = row;
+    const { start, end } = executionTime(row);
+    const after = lastEditAt !== null && start !== null && end !== null && start > lastEditAt && end >= start;
+    return { command: clip(commandText(it), 180), success: !after || it.attempted || it.completed === false ? null : it.success ?? (Number.isInteger(it.exit_code) ? it.exit_code === 0 : null), exit_code: it.exit_code ?? null };
+  });
+}
+
+/** Hook completions supplement transcripts and replace matching attempts.
+ * Call ids win; otherwise match the latest identical operation, not every
+ * earlier invocation of a repeated check. Retain failures and execution time.
+ */
+export function mergeToolResults(items, results) {
+  const merged = [...items];
+  for (const row of results) {
+    const same = (other) => {
+      if (row.it.id && other.it.id) return row.it.id === other.it.id;
+      if (row.it.type !== other.it.type) return false;
+      if (row.it.type === "CommandExecution") return commandText(row.it) === commandText(other.it);
+      if (row.it.type === "FileChange") return JSON.stringify(row.it.changes) === JSON.stringify(other.it.changes);
+      return false;
+    };
+    const index = merged.findLastIndex((other) => same(other) && (row.it.id && row.it.id === other.it.id || other.it.attempted || other.it.exit_code == null || Math.abs((row.receivedAt ?? row.t) - (other.receivedAt ?? other.t)) < 2000));
+    if (index >= 0) {
+      const prior = merged[index];
+      const before = executionTime(prior), after = executionTime(row);
+      const execution = { start: before.start ?? after.start, end: before.end ?? after.end };
+      merged[index] = { ...prior, ...row, t: execution.end ?? execution.start, execution, it: { ...prior.it, ...row.it, attempted: false } };
+    } else merged.push(row);
+  }
+  return merged.sort((a, b) => (a.t ?? executionTime(a).end ?? executionTime(a).start ?? 0) - (b.t ?? executionTime(b).end ?? executionTime(b).start ?? 0));
 }
 
 const SKIP_DIRS = new Set(["node_modules", "dist", "build", "out", "coverage", "vendor", "target", "__pycache__"]);
@@ -228,13 +279,23 @@ export function touchedFiles(root, since, { limit = 5000, depth = 5 } = {}) {
 }
 
 /** Turn evidence plus files the log missed because a command, not an edit tool, wrote them. */
-export function withTouched(evidence, cwd, since) {
-  const extra = touchedFiles(cwd, since).filter((f) => !evidence.files_changed.includes(f));
-  if (!extra.length) return evidence;
+export function withTouched(evidence, cwd, since, items = []) {
+  const touched = touchedFiles(cwd, since);
+  const extra = touched.filter((f) => !evidence.files_changed.includes(f));
+  let lastEditAt = evidence.last_edit_at ?? 0;
+  for (const file of touched) {
+    try { lastEditAt = Math.max(lastEditAt, statSync(join(cwd, file)).mtimeMs); } catch { /* gone */ }
+  }
+  if (!extra.length && lastEditAt === (evidence.last_edit_at ?? 0)) return evidence;
   const ui = extra.filter((f) => UI_FILE.test(f) && !TEST_PATH.test(f));
+  const unknownEdit = evidence.edited && evidence.last_edit_at === null;
+  const after = unknownEdit ? [] : items.filter((row) => row.it.type !== "FileChange" && (executionTime(row).start ?? executionTime(row).end ?? -1) > lastEditAt);
   return {
     ...evidence,
     edited: true,
+    last_edit_at: unknownEdit ? null : lastEditAt,
+    actions_after_last_edit: after.map(({ it }) => describe(it, cwd)).filter(Boolean).slice(-15),
+    checks_after_last_edit: checkEvidence(items, unknownEdit ? null : lastEditAt),
     files_changed: [...evidence.files_changed, ...extra].slice(0, 20),
     files_changed_count: evidence.files_changed_count + extra.length,
     ui_files_changed: [...evidence.ui_files_changed, ...ui].slice(0, 10),
@@ -286,4 +347,32 @@ export function turnTexts(items, { since = 0 } = {}) {
     else if (it.type === "McpToolCall" && it.arguments) out.push(JSON.stringify(it.arguments));
   }
   return out.filter(Boolean);
+}
+
+/**
+ * Muse Code sends Claude-shaped hook payloads with its own tool names and no
+ * transcript. Its calls are renamed to the Claude tools the wiki's lessons name.
+ */
+export function museTool(name, input = {}) {
+  if (name === "bash") return { tool: "Bash", input: { command: input.command ?? "" } };
+  if (name === "write_file") return { tool: "Write", input: { file_path: input.path, content: input.content } };
+  if (name === "edit_file") return { tool: "Edit", input: { file_path: input.path, old_string: input.find, new_string: input.replace } };
+  return { tool: name, input };
+}
+
+/**
+ * One tool call as a session-log item, for harnesses that send no transcript:
+ * the Stop hook builds its evidence from these instead.
+ */
+export function hookItem(tool, input = {}) {
+  if (tool === "Bash") return { type: "CommandExecution", command: input.command ?? "" };
+  if (["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool)) return input.file_path || input.notebook_path ? { type: "FileChange", changes: [{ path: input.file_path ?? input.notebook_path }] } : null;
+  if (tool === "apply_patch") {
+    const paths = [...String(input.input ?? input.patch ?? input.command ?? "").matchAll(/^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$/gm)].map((m) => m[1].trim());
+    return paths.length ? { type: "FileChange", changes: paths.map((path) => ({ path })) } : null;
+  }
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(tool);
+  if (mcp) return { type: "McpToolCall", server: mcp[1], tool: mcp[2], arguments: input };
+  if (tool === "subagent_spawn") return { type: "SubAgentActivity" };
+  return null;
 }

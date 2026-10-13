@@ -44,7 +44,7 @@ export function loadSession(id) {
 }
 
 export function saveSession(id, state, { platform = process.platform, rename = renameSync, wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } = {}) {
-  if (!id) return;
+  if (!id) return true;
   let tmp;
   try {
     const file = sessionFile(id);
@@ -54,20 +54,21 @@ export function saveSession(id, state, { platform = process.platform, rename = r
     for (let attempt = 0; ; attempt += 1) {
       try {
         rename(tmp, file);
-        return;
+        return true;
       } catch (e) {
         if (platform !== "win32" || !["EPERM", "EBUSY"].includes(e.code) || attempt === 4) throw e;
         wait(25);
       }
     }
-  } catch (error) {
-    // A block without saved counters could repeat forever. The hook boundary logs this error and lets the turn end.
+  } catch {
+    // A block without saved counters could repeat forever. Callers must pass
+    // through when persistence fails; ENOSPC must never become a hook error.
     if (tmp) try { unlinkSync(tmp); } catch { /* already gone or still held open */ }
-    throw error;
+    return false;
   }
 }
 
-export const freshSession = () => ({ turn: 0, request: null, previousRequest: null, firstRequest: null, turnStartedAt: null, model: null, shown: {}, stop: { turn: -1, blocked: [], reviews: 0 } });
+export const freshSession = () => ({ turn: 0, request: null, previousRequest: null, earlierRequests: [], firstRequest: null, turnStartedAt: null, model: null, shown: {}, stop: { turn: -1, blocked: [], reviews: 0 } });
 
 export function log(event) {
   try {

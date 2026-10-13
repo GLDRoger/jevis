@@ -35,6 +35,7 @@ export const SETTINGS = {
   JEVIS_DESIGN_LAW: { ok: text, help: "a Markdown file of your own design rules" },
   JEVIS_WIKI: { ok: absolutePaths, env: (v) => [v].flat().join(delimiter), help: "absolute lesson folders, replacing the defaults" },
   JEVIS_JEV_URL: { ok: httpUrl, help: "a /v1/systemone server instead of TypeSafe" },
+  JEVIS_JEV: { ok: oneOf("on", "off"), help: "off disables decision-model calls; hooks pass through" },
   JEVIS_JEV_MODEL: { ok: text, help: "the model field sent with each call" },
   JEVIS_JEV_CHUNK: { ok: number, env: String, help: "questions per request" },
   JEVIS_TIMEOUT_MS: { ok: number, env: String, help: "how long a hook waits for the decision model" },

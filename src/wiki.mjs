@@ -4,6 +4,8 @@ import { homedir } from "node:os";
 import { dirname, join, posix, relative, resolve, sep, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AXES } from "./axes.mjs";
+import { BASH_FACTS } from "./bash-facts.mjs";
+import { RULES } from "./rules.mjs";
 import { ensureDir, jevisHome } from "./state.mjs";
 import { insideFolder, isQualifiedPath, samePath, splitFolders } from "./paths.mjs";
 
@@ -23,7 +25,7 @@ export const WIKI_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "wi
 const EVENTS = ["prompt", "tool", "stop"];
 const ACTIONS = { prompt: ["context"], tool: ["context", "deny"], stop: ["block"] };
 const REQUIRED = ["event", "ask", "action", "title", "source"];
-const KNOWN = new Set([...REQUIRED, "yes", "no", "min", "when", "tools", "family", "unless", "unless_max", "optional", "off"]);
+const KNOWN = new Set([...REQUIRED, "yes", "no", "min", "when", "tools", "family", "unless", "unless_max", "optional", "off", "decide"]);
 export const DEFAULT_UNLESS_MAX = 0.5;
 export const DEFAULT_MIN = 0.75;
 
@@ -123,6 +125,7 @@ export function validateEntry(e) {
   if (e.body && e.body.length > 900) errors.push(`body is ${e.body.length} characters; keep it under 900`);
   if (e.tools !== undefined && (e.event !== "tool" || !Array.isArray(e.tools))) errors.push("tools is a list, on tool entries only");
   if (e.optional !== undefined && typeof e.optional !== "boolean") errors.push("optional is true or false");
+  if (e.decide !== undefined && !RULES.includes(e.decide)) errors.push(`decide must be one of ${RULES.join(", ")}`);
   if (e.family !== undefined && !FAMILIES.includes(e.family)) errors.push(`family is ${FAMILIES.join(" or ")}; leave it out for every model`);
   if (typeof e.when !== "object" || Array.isArray(e.when)) errors.push("when is a map");
   else {
@@ -387,6 +390,9 @@ export function conditionsHold(when, { profile, state }) {
   for (const [key, want] of Object.entries(when ?? {})) {
     const cmp = typeof want === "string" ? want.match(/^(>=|<=|>|<)\s*([\d.]+)$/) : null;
     const actual = key in profile ? profile[key] : lookup(state, key);
+    // Tri-state Bash proofs: an unknown operation keeps both the pre-call
+    // pool and the final gate open. Other missing facts retain strict checks.
+    if (actual === null && (key === "marks.em_dash" || BASH_FACTS.some((fact) => key === `marks.${fact}`))) continue;
     if (cmp) {
       if (typeof actual !== "number") return false;
       const n = Number(cmp[2]);

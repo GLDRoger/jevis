@@ -157,9 +157,9 @@ async function checkInstalledHooks(t, { nodeWithSpaces = false, selectedEvents =
     claude: readJson(join(home, ".claude", "settings.json")),
     codex: readJson(join(home, ".codex", "hooks.json")),
   };
-  const events = { UserPromptSubmit: "prompt", PreToolUse: "tool", Stop: "stop", SessionStart: "session", PostCompact: "session" };
+  const events = { UserPromptSubmit: "prompt", PreToolUse: "tool", PostToolUse: "post", PostToolUseFailure: "post", Stop: "stop", SessionStart: "session", PostCompact: "session" };
   for (const [harness, config] of Object.entries(configs)) {
-    assert.deepEqual(Object.keys(config.hooks).sort(), Object.keys(events).filter((event) => harness === "codex" || event !== "PostCompact").sort());
+    assert.deepEqual(Object.keys(config.hooks).sort(), Object.keys(events).filter((event) => harness === "claude" || event !== "PostToolUseFailure").sort());
     const firstWords = new Set();
     for (const [event, groups] of Object.entries(config.hooks)) for (const group of groups) for (const hook of group.hooks) {
       t.diagnostic(`${harness} ${event} installed command: ${hook.command}`);
@@ -188,6 +188,7 @@ async function checkInstalledHooks(t, { nodeWithSpaces = false, selectedEvents =
           const payload = {
             prompt: { prompt: "Update the fixture." },
             tool: { tool_name: "Bash", tool_input: { command: "fixture-delete --all" } },
+            post: { tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 1 } },
             stop: { last_assistant_message: "The fixture is finished." },
             session: event === "SessionStart" ? { source: "startup" } : {},
           };
@@ -199,9 +200,9 @@ async function checkInstalledHooks(t, { nodeWithSpaces = false, selectedEvents =
           try {
             assertExit(result);
             assert.ok(result.ms < hook.timeout * 1000, `hook exceeded its ${hook.timeout}s timeout`);
-            if (kind === "session") {
+            if (kind === "session" || kind === "post") {
               assert.equal(result.stdout, "");
-              assert.ok(existsSync(join(home, ".jevis", "sessions", `${sessionId}.json`)), "session hook must save its session");
+              assert.ok(existsSync(join(home, ".jevis", "sessions", `${sessionId}.json`)), "local hook must retain its session");
             } else {
               const output = JSON.parse(result.stdout);
               if (kind === "prompt") assert.ok(output.hookSpecificOutput?.additionalContext?.includes(titles.prompt));

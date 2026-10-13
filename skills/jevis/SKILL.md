@@ -14,6 +14,8 @@ Almost every behavior is a **wiki entry**: one Markdown file holding one questio
 
 Paths below are relative to the Jevis repo, two folders above this file. `jevis` means `node bin/jevis.mjs`, run from the repo.
 
+When this skill comes from an installed plugin, that location is the plugin root, not the user's current project. Resolve it from this skill's full path, and invoke its CLI by absolute path while keeping the working directory in the target project. Treat the installed plugin's code and shipped `wiki/` as read-only: personal lessons belong in `~/.jevis/wiki/`, and project lessons belong in the target project's `.jevis/wiki/`. For a contribution to Jevis itself, work in the user's source checkout instead of its installed cache. Plugin hooks run only in a supported Codex runtime after the user reviews and trusts them; ordinary Chat does not run them. See the README's Native Codex plugin section for installation checks.
+
 ## 1. Pin down the behavior
 
 Restate the user's wish as one sentence: "At <moment>, when <something visible in the state>, Jevis should <tell the agent | refuse | send it back>." If the user gave a vague wish ("stop Codex making cheap-looking buttons"), name the concrete pattern and one example that must *not* trigger it, and confirm both with the user when the boundary is unclear.

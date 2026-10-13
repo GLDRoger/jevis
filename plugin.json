@@ -1,0 +1,27 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "jevis",
+  "version": "0.1.0",
+  "description": "Lessons, tool checks, and visual reviews for coding agents.",
+  "author": { "name": "GLDRoger", "url": "https://github.com/GLDRoger" },
+  "homepage": "https://github.com/GLDRoger/jevis",
+  "repository": "https://github.com/GLDRoger/jevis",
+  "license": "MIT",
+  "keywords": ["codex", "hooks", "code-review"],
+  "extensions": {
+    "com.openai": {
+      "hooks": "./hooks/hooks.json",
+      "interface": {
+        "displayName": "Jevis",
+        "shortDescription": "Lessons and checks for coding agents",
+        "longDescription": "Jevis adds relevant lessons, checks tool calls, and reviews visual work before a coding agent finishes. Local hooks require Node.js 22+, a configured decision model, and explicit hook trust. The bundled skill helps change and test lessons.",
+        "developerName": "GLDRoger",
+        "category": "Developer Tools",
+        "capabilities": ["Read", "Write"],
+        "websiteURL": "https://github.com/GLDRoger/jevis",
+        "defaultPrompt": ["Use Jevis to add and test a lesson for this repository."],
+        "brandColor": "#65D9C5"
+      }
+    }
+  }
+}

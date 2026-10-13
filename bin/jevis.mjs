@@ -5,8 +5,9 @@ import { applyConfig } from "../src/config.mjs";
 import { workspaceOf } from "../src/context.mjs";
 import { doctor, formatDoctor } from "../src/doctor.mjs";
 import { evaluate } from "../src/engine.mjs";
+import { formatGateReplay, gateReplay } from "../src/gate-replay.mjs";
 import { exportDataset, formatExport, TEST_SHARE } from "../src/export.mjs";
-import { onPrompt, onSession, onStop, onTool } from "../src/hooks.mjs";
+import { onPost, onPrompt, onSession, onStop, onTool } from "../src/hooks.mjs";
 import { CORRECTION_MIN, formatMine, mine } from "../src/mine.mjs";
 import { findSession, replay } from "../src/replay.mjs";
 import { eachLog, jevisHome, log } from "../src/state.mjs";
@@ -54,13 +55,18 @@ function printResult(r, { near = 5 } = {}) {
 }
 
 const commands = {
+  "gate-replay"() {
+    const report = gateReplay({ file: flag("file"), wiki: wikiFor(process.cwd()) });
+    console.log(args.includes("--json") ? JSON.stringify(report, null, 2) : formatGateReplay(report));
+    if (report.lostFires || Object.keys(report.missingLessons).length) process.exitCode = 1;
+  },
   // Hook entry points: JSON on stdin, JSON (or nothing) on stdout. A hook never breaks the agent.
   async hook() {
     const kind = args[0];
     let input = {};
     try {
       input = JSON.parse(readFileSync(0, "utf8") || "{}");
-      const run = { prompt: onPrompt, tool: onTool, stop: onStop, session: onSession }[kind];
+      const run = { prompt: onPrompt, tool: onTool, post: onPost, stop: onStop, session: onSession }[kind];
       const output = run ? await run(input) : null;
       if (output) process.stdout.write(JSON.stringify(output));
     } catch (error) {
@@ -219,7 +225,7 @@ function trustWord(project) {
 }
 
 if (!commands[command]) {
-  console.error("usage: jevis <hook prompt|tool|stop|session | ask | doctor | lint | trust | replay | stats [--near] | mine | export>");
+  console.error("usage: jevis <hook prompt|tool|post|stop|session | ask | doctor | lint | trust | replay | gate-replay [--file path] | stats [--near] | mine | export>");
   process.exit(2);
 }
 await commands[command]();

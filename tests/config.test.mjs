@@ -35,6 +35,15 @@ test("settings: the environment wins over the file, and each value's source is k
   assert.equal(sources.JEVIS_SCOPE, "default");
 });
 
+test("settings: JEVIS_JEV=off is accepted in config and doctor reports intentional disablement", async () => {
+  const file = join(process.env.JEVIS_HOME, "off.json");
+  writeFileSync(file, JSON.stringify({ JEVIS_JEV: "off" }));
+  assert.deepEqual(readConfig(file).values, { JEVIS_JEV: "off" });
+  assert.deepEqual(readConfig(file).errors, []);
+  const { jevChecks } = await import("../src/doctor.mjs");
+  assert.match((await jevChecks({ env: { JEVIS_JEV: "off" }, offline: true }))[0].detail, /JEVIS_JEV=off: no calls are made/);
+});
+
 test("settings: writing keeps other settings, removes a null one, and the file is private", () => {
   const file = join(process.env.JEVIS_HOME, "config.json");
   writeFileSync(file, JSON.stringify({ JEVIS_MODE: "shadow", JEVIS_CRITIC: "codex" }));

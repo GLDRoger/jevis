@@ -26,7 +26,10 @@ test("install: an earlier Jevis install is replaced, and everything else is kept
   assert.equal(config.model, "opus");
   assert.deepEqual(config.permissions, { defaultMode: "auto" });
   assert.deepEqual(config.hooks.Notification, [{ matcher: "", hooks: [{ type: "command", command: "say done" }] }]);
-  assert.deepEqual(config.hooks.PostToolUse, [{ hooks: [{ type: "command", command: "prettier --write" }] }]);
+  assert.deepEqual(config.hooks.PostToolUse[0], { hooks: [{ type: "command", command: "prettier --write" }] });
+  assert.match(config.hooks.PostToolUse.at(-1).hooks[0].command, /hook post$/);
+  assert.ok(config.hooks.PostToolUseFailure);
+  assert.ok(config.hooks.PostCompact);
   assert.deepEqual(config.hooks.PreToolUse[0], { matcher: "Bash", hooks: [{ type: "command", command: "audit-bash" }] }, "a group shared with Jevis keeps its other hooks");
   assert.equal(config.hooks.UserPromptSubmit.at(-1).hooks[0].command, "/n /j/bin/jevis.mjs hook prompt");
   assert.equal(config.hooks.Stop.at(-1).hooks[0].timeout, 420);
@@ -38,7 +41,7 @@ test("install: running it twice gives the same config, and the hook commands car
   const once = plan(userSettings(), "codex", { node: "/n", cli: "/j/bin/jevis.mjs" }).config;
   assert.deepEqual(plan(once, "codex", { node: "/n", cli: "/j/bin/jevis.mjs" }).config, once);
   assert.ok(once.hooks.PostCompact, "Codex also refreshes notes after compaction");
-  assert.equal(once.hooks.PreToolUse.at(-1).matcher, undefined, "Codex hooks see every tool");
+  assert.equal(once.hooks.PreToolUse.at(-1).matcher, jevisHooks("claude").PreToolUse[0].matcher, "Codex supports the same matcher and aliases apply_patch to Edit/Write");
   assert.equal(jevisHooks("claude", { node: "/n", cli: "/j/bin/jevis.mjs" }).Stop[0].hooks[0].command, "/n /j/bin/jevis.mjs hook stop");
   // Without a short Node name, Windows falls back to node and still recognizes the install.
   const win = jevisHooks("codex", { platform: "win32", shortPath: () => null, node: "C:\\Program Files\\nodejs\\node.exe", cli: "C:\\Users\\me\\jevis\\bin\\jevis.mjs" });
@@ -109,4 +112,22 @@ test("install: backups of your settings are private, even when the README's mkdi
   // A second install without options keeps the saved setting.
   execFileSync(process.execPath, [fileURLToPath(new URL("../bin/install.mjs", import.meta.url)), "--harness", "claude"], { env, stdio: "ignore" });
   assert.deepEqual(JSON.parse(readFileSync(join(home, ".jevis", "config.json"), "utf8")), { JEVIS_MODE: "shadow" });
+});
+
+test("install: backs up config.json privately before changing options; dry-run writes nothing", () => {
+  const home = mkdtempSync(join(tmpdir(), "jevis-config-backup-"));
+  const jevis = join(home, ".jevis");
+  mkdirSync(jevis);
+  const before = { JEVIS_CRITIC: "off", JEVIS_MODE: "shadow" };
+  writeFileSync(join(jevis, "config.json"), JSON.stringify(before), { mode: 0o644 });
+  const env = { ...process.env, HOME: home, USERPROFILE: home, JEVIS_HOME: jevis };
+  const install = fileURLToPath(new URL("../bin/install.mjs", import.meta.url));
+  execFileSync(process.execPath, [install, "--harness", "claude", "--live", "--dry-run"], { env, stdio: "ignore" });
+  assert.deepEqual(readdirSync(jevis), ["config.json"]);
+  execFileSync(process.execPath, [install, "--harness", "claude", "--live"], { env, stdio: "ignore" });
+  const backups = join(jevis, "backups");
+  const copy = join(backups, readdirSync(backups)[0], "config.json");
+  assert.deepEqual(JSON.parse(readFileSync(copy, "utf8")), before);
+  assert.deepEqual(JSON.parse(readFileSync(join(jevis, "config.json"), "utf8")), { JEVIS_CRITIC: "off" });
+  if (process.platform !== "win32") assert.equal(statSync(copy).mode & 0o777, 0o600);
 });
