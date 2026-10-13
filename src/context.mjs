@@ -15,6 +15,7 @@ import { commandText, readSession } from "./transcript.mjs";
 
 /** Codex puts the model in the hook input; Claude Code only records it in the transcript. */
 export function harnessOf(input, { withModel = true } = {}) {
+  if (input.model_provider === "gemini-cli" || input.model_provider === "antigravity") return { harness: input.model_provider === "gemini-cli" ? "Gemini CLI" : "Antigravity CLI", model: input.model ? String(input.model) : null };
   if (input.model_provider === "meta") return { harness: "Muse Code", model: input.model ? String(input.model) : null };
   if (input.model) return { harness: "Codex", model: String(input.model) };
   const claude = /[\\/]\.claude[\\/]projects[\\/]/.test(input.transcript_path ?? "") || "permission_mode" in input;
