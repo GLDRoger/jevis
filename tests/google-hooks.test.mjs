@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { antigravityMessages, antigravityReceiptRefreshes, googleTool, googleInput, googleOutput, validGoogleInput } from '../src/google-hooks.mjs';
 import { harnessOf } from '../src/context.mjs';
 import { toolResult } from '../src/post.mjs';
@@ -66,7 +66,8 @@ test('Transcript reads reject symlinks, malformed rows and non-message steps', (
 test('Invalid session IDs and relative workspaces are rejected', () => {
   assert.equal(validGoogleInput('gemini-cli', { session_id: '../escape', cwd: '/w' }), false);
   assert.equal(validGoogleInput('antigravity', { conversationId: 'id', workspacePaths: ['relative'] }), false);
-  assert.equal(validGoogleInput('gemini-cli', { session_id: 'uuid-1', cwd: '/w' }), true);
+  assert.equal(validGoogleInput('gemini-cli', { session_id: 'uuid-1', cwd: resolve('/w') }), true);
+  if (process.platform === 'win32') assert.equal(validGoogleInput('gemini-cli', { session_id: 'uuid-1', cwd: resolve('/w').replaceAll('\\', '/') }), true);
 });
 
 test('Gemini shell transport footer records zero and nonzero exits, not claims in output', () => {

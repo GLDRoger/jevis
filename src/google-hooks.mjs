@@ -1,4 +1,4 @@
-import { closeSync, fstatSync, openSync, readSync, constants } from 'node:fs';
+import { closeSync, fstatSync, lstatSync, openSync, readSync, constants } from 'node:fs';
 import { resolve } from 'node:path';
 
 // Google CLI transcripts are not Codex/Claude transcripts. Antigravity's
@@ -7,7 +7,9 @@ export function antigravityMessages(path) {
   if (!path) return [];
   let fd;
   try {
-    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    // Windows has no O_NOFOLLOW, so a link is refused by lstat first; O_NOFOLLOW still closes the race where it exists.
+    if (lstatSync(path).isSymbolicLink()) return [];
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     const stat = fstatSync(fd);
     if (!stat.isFile()) return [];
     const size = Math.min(stat.size, 4 * 1024 * 1024);
@@ -118,8 +120,11 @@ export function googleOutput(provider, event, output) {
   return specific.additionalContext ? { hookSpecificOutput: { hookEventName: event, additionalContext: specific.additionalContext } } : {};
 }
 
+// Already absolute and normalized; on Windows, forward slashes (C:/w) count as the same path.
+const absoluteResolved = (cwd, platform = process.platform) => cwd === resolve(cwd) || (platform === 'win32' && cwd.replaceAll('/', '\\') === resolve(cwd));
+
 export function validGoogleInput(provider, raw) {
   const session = provider === 'antigravity' ? raw.conversationId : raw.session_id;
   const cwd = provider === 'antigravity' ? raw.workspacePaths?.[0] : raw.cwd;
-  return typeof session === 'string' && session.length > 0 && session.length <= 200 && /^[\w-]+$/.test(session) && typeof cwd === 'string' && cwd === resolve(cwd);
+  return typeof session === 'string' && session.length > 0 && session.length <= 200 && /^[\w-]+$/.test(session) && typeof cwd === 'string' && absoluteResolved(cwd);
 }
