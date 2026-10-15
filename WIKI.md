@@ -19,16 +19,16 @@ Jevis loads the shipped `wiki/` in this repo, then yours in `~/.jevis/wiki/` (un
 
 A repository's `.jevis/wiki/` works the same way, for everyone who works in it, with two differences. It loads only after `jevis trust <repo>`, and only as its files were when trusted: any change needs trusting again. And it can't turn off or replace a `safety/` entry: lint reports such a file as broken, and the safety entry stays in force. Run `lint` from inside the repository to check its lessons, trusted or not.
 
-On every hook event, Jevis sends Jev the event's state plus the unresolved `ask` (and `unless`) questions for that event, all in one call. An entry can opt into a code rule with `decide` (below). Questions in a call are answered in parallel, so the wiki can grow into the hundreds without slowing a hook. An entry fires when three things hold:
+On every hook event, Jevis sends the decision model (Jev or GPT-6 Luna, whichever `JEVIS_DECIDER` selects) the event's state plus the unresolved `ask` (and `unless`) questions for that event, all in one call. An entry can opt into a code rule with `decide` (below). Questions in a call are answered in parallel, so the wiki can grow into the hundreds without slowing a hook. An entry fires when three things hold:
 - its `ask` answer clears `min`;
 - its `unless` answer stays under `unless_max`;
 - its `when` conditions hold.
 
-Facts in `when` are known before Jev is asked, so an entry whose facts already fail is left out of the call. When that leaves a tool call with no entry at all, there is no call.
+Facts in `when` are known before the decision model is asked, so an entry whose facts already fail is left out of the call. When that leaves a tool call with no entry at all, there is no call.
 
 What it does next depends on its `action`.
 
-With `decide`, exact matches need no Jev answer to `ask`, and exact non-matches need neither question. Positive matches still ask Jev the separate `unless`: permission and supplied copy need judgment. A missing or failed exception answer never refuses a call. When all entries and their gates are settled by code, no Jev call is made. The event log records `code` (exact lesson decisions) and `jevQuestions`; code scores are not model probabilities or training labels. Keep `ask`, `yes`/`no`, and `unless` as the fallback contract; custom lessons opt in explicitly.
+With `decide`, exact matches need no model answer to `ask`, and exact non-matches need neither question. Positive matches still ask the model the separate `unless`: permission and supplied copy need judgment. A missing or failed exception answer never refuses a call. When all entries and their gates are settled by code, no decision-model call is made. The event log records `code` (exact lesson decisions) and `jevQuestions`; code scores are not model probabilities or training labels. Keep `ask`, `yes`/`no`, and `unless` as the fallback contract; custom lessons opt in explicitly.
 
 ## Format
 
@@ -56,8 +56,8 @@ Instead: pick one concept from the product's own world and let it decide the lay
 | `ask` | yes | One literal yes/no question about the state. Name the state fields it reads in backticks. |
 | `yes`, `no` | no | What a yes and a no mean. Put the boundary cases here. |
 | `min` | no | The probability the `ask` answer must reach. Default 0.75. Use 0.85 or more for `deny` and `block`. |
-| `decide` | no | A named predicate in `src/rules.mjs`: `destructive_git`, `em_dash_copy`, `gradient_text`, or `emoji_icons`. Code answers the `ask` with 0 or 1 when exact; ambiguous input falls back to Jev. A rule error stands the lesson down. |
-| `unless` | no | A second yes/no question that stands the entry down, usually "did the user ask for exactly this?". Jev answers each literal question better than a compound one: a deny asked as "is this destructive, when the user did not ask for it?" scored 0.86 on a case it should catch; split into `ask` and `unless`, the same case scored 0.97 and 0.28. |
+| `decide` | no | A named predicate in `src/rules.mjs`: `destructive_git`, `em_dash_copy`, `gradient_text`, or `emoji_icons`. Code answers the `ask` with 0 or 1 when exact; ambiguous input falls back to the decision model. A rule error stands the lesson down. |
+| `unless` | no | A second yes/no question that stands the entry down, usually "did the user ask for exactly this?". Both decision models answer a literal question better than a compound one: a deny asked as "is this destructive, when the user did not ask for it?" scored 0.86 on a case it should catch; split into `ask` and `unless`, the same case scored 0.97 and 0.28. |
 | `unless_max` | no | The `unless` answer at or above which the entry stands down. Default 0.5. |
 | `when` | no | Conditions that must also hold: axes (see below) with `">=x"` or `"<x"`, and facts with a literal value (`{ evidence.edited: true }`, `{ marks.plain_read: false }`). |
 | `tools` | tool only | Tool names the entry applies to: `Bash`, `apply_patch` (Codex), `Edit`, `Write`, `MultiEdit`, `mcp__*`. Glob `*` allowed. |
@@ -67,7 +67,7 @@ Instead: pick one concept from the product's own world and let it decide the lay
 | `title` | yes | A few words naming the lesson. |
 | `source` | yes | Where the lesson came from: session ids, dates, counts, a file. An entry without evidence is an opinion. |
 
-## The state Jev reads
+## The state the decision model reads
 
 **prompt**
 - `request`: the user's message, with secrets masked.
@@ -81,7 +81,7 @@ Instead: pick one concept from the product's own world and let it decide the lay
 - `earlier_requests`: up to 8 of the session's messages before it, oldest first, each cut to 400 characters. For permission given earlier, such as "commit whenever it makes sense".
 - `tool`: the tool name.
 - `input`: the command (up to 4,000 characters), or for an edit, the file path and only the lines it adds: the removed and unchanged lines of an `apply_patch` are left out, so a check judges what the edit introduces. Secrets are masked before Jev sees any of it (`src/redact.mjs`).
-- `marks`: exact facts about `input` that code checks, because Jev blurs or cannot see them:
+- `marks`: exact facts about `input` that code checks, because a decision model blurs or cannot see them:
   - `marks.em_dash`: it contains U+2014, not an en dash; unknown (`null`) when a clipped input could hide one;
   - `marks.ran_before`: this session already ran this exact command;
   - Bash effects: `marks.git_write`, `marks.writes_file`, `marks.runs_tests`, `marks.opens_app`. They are `true` for explicit operations, `false` only for proven irrelevance, and `null` (unknown) for scripts, expansions, parse failures, or clipped inputs. `when: { marks.writes_file: true }` removes a lesson only when this mark is proven false; unknowns still go to Jev. On other tools, writes are true for edit/patch tools and the remaining effects are unknown. `marks.uses_credentials` is false only for plain reads or a small set of local utilities that cannot consume or set credentials; safety lessons otherwise stay judged.
@@ -101,11 +101,11 @@ Instead: pick one concept from the product's own world and let it decide the lay
   - `commands_run`, `used_subagents`;
   - `files_written_by_commands`: files under the project modified during the turn that no edit tool recorded (a heredoc, a script, a JavaScript exec). They are also counted in `files_changed` and `ui_files_changed`, and they set `edited`.
 
-  Whether an action was a test, a build, or a browser check is Jev's call: ask it about `evidence.actions_after_last_edit`.
+  Whether an action was a test, a build, or a browser check is the decision model's call: ask it about `evidence.actions_after_last_edit`.
 
 ## Axes
 
-Axes are the shared profile, the spider chart, that Jev scores on every event of a kind. Entries use them in `when` to share a gate instead of repeating it. `src/axes.mjs` defines them.
+Axes are the shared profile, the spider chart, that the decision model scores on every event of a kind. Entries use them in `when` to share a gate instead of repeating it. `src/axes.mjs` defines them.
 
 **prompt**
 - `wants_change`: the user wants something made or changed, not an answer.
@@ -137,7 +137,7 @@ Axes are the shared profile, the spider chart, that Jev scores on every event of
 `wiki/slop/` holds `deny` entries on edits (`Write`, `Edit`, `MultiEdit`, `apply_patch`, and `Bash` heredocs) for the telltales of generated design: gradient text, purple gradients, emoji and Unicode glyphs as icons, frosted glass, glow blobs, feature-card rows, announcement pills, marquees, rotating text stamps, invented social proof, hype copy, the italic accent word, numbered mono labels, hover lift on every card, unasked template sections, colored left-edge bars, decorative SVG, and section-scrolling sidebars.
 
 Each one follows the same shape:
-- `ask` names the pattern as code would write it (`background-clip: text`, `border-l-4`, `<textPath>`), because Jev reads the edit literally.
+- `ask` names the pattern as code would write it (`background-clip: text`, `border-l-4`, `<textPath>`), because the decision model reads the edit literally.
 - `no` lists the look-alikes that must pass (a brand's own gradient, a data chart, an imported icon, a docs page naming the pattern) and ends with the shared clause for prose, comments, searches, and non-interface files.
 - `unless` asks whether the user asked for exactly this.
 - The body says why it reads as generated, then `Instead:` with the concrete alternative.
@@ -147,9 +147,10 @@ The critic reads every slop entry's title and first line as its list of telltale
 ## Writing a good entry
 
 - **One failure per entry.** Two failures are two entries, because they fire under different conditions.
-- **Make the `ask` literal.** Jev answers the words you wrote, not the ones you meant. If you would explain what you meant, that explanation belongs in `yes` and `no`. Keep counting and arithmetic out of the question: that belongs in code, as a fact.
+- **Make the `ask` literal.** The decision model answers the words you wrote, not the ones you meant. If you would explain what you meant, that explanation belongs in `yes` and `no`. Keep counting and arithmetic out of the question: that belongs in code, as a fact.
 - **Body.** One or two sentences naming the default failure, then what to do instead. Write it as guidance to a capable colleague, in two to six lines. Point to a skill path when the fix needs a procedure.
 - **Deny and block.** Use them only when the harm is concrete and the question is precise. A wrong block costs more than a missed note: an earlier hook system once held a session for hours over one.
 - **The user's words win.** A body never overrides what the user asked for. Every `deny` and `block` entry needs an `unless` that asks whether the user asked for exactly this. Write it literally, with its boundary cases: "run the QA pass" first read as asking to see a window (0.77) until the question said that testing and checking do not count (0.07).
 - **Give the reason.** Agents rightly distrust unexplained instructions injected mid-session. In a live test, both Claude Sonnet and GPT-6 Sol flagged a bare "end your reply with this word" as possible injection. A body that names the failure and the user's interest reads as what it is: advice from this user's history.
 - **Test before you ship it.** Run `jevis ask` for single cases, and `jevis replay <session>` against real sessions where the failure happened and where it did not.
+- **Test on both deciders.** `min` and `unless_max` were tuned on Jev's probabilities, and GPT-6 Luna's sit differently: it answers `unless` ("did the user ask for exactly this?") higher. Run your cases with `JEVIS_DECIDER=luna` as well as the default, and set thresholds that hold on the decider you use. `jevis stats --near` reads only the active decider's records.

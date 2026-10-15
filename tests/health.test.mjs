@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { errorClass, errorMessage, FAILURE_WINDOW, outageLine, recordHealth } from "../src/health.mjs";
-import { askJev, setJevTransport } from "../src/jev.mjs";
+import { askJev, chunkSize, decider, jevAvailable, lunaKey, lunaTransport, setJevTransport, setLunaUrl } from "../src/jev.mjs";
 import { onPrompt, onSession, onStop } from "../src/hooks.mjs";
 import { activityChecks } from "../src/doctor.mjs";
 import { loadSession, log, saveSession } from "../src/state.mjs";
@@ -15,6 +15,168 @@ for (const key of ["JEVIS_MODE", "JEVIS_JEV", "JEVIS_SCOPE", "JEVIS_DISABLE", "J
 process.env.JEVIS_CRITIC = "off";
 const question = { probe: { type: "noul", instructions: "Is this a probe?" } };
 const good = async (body) => ({ answers: Object.fromEntries(Object.keys(body.questions).map((id) => [id, { noul: 0.05 }])) });
+
+// New provider tests restore every setting they touch, even on assertion failure.
+const providerEnv = (t, values = {}) => {
+  const keys = ["JEVIS_DECIDER", "JEVIS_LUNA_MODEL", "JEVIS_LUNA_KEY", "OPENAI_API_KEY", "JEVIS_JEV_MODEL", "JEVIS_JEV_URL", "JEVIS_JEV_CHUNK", "JEVIS_JEV", "JEVIS_RECORD", "JEVIS_MODE", "JEVIS_HOME"];
+  const before = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  t.after(() => {
+    for (const [key, value] of Object.entries(before)) value === undefined ? delete process.env[key] : process.env[key] = value;
+    setJevTransport(good);
+    setLunaUrl(null);
+  });
+  for (const key of keys) if (key !== "JEVIS_HOME") delete process.env[key];
+  Object.assign(process.env, values);
+};
+
+test("deciders: TypeSafe defaults to Jev 1.14 and honors its model override", async (t) => {
+  providerEnv(t, { JEVIS_HOME: mkdtempSync(join(tmpdir(), "jevis-jev-model-")) });
+  assert.equal(decider(), "jev");
+  const models = [];
+  setJevTransport(async (body) => { models.push(body.model); return good(body); });
+  await askJev({ state: {}, questions: question, event: "tool" });
+  process.env.JEVIS_JEV_MODEL = "custom-jev";
+  await askJev({ state: {}, questions: question, event: "tool" });
+  assert.deepEqual(models, ["jev-1.14.0", "custom-jev"]);
+  const rows = readFileSync(join(process.env.JEVIS_HOME, "jev", "calls.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
+  assert.deepEqual(rows.map((r) => [r.decider, r.deciderModel]), [["jev", "jev-1.14.0"], ["jev", "custom-jev"]]);
+  process.env.JEVIS_JEV_URL = "http://127.0.0.1:8000/v1/systemone";
+  delete process.env.JEVIS_JEV_MODEL;
+  await askJev({ state: {}, questions: question, record: false });
+  assert.equal(models.at(-1), undefined, "self-hosted Jev still receives no default model");
+});
+
+test("deciders: Luna HTTP translation, refusals, chunking, usage, and recording", async (t) => {
+  providerEnv(t, { JEVIS_DECIDER: "luna", JEVIS_LUNA_KEY: " fake-luna-key ", JEVIS_HOME: mkdtempSync(join(tmpdir(), "jevis-luna-")) });
+  const requests = [];
+  let status = 200;
+  const server = createServer(async (req, res) => {
+    let raw = "";
+    for await (const part of req) raw += part;
+    const body = JSON.parse(raw);
+    requests.push({ body, method: req.method, auth: req.headers.authorization });
+    res.setHeader("Content-Type", "application/json");
+    if (status !== 200) {
+      res.writeHead(status);
+      return res.end(JSON.stringify({ error: { message: "Bad OpenAI key", type: "invalid_request_error" } }));
+    }
+    res.end(JSON.stringify({ model: body.model, answers: body.questions.map((q) => q.name === "refusal" ? { type: "refusal", name: q.name } : q.name === "missing" ? { type: "predicate", name: q.name } : { type: "predicate", name: q.name, probability: 0.8 }), usage: { input_tokens: 12, output_tokens: 2 } }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  setLunaUrl(`http://127.0.0.1:${server.address().port}/v1/decisions`);
+  setJevTransport(null);
+  process.env.JEVIS_JEV_URL = "http://127.0.0.1:1/ignored";
+  process.env.JEVIS_JEV_MODEL = "ignored-jev";
+  const qs = {
+    "slop/emoji#unless": { type: "noul", instructions: "Does this qualify?", criteria: { true: "it qualifies", false: "it does not" } },
+    "axis:foo": { type: "noul", instructions: "Is this a probe?" },
+    refusal: question.probe, missing: question.probe,
+  };
+  const r = await askJev({ state: { request: "probe", token: "sk-not-a-real-secret" }, questions: qs, model: "claude-test", event: "tool" });
+  assert.equal(r.error, null);
+  assert.deepEqual(r.answers, { "slop/emoji#unless": { noul: 0.8 }, "axis:foo": { noul: 0.8 } });
+  assert.equal(requests.length, 1);
+  const request = requests[0];
+  assert.equal(request.method, "POST");
+  assert.equal(request.auth, "Bearer fake-luna-key");
+  assert.equal(request.body.model, "gpt-6-luna");
+  assert.equal(typeof request.body.input, "string");
+  assert.deepEqual(JSON.parse(request.body.input), { request: "probe", token: "[redacted]" });
+  assert.deepEqual(request.body.questions, [
+    { type: "predicate", name: "slop/emoji#unless", instructions: "Does this qualify? Yes means: it qualifies. No means: it does not." },
+    { type: "predicate", name: "axis:foo", instructions: "Is this a probe?" },
+    { type: "predicate", name: "refusal", instructions: question.probe.instructions },
+    { type: "predicate", name: "missing", instructions: question.probe.instructions },
+  ]);
+  const calls = () => readFileSync(join(process.env.JEVIS_HOME, "jev", "calls.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
+  assert.equal(calls()[0].decider, "luna");
+  assert.equal(calls()[0].deciderModel, "gpt-6-luna");
+  assert.equal(calls()[0].model, "claude-test", "the agent-model field retains its meaning");
+  assert.deepEqual(calls()[0].usage, { input_tokens: 12, output_tokens: 2 });
+
+  process.env.JEVIS_LUNA_MODEL = "custom-luna";
+  await askJev({ state: {}, questions: question, event: "tool" });
+  assert.equal(requests[1].body.model, "custom-luna");
+  assert.equal(calls()[1].deciderModel, "custom-luna");
+  requests.length = 0;
+  const many = Object.fromEntries(Array.from({ length: 450 }, (_, i) => [`q${i}`, question.probe]));
+  assert.equal(chunkSize(), 200);
+  const chunked = await askJev({ state: {}, questions: many, event: "tool" });
+  assert.equal(Object.keys(chunked.answers).length, 450);
+  assert.deepEqual(requests.map((r) => r.body.questions.length).sort((a, b) => a - b), [50, 200, 200]);
+  assert.deepEqual(calls().at(-1).usage, { input_tokens: 36, output_tokens: 6 });
+  process.env.JEVIS_JEV_CHUNK = "150";
+  assert.equal(chunkSize(), 150);
+  status = 401;
+  const failed = await askJev({ state: {}, questions: question, record: false });
+  assert.equal(failed.answers, null);
+  assert.equal(failed.error, "HTTP 401: Bad OpenAI key");
+  assert.equal(failed.errorClass, "auth/billing");
+});
+
+test("deciders: Luna hedges a stalled HTTP request and aborts the loser", async (t) => {
+  providerEnv(t, { JEVIS_DECIDER: "luna", JEVIS_LUNA_KEY: "fake-key" });
+  let requests = 0;
+  let closed;
+  const loserClosed = new Promise((resolve) => { closed = resolve; });
+  const server = createServer((req, res) => {
+    req.resume();
+    requests += 1;
+    if (requests === 1) return void res.on("close", closed);
+    res.end(JSON.stringify({ answers: [{ type: "predicate", name: "probe", probability: 1 }] }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  setLunaUrl(`http://127.0.0.1:${server.address().port}/v1/decisions`);
+  setJevTransport(null);
+  const r = await askJev({ state: {}, questions: question, timeoutMs: 2000, record: false });
+  assert.equal(r.error, null);
+  assert.equal(r.answers.probe.noul, 1);
+  assert.ok(requests >= 2 && requests <= 3);
+  await loserClosed;
+});
+
+test("deciders: unsupported Luna questions throw and askJev fails open", async (t) => {
+  providerEnv(t, { JEVIS_DECIDER: "luna", JEVIS_LUNA_KEY: "fake-key" });
+  setJevTransport(null);
+  const body = { state: {}, questions: { bad: { type: "choice", instructions: "Pick one" } } };
+  await assert.rejects(lunaTransport(body, 100), /Luna supports only noul questions: bad has type choice/);
+  const r = await askJev({ ...body, record: false });
+  assert.equal(r.answers, null);
+  assert.match(r.error, /only noul/);
+});
+
+test("deciders: Luna key precedence, trimming, and availability", (t) => {
+  providerEnv(t, { JEVIS_DECIDER: "luna", JEVIS_HOME: mkdtempSync(join(tmpdir(), "jevis-luna-key-")) });
+  setJevTransport(null);
+  assert.equal(jevAvailable(), false);
+  mkdirSync(join(process.env.JEVIS_HOME, "secrets"));
+  const file = join(process.env.JEVIS_HOME, "secrets", "openai_api_key");
+  writeFileSync(file, " \n ");
+  assert.equal(jevAvailable(), false);
+  writeFileSync(file, " file-key\n");
+  assert.deepEqual(lunaKey(), { key: "file-key", source: file });
+  assert.equal(jevAvailable(), true);
+  process.env.OPENAI_API_KEY = " openai-env ";
+  assert.deepEqual(lunaKey(), { key: "openai-env", source: "OPENAI_API_KEY" });
+  process.env.JEVIS_LUNA_KEY = " luna-env ";
+  assert.deepEqual(lunaKey(), { key: "luna-env", source: "JEVIS_LUNA_KEY" });
+  process.env.JEVIS_LUNA_KEY = " ";
+  assert.equal(lunaKey().source, "OPENAI_API_KEY");
+  process.env.JEVIS_JEV = "off";
+  assert.equal(jevAvailable(), false);
+});
+
+test("outages: Luna uses its own name with the unchanged outage wording", (t) => {
+  providerEnv(t, { JEVIS_DECIDER: "luna" });
+  const now = Date.parse("2026-10-15T12:00:00Z");
+  for (let i = 0; i < 3; i++) recordHealth("HTTP 401: bad key", { now });
+  assert.equal(outageLine({ now }), "Jevis: GPT-6 Luna unavailable since 12:00 UTC (HTTP 401 auth/billing). Hooks are passing everything through.");
+  delete process.env.JEVIS_DECIDER;
+  assert.equal(outageLine({ now }), "Jevis: Jev unavailable since 12:00 UTC (HTTP 401 auth/billing). Hooks are passing everything through.");
+  recordHealth(null);
+});
 
 test("outages: nested messages, codes, detail and bounded objects never stringify badly", () => {
   assert.equal(errorMessage({ error: { message: "Credits exhausted", code: "billing" } }), "Credits exhausted");

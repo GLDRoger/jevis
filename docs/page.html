@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jevis · How data moves through it</title>
-<meta name="description" content="An operating manual for Jevis: how a prompt, a tool call, or a turn ending travels from the hook through Jev and the wiki to the agent.">
+<meta name="description" content="An operating manual for Jevis: how a prompt, a tool call, or a turn ending travels from the hook through the wiki and the decision model (Jev or GPT-6 Luna) to the agent.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Ccircle cx=%228%22 cy=%228%22 r=%226%22 fill=%22%23F2C94C%22 stroke=%22%231D3A4A%22 stroke-width=%222%22/%3E%3C/svg%3E">
 <style>
 /* Tanker (Indian Type Foundry, via Fontshare) is self-hosted: the page opens from disk, and the Google-font rotation reads as generated. Body text is system-ui. */
@@ -294,9 +294,9 @@ footer b { color: var(--ink); }
   </div>
   <p class="wordmark" aria-hidden="true"><span>JEVIS</span></p>
   <div class="mast-foot">
-    <h1>How a prompt, a command, or the end of a turn travels through Jevis, from the hook to Jev to the agent.</h1>
+    <h1>How a prompt, a command, or the end of a turn travels through Jevis, from the hook to the decision model to the agent.</h1>
     <div>
-      <p>Jevis listens at three hooks. Each time one fires, it gathers plain facts, asks Jev every question the wiki has for that moment in one call, and acts only on what clears the entry's bar. When anything goes wrong, it steps aside and the agent carries on.</p>
+      <p>Jevis listens at three hooks. Each time one fires, it gathers plain facts, asks the decision model (TypeSafe&rsquo;s Jev, or OpenAI&rsquo;s GPT-6 Luna) every question the wiki has for that moment in one call, and acts only on what clears the entry's bar. When anything goes wrong, it steps aside and the agent carries on.</p>
       <div class="specline" id="specline"></div>
     </div>
   </div>
@@ -312,7 +312,7 @@ footer b { color: var(--ink); }
   <aside class="pin" aria-label="Exploded diagram of Jevis">
     <div class="figure" id="figure">
       <svg id="diagram" viewBox="0 0 560 900" role="img" aria-labelledby="dtitle">
-        <title id="dtitle">Exploded diagram: the hook, the facts, the wiki, the question set, Jev, the record, the gates, the action, and memory, connected in order.</title>
+        <title id="dtitle">Exploded diagram: the hook, the facts, the wiki, the question set, the decision model, the record, the gates, the action, and memory, connected in order.</title>
       </svg>
       <div class="flash"></div>
     </div>
@@ -357,7 +357,7 @@ footer b { color: var(--ink); }
 
 <footer>
   <div><b>Where it lives.</b> <code>~/code/jevis</code>: hooks in <code>src/hooks.mjs</code>, the engine in <code>src/engine.mjs</code>, the lessons in <code>wiki/</code>. State in <code>~/.jevis</code>, private to your user.</div>
-  <div><b>Safety note.</b> Jevis fails open. With no key, a timeout, an error, or Jev down, no note is added, nothing is refused, and no turn is held.</div>
+  <div><b>Safety note.</b> Jevis fails open. With no key, a timeout, an error, or the decision model down, no note is added, nothing is refused, and no turn is held.</div>
 </footer>
 
 <script type="application/json" id="data">/*SCENARIOS*/</script>
@@ -382,29 +382,29 @@ footer b { color: var(--ink); }
     { n: 1, short: "Hook", title: "The hook fires", where: "bin/jevis.mjs hook prompt | tool | stop | session",
       a: ["Codex and Claude Code call Jevis at four moments: the user sends a prompt (<b>UserPromptSubmit</b>), the agent is about to run a tool (<b>PreToolUse</b>), the agent is about to end its turn (<b>Stop</b>), and a session starts or is compacted (<b>SessionStart</b>, <b>PostCompact</b>).", "Each call arrives as JSON on standard input: the session id, the working folder, the transcript path, and the prompt, tool input, or final message."],
       parts: [["Codex", "sends the model in the input; the file-edit tool is <code>apply_patch</code>"], ["Claude Code", "records the model in the transcript; tools are <code>Bash</code>, <code>Edit</code>, <code>Write</code>"], ["Scope", "<code>JEVIS_SCOPE</code> limits it to folders; <code>JEVIS_DISABLE</code> turns it off"]],
-      note: ["Harness-written prompts", "A background agent finishing or a slash command's output is not a person's request, so Jevis skips it without calling Jev."] },
+      note: ["Harness-written prompts", "A background agent finishing or a slash command's output is not a person's request, so Jevis skips it without calling the decision model."] },
     { n: 2, short: "Facts", title: "Facts are gathered, nothing judged", where: "src/context.mjs",
-      a: ["Jevis turns the hook input into the <b>state</b> Jev will read. This step only parses and lists: the request with Codex's attachment preamble removed, attachment names, the folder's top-level files, whether it is a git repository, the harness and model, and whether a person or another agent started the session.", "For a turn ending it reads the session log, subagents included, and lists what happened after the turn began: files changed, and every command, browser step, and image view after the last edit."],
+      a: ["Jevis turns the hook input into the <b>state</b> the decision model will read. This step only parses and lists: the request with Codex's attachment preamble removed, attachment names, the folder's top-level files, whether it is a git repository, the harness and model, and whether a person or another agent started the session.", "For a turn ending it reads the session log, subagents included, and lists what happened after the turn began: files changed, and every command, browser step, and image view after the last edit."],
       parts: [["request", "the user's words, up to 2,000 characters"], ["workspace", "git or not, up to 40 top-level names"], ["evidence", "<code>actions_after_last_edit</code>, e.g. <code>exit 0: pnpm test</code>"], ["memory", "the current request and turn, from <code>~/.jevis/sessions</code>"]],
-      note: ["Why no judgement here", "An earlier hook system decided what a prompt meant with word patterns, and it misread requests. Here, whether a command was a test or a browser check is Jev's call."] },
+      note: ["Why no judgement here", "An earlier hook system decided what a prompt meant with word patterns, and it misread requests. Here, whether a command was a test or a browser check is the decision model's call."] },
     { n: 3, short: "Wiki", title: "The wiki is narrowed to what can apply", where: "wiki/<area>/<name>.md · src/wiki.mjs",
-      a: [`The wiki holds ${C.entries} lessons from real sessions: ${C.byEvent.prompt} for prompts, ${C.byEvent.tool} for tool calls, ${C.byEvent.stop} for turn endings. Each is one Markdown file with a yes/no question, a threshold, and what to do when it fires.`, "Before Jev is asked anything, entries are filtered by event, by tool name, by model, and by the facts code already knows, so a Sol-only lesson never reaches a Claude session. A tool call no entry could apply to costs no call at all: a command that provably only reads (<code>ls</code>, <code>rg</code>, <code>git log</code>) skips every lesson about commands, and in the maintainer's log that was 42% of them."],
+      a: [`The wiki holds ${C.entries} lessons from real sessions: ${C.byEvent.prompt} for prompts, ${C.byEvent.tool} for tool calls, ${C.byEvent.stop} for turn endings. Each is one Markdown file with a yes/no question, a threshold, and what to do when it fires.`, "Before the decision model is asked anything, entries are filtered by event, by tool name, by model, and by the facts code already knows, so a Sol-only lesson never reaches a Claude session. A tool call no entry could apply to costs no call at all: a command that provably only reads (<code>ls</code>, <code>rg</code>, <code>git log</code>) skips every lesson about commands, and in the maintainer's log that was 42% of them."],
       parts: [["ask", "the entry's yes/no question about the state"], ["unless", "a second question that stands it down, usually “did the user ask for exactly this?”"], ["when", "conditions on the axes or on facts"], ["action", "<code>context</code>, <code>deny</code>, or <code>block</code>"]],
       note: ["Where the lessons came from", "Mined from 661 Codex and 126 Claude Code sessions plus an earlier hook system's history: user corrections, rejected designs, false claims. Every entry names its evidence."] },
     { n: 4, short: "Questions", title: "One question set is built", where: "src/axes.mjs · src/engine.mjs",
-      a: ["The <b>axes</b> go in first: a fixed profile Jev scores on every event of a kind. This is the spider chart: for a prompt, whether it wants a change, is open-ended, visual, code, new, risky, a correction, a delegation, needs current facts, or is mostly writing.", "Then each candidate entry adds its <b>ask</b> and, if it has one, its <b>unless</b>. The set's hash becomes its version, so recorded answers are only compared within one set."],
+      a: ["The <b>axes</b> go in first: a fixed profile the decision model scores on every event of a kind. This is the spider chart: for a prompt, whether it wants a change, is open-ended, visual, code, new, risky, a correction, a delegation, needs current facts, or is mostly writing.", "Then each candidate entry adds its <b>ask</b> and, if it has one, its <b>unless</b>. The set's hash becomes its version, so recorded answers are only compared within one set."],
       parts: [["prompt", "10 axes"], ["tool", "2 axes: destructive, outward"], ["stop", "3 axes: work requested, claims done, claims verified"]],
       note: ["Why split ask and unless", "Jev reads literally. “Is this destructive when the user did not ask?” scored 0.86 on a case it should catch; split in two, the same case scored 0.97 and 0.28."] },
-    { n: 5, short: "Jev", title: "Masked, sent once, hedged", where: "src/jev.mjs",
-      a: ["Secrets are masked first: API keys, tokens, bearer headers, passwords in URLs. Then every question goes to Jev in a single call, because questions in a call are answered in parallel: 1 question takes about 330 ms and 250 take about 360 ms.", "Jev's latency has a long tail, so if no answer arrives in 350 ms, an identical request goes out, and another at 750 ms; whichever answers first wins. The whole call has one deadline: 3 seconds for prompts and turn endings, 1.5 for tool calls."],
+    { n: 5, short: "Decide", title: "Masked, sent once, hedged", where: "src/jev.mjs",
+      a: ["Secrets are masked first: API keys, tokens, bearer headers, passwords in URLs. Then every question goes to the decision model in a single call, because questions in a call are answered in parallel: on Jev, 1 question takes about 330 ms and 250 take about 360 ms.", "GPT-6 Luna gets the same call through OpenAI&rsquo;s Decisions API: each question becomes a predicate, about 380 ms for 66 of them. Both models have a long latency tail, so if no answer arrives in 350 ms, an identical request goes out, and another at 750 ms; whichever answers first wins. The whole call has one deadline: 3 seconds for prompts and turn endings, 1.5 for tool calls."],
       parts: [["chunk", "more than 200 questions split into parallel calls"], ["hedge", "more requests at 350 and 750 ms"], ["deadline", "3 s, or 1.5 s for tool calls"]],
       note: ["Measured", "Before the hedge, 20 calls had a median of 390 ms but a 4.2 s worst case. With it, 40 calls in a row stayed under 1 s."] },
     { n: 6, short: "Record", title: "Every call is recorded", where: "~/.jevis/jev/calls.jsonl · ~/.jevis/jev/questions/",
-      a: ["Each call is appended to a private log: the masked state, every answer with its probability, the timing, and any error. The question set itself is stored once per version.", "This is training data. Laya, an open-source model that serves the same API, can already stand in for Jev (set JEVIS_JEV_URL), and a checkpoint fine-tuned on these calls can learn to give Jev's answers offline."],
+      a: ["Each call is appended to a private log: the masked state, every answer with its probability, the timing, and any error. The question set itself is stored once per version.", "This is training data. Laya, an open-source model that serves the same API, can already stand in for Jev (set JEVIS_JEV_URL), and a checkpoint fine-tuned on these calls can learn to give Jev's answers offline. Each record names its decider, so Luna&rsquo;s answers are never mixed into Jev&rsquo;s training labels or threshold tuning."],
       parts: [["calls.jsonl", "state, answers, ms, usage, error"], ["questions/", "one file per question-set version"], ["mode", "files 600, folders 700"]],
       note: ["Not recorded", "Replays and evals of old sessions don't write training data unless asked with <code>--record</code>."] },
     { n: 7, short: "Gates", title: "Three gates decide what fires", where: "src/engine.mjs · conditionsHold",
-      a: ["An entry fires only when its answer reaches its <b>min</b>, its <b>unless</b> answer stays under <b>unless_max</b>, and its <b>when</b> conditions hold on the profile and the facts.", "If Jev says nothing about an <b>unless</b>, Jevis assumes the user asked, so a hiccup can never refuse a command."],
+      a: ["An entry fires only when its answer reaches its <b>min</b>, its <b>unless</b> answer stays under <b>unless_max</b>, and its <b>when</b> conditions hold on the profile and the facts.", "If the decision model says nothing about an <b>unless</b>, Jevis assumes the user asked, so a hiccup can never refuse a command."],
       parts: [["min", "default 0.75; 0.85 or more for deny and block"], ["unless_max", "default 0.5"], ["when", "e.g. <code>wants_change ≥ 0.6</code>, <code>evidence.edited = true</code>"]],
       note: ["The user's words win", "Every deny has an unless. “Run the QA pass” first read as asking to see a window (0.77) until the question said testing does not count (0.07)."] },
     { n: 8, short: "Action", title: "The action fits the moment", where: "src/hooks.mjs",
@@ -429,7 +429,7 @@ footer b { color: var(--ink); }
     if (i) svg.append(s("path", { class: "wire", id: `w-${i}`, d: `M ${X + W / 2} ${y - GAP} V ${y}` }));
     const g = s("g", { class: "part", id: `part-${st.n}` });
     g.append(s("rect", { class: "body", x: X, y, width: W, height: H, rx: 8 }));
-    g.append(s("text", { x: X + 16, y: y + 26 }, st.title.replace(", nothing judged", "").replace(" is narrowed to what can apply", " narrowed").replace("Masked, sent once, hedged", "Jev: masked, sent, hedged").replace("Three gates decide what fires", "Three gates").replace("The action fits the moment", "The action")));
+    g.append(s("text", { x: X + 16, y: y + 26 }, st.title.replace(", nothing judged", "").replace(" is narrowed to what can apply", " narrowed").replace("Masked, sent once, hedged", "Decide: masked, sent, hedged").replace("Three gates decide what fires", "Three gates").replace("The action fits the moment", "The action")));
     g.append(s("text", { class: "small", x: X + 16, y: y + 46 }, sub[i]));
     // Callouts all sit on the left, as in a product manual; side channels run on the right.
     const num = s("g", { class: "num" });
@@ -440,7 +440,7 @@ footer b { color: var(--ink); }
     g.append(num);
     svg.append(g);
   });
-  // Side channels: the transcript into the facts, Jev's service, the record's use, and the outputs back to the harness.
+  // Side channels: the transcript into the facts, the decision model's service, the record's use, and the outputs back to the harness.
   const yOf = (n) => Y0 + (n - 1) * (H + GAP);
   const side = (n, label, dir) => {
     const y = yOf(n) + H / 2;
@@ -448,7 +448,7 @@ footer b { color: var(--ink); }
     svg.append(s("text", { class: "label-out", x: X + W + 12, y: y - 8 }, `${dir} ${label}`));
   };
   side(2, "session log", "←");
-  side(5, "Jev API", "⇄");
+  side(5, "Jev or Luna API", "⇄");
   side(6, "or Laya, self-hosted", "→");
   // The output returns to the harness: a loop around the far left, outside the callouts.
   const y8 = yOf(8) + H / 2 + 14, y1 = yOf(1) + H / 2 + 14;
@@ -499,13 +499,15 @@ footer b { color: var(--ink); }
   $("#captured").textContent = new Date(DATA.captured).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   const tech = [
     ["Lessons in the wiki", `<b>${C.entries}</b> · ${C.byAction.context} notes, ${C.byAction.deny} denies, ${C.byAction.block} blocks`],
+    ["Decision models", "TypeSafe <b>Jev 1.14</b> (default) or OpenAI <b>GPT-6 Luna</b>, one setting apart"],
     ["Jev latency, one question vs 250", "<b>330 ms</b> vs 360 ms (Sep 27 2026)"],
+    ["Luna latency, 66 questions", "<b>383 ms</b> median, 1.57 s worst of 10 (Oct 15 2026)"],
     ["Worst of 40 calls, with the 700 ms hedge", "<b>988 ms</b> (4.2 s worst of 20 without it)"],
-    ["Cost per event", "about <b>6,000 tokens</b> at $0.042 per million: $0.0003"],
+    ["Cost per event", "Jev: about <b>6,000 tokens</b> at $0.042 per million, $0.0003. Luna: about $0.0016"],
     ["Tool-call battery, live", "<b>16 / 16</b> denies and passes as expected"],
     ["Real turn endings replayed", "<b>312</b> across 60 sessions; <b>4</b> would be held (1.3%)"],
     ["Labeled prompts replayed", "<b>220</b>; 92 get no note, none get more than 4"],
-    ["Failure behaviour", "no key, timeout, error, or Jev down: <b>nothing happens</b>"],
+    ["Failure behaviour", "no key, timeout, error, refusal, or the model down: <b>nothing happens</b>"],
   ];
   $("#tech").append(...tech.map(([k, v]) => h("tr", {}, h("th", { scope: "row" }, k), h("td", { html: v }))));
 

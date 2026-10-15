@@ -18,7 +18,7 @@ const { tune, formatTune, sinceTime } = await import("../src/tune.mjs");
 const { mine, formatMine } = await import("../src/mine.mjs");
 const { clip } = await import("../src/context.mjs");
 const { onPrompt } = await import("../src/hooks.mjs");
-const { exportDataset, goldOf, pickTest } = await import("../src/export.mjs");
+const { exportDataset, formatExport, goldOf, pickTest } = await import("../src/export.mjs");
 
 const put = (id, text) => {
   mkdirSync(join(wikiDir, id, ".."), { recursive: true });
@@ -51,6 +51,21 @@ const tool = async (sessionId, request, input) => {
   await evaluate({ event: "tool", tool: "Bash", sessionId, harness: "Codex", model: "gpt-6", wiki: loadWiki(), state: { request, tool: "Bash", input, workspace: {} } });
   await tick();
 };
+
+test("export: only Jev and historical labels enter Laya training, not Luna", () => {
+  const home = mkdtempSync(join(tmpdir(), "jevis-export-deciders-"));
+  mkdirSync(join(home, "jev", "questions"), { recursive: true });
+  writeFileSync(join(home, "jev", "questions", "v1.json"), JSON.stringify({ q: { type: "noul", instructions: "A question?" } }));
+  const rows = [undefined, "jev", "luna", "other"].map((decider, i) => ({ decider, event: "tool", version: "v1", sessionId: `s${i}`, state: { request: `${i}` }, answers: { q: 0.9 } }));
+  writeFileSync(join(home, "jev", "calls.jsonl"), rows.map(JSON.stringify).join("\n") + "\n");
+  const r = exportDataset({ home, out: join(home, "out"), testShare: 0 });
+  assert.equal(r.train, 2);
+  assert.equal(r.otherDeciders, 2);
+  assert.equal(r.sessions, 2);
+  assert.match(formatExport(r), /Skipped 2 non-Jev calls \(including Luna\): Laya training exports keep only Jev labels/);
+  const exported = gunzipSync(readFileSync(r.files.train)).toString().trim().split("\n").map(JSON.parse);
+  assert.deepEqual(exported.map((row) => JSON.parse(row.state).request).sort(), ["0", "1"]);
+});
 
 await prompt("s1", "make a page for the bakery");
 log({ event: "prompt", sessionId: "s1", acted: ["t/page"] });
@@ -258,4 +273,27 @@ test("export: rows in Laya's format, split by whole sessions, repeats dropped, f
   appendFileSync(calls, `${JSON.stringify({ at: new Date().toISOString(), event: "tool", version, sessionId: "old", state: { request: "x", tool: "Bash", input: 'aws configure set aws_secret_access_key "private phrase for test"' }, answers: { "t/push": 0.1 } })}\n`);
   const again = exportDataset({ out, testShare: 0 });
   assert.ok(!gunzipSync(readFileSync(again.files.train)).toString().includes("private phrase for test"));
+});
+
+test("tune: thresholds are judged only on the active decider's records", async () => {
+  const { tune } = await import("../src/tune.mjs");
+  const { mkdtempSync, writeFileSync, mkdirSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "jevis-tune-decider-"));
+  mkdirSync(join(dir, "questions"));
+  const entry = { id: "probe", event: "prompt", action: "note", min: 0.5, ask: "Is it a probe?" };
+  const rows = [{ event: "prompt", version: "v", answers: { probe: 0.9 }, state: {} }, { event: "prompt", version: "v", decider: "jev", answers: { probe: 0.9 }, state: {} }, { event: "prompt", version: "v", decider: "luna", answers: { probe: 0.9 }, state: {} }];
+  writeFileSync(join(dir, "calls.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  const saved = process.env.JEVIS_DECIDER;
+  try {
+    delete process.env.JEVIS_DECIDER;
+    assert.equal(tune([entry], { file: join(dir, "calls.jsonl"), questionsDir: join(dir, "questions") }).records, 2);
+    process.env.JEVIS_DECIDER = "luna";
+    const r = tune([entry], { file: join(dir, "calls.jsonl"), questionsDir: join(dir, "questions") });
+    assert.equal(r.records, 1);
+    assert.equal(r.decider, "luna");
+  } finally {
+    if (saved === undefined) delete process.env.JEVIS_DECIDER; else process.env.JEVIS_DECIDER = saved;
+  }
 });

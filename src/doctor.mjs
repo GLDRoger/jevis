@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TARGETS, commandWords, isJevis, jevisHooks, onPath, reviewStatus } from "../bin/install.mjs";
 import { readConfig, settingSources } from "./config.mjs";
-import { askJev, jevUrl, TYPESAFE_URL } from "./jev.mjs";
+import { askJev, decider, jevModel, jevUrl, lunaKey, lunaModel, LUNA_URL, TYPESAFE_URL } from "./jev.mjs";
 import { jevisHome } from "./state.mjs";
 import { eachJsonl } from "./transcript.mjs";
 import { redact } from "./redact.mjs";
@@ -120,17 +120,20 @@ function keySource(env) {
 
 /** The decision model: configured, keyed, and (unless offline) answering. */
 export async function jevChecks({ env = process.env, offline = false, timeoutMs = 8000 } = {}) {
-  const url = jevUrl();
+  const luna = decider(env) === "luna";
+  const url = luna ? LUNA_URL : jevUrl();
   const typesafe = url === TYPESAFE_URL;
+  const label = luna ? `GPT-6 Luna (${lunaModel(env)})` : `Jev${jevModel() ? ` (${jevModel()})` : ""} at ${shown(url)}`;
   const out = [];
   if (env.JEVIS_JEV === "off") return [warn("decision model", "JEVIS_JEV=off: no calls are made", "unset JEVIS_JEV")];
-  const source = keySource(env);
+  const source = luna ? lunaKey(env)?.source : keySource(env);
+  if (luna && !source) return [fail("decision model", `${label}, but no API key: every hook does nothing`, "put the key in ~/.jevis/secrets/openai_api_key (chmod 600), or set JEVIS_LUNA_KEY or OPENAI_API_KEY")];
   if (typesafe && !source) return [fail("decision model", `TypeSafe at ${url}, but no API key: every hook does nothing`, "put the key in ~/.jevis/secrets/typesafe_api_key (chmod 600), or point --jev-url at a Laya server")];
   if (process.platform !== "win32" && source && isAbsolute(source) && modeOf(source) & 0o077) out.push(warn("api key", `${source} is readable by others (mode ${modeOf(source).toString(8)})`, `chmod 600 ${source}`));
-  if (offline) return [...out, info("decision model", `${shown(url)}${source ? `, key from ${source}` : ""}; not called (--offline)`)];
+  if (offline) return [...out, info("decision model", `${label}${source ? `, key from ${source}` : ""}; not called (--offline)`)];
   const r = await askJev({ state: { request: "jevis doctor checking the connection" }, questions: { doctor: { type: "noul", instructions: "Does `request` mention a connection check?" } }, event: "doctor", timeoutMs, record: false });
-  if (!r.answers) return [...out, fail("decision model", `${shown(url)} did not answer: ${r.error}`, typesafe ? "check the key and the network (https://api.typesafe.ai)" : "check that the server is running and speaks POST /v1/systemone")];
-  return [...out, ok("decision model", `${shown(url)} answered in ${r.ms} ms${source ? `, key from ${source}` : ""}`)];
+  if (!r.answers) return [...out, fail("decision model", `${label} did not answer: ${r.error}`, luna ? "check the key and the network (https://api.openai.com)" : typesafe ? "check the key and the network (https://api.typesafe.ai)" : "check that the server is running and speaks POST /v1/systemone")];
+  return [...out, ok("decision model", `${label} answered in ${r.ms} ms${source ? `, key from ${source}` : ""}`)];
 }
 
 /** ~/.jevis holds prompts and the call record: it and what is in it stay private to this user. */

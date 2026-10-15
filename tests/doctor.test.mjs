@@ -93,6 +93,39 @@ test("doctor: the decision model needs a key for TypeSafe, and a live answer", a
   assert.equal((await jevChecks({ env: { TYPESAFE_API_KEY: "sk-test" }, offline: true })).at(-1).status, "info");
 });
 
+test("doctor: Luna needs a key, names its source and model, and checks file permissions", async (t) => {
+  const home = process.env.JEVIS_HOME;
+  const decider = process.env.JEVIS_DECIDER;
+  t.after(() => {
+    process.env.JEVIS_HOME = home;
+    decider === undefined ? delete process.env.JEVIS_DECIDER : process.env.JEVIS_DECIDER = decider;
+    setJevTransport(null);
+  });
+  process.env.JEVIS_HOME = mkdtempSync(join(tmpdir(), "jevis-doctor-luna-"));
+  process.env.JEVIS_DECIDER = "luna";
+  const noKey = await jevChecks({ env: { JEVIS_DECIDER: "luna" } });
+  assert.equal(noKey[0].status, "fail");
+  assert.match(noKey[0].detail, /GPT-6 Luna \(gpt-6-luna\).*no API key/);
+  assert.match(noKey[0].fix, /openai_api_key/);
+  for (const source of ["JEVIS_LUNA_KEY", "OPENAI_API_KEY"]) {
+    const env = { JEVIS_DECIDER: "luna", [source]: "fake-key" };
+    const r = await jevChecks({ env, offline: true });
+    assert.equal(r.at(-1).status, "info");
+    assert.ok(r.at(-1).detail.includes(`key from ${source}`));
+    assert.ok(!JSON.stringify(r).includes("fake-key"));
+  }
+  mkdirSync(join(process.env.JEVIS_HOME, "secrets"));
+  const file = join(process.env.JEVIS_HOME, "secrets", "openai_api_key");
+  writeFileSync(file, "fake-file-key", { mode: 0o644 });
+  const offline = await jevChecks({ env: { JEVIS_DECIDER: "luna", JEVIS_LUNA_MODEL: "custom-luna" }, offline: true });
+  if (process.platform !== "win32") assert.ok(offline.some((c) => c.status === "warn" && /readable by others/.test(c.detail)));
+  assert.ok(offline.at(-1).detail.includes(`GPT-6 Luna (custom-luna), key from ${file}`));
+  setJevTransport(async () => ({ answers: { doctor: { noul: 1 } } }));
+  assert.match((await jevChecks({ env: { JEVIS_DECIDER: "luna" } })).at(-1).detail, /GPT-6 Luna \(gpt-6-luna\) answered in \d+ ms, key from/);
+  setJevTransport(async () => { throw new Error("HTTP 401: bad key"); });
+  assert.match((await jevChecks({ env: { JEVIS_DECIDER: "luna" } })).at(-1).fix, /https:\/\/api.openai.com/);
+});
+
 test("doctor: loose permissions, broken hooks, and failing decisions in the log are warned about", () => {
   const home = mkdtempSync(join(tmpdir(), "jevis-doctor-priv-"));
   mkdirSync(join(home, "backups"));

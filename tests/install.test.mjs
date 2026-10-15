@@ -50,6 +50,9 @@ test("install: running it twice gives the same config, and the hook commands car
 });
 
 test("install: options are saved as settings, kept across installs, and older command prefixes carry over", () => {
+  assert.deepEqual(settingsChanges({ decider: "luna" }), { JEVIS_DECIDER: "luna" });
+  assert.deepEqual(settingsChanges({ decider: "jev" }), { JEVIS_DECIDER: null });
+  assert.throws(() => settingsChanges({ decider: "bogus" }), /--decider must be one of jev, luna, got bogus/);
   assert.deepEqual(settingsChanges({ shadow: true, critic: "off", jevUrl: "http://127.0.0.1:8000/v1/systemone" }), { JEVIS_MODE: "shadow", JEVIS_CRITIC: "off", JEVIS_JEV_URL: "http://127.0.0.1:8000/v1/systemone" });
   assert.deepEqual(settingsChanges({}), {}, "an install without options changes no setting");
   assert.deepEqual(settingsChanges({ live: true, critic: "claude", jevUrl: "typesafe" }), { JEVIS_MODE: null, JEVIS_CRITIC: null, JEVIS_JEV_URL: null }, "defaults remove the setting");
@@ -72,6 +75,23 @@ test("install: --critic picks the reviewer or turns the review off, and says whe
   assert.match(missing, /skipped until Google Chrome and the claude CLI are installed/);
   assert.match(missing, /--critic off, or pick --critic codex/);
   assert.match(reviewStatus("codex", { chrome: true, cli: false }), /skipped until the codex CLI is installed\. .*--critic off\.$/);
+});
+
+test("install: Luna dry-run checks OpenAI keys, not TypeSafe keys, without writing", () => {
+  const home = mkdtempSync(join(tmpdir(), "jevis-install-luna-"));
+  const env = { ...process.env, HOME: home, USERPROFILE: home, JEVIS_HOME: join(home, ".jevis") };
+  for (const key of ["JEVIS_DECIDER", "JEVIS_LUNA_KEY", "OPENAI_API_KEY"]) delete env[key];
+  env.TYPESAFE_API_KEY = "fake-typesafe-key";
+  const run = () => execFileSync(process.execPath, [fileURLToPath(new URL("../bin/install.mjs", import.meta.url)), "--dry-run", "--decider", "luna"], { env, encoding: "utf8" });
+  const missing = run();
+  assert.match(missing, /No OpenAI key in JEVIS_LUNA_KEY, OPENAI_API_KEY, or ~\/\.jevis\/secrets\/openai_api_key/);
+  assert.doesNotMatch(missing, /No TypeSafe key/);
+  assert.match(missing, /JEVIS_DECIDER="luna"/);
+  assert.match(missing, /Dry run: nothing written/);
+  assert.deepEqual(readdirSync(home), []);
+  env.OPENAI_API_KEY = "fake-openai-key";
+  assert.doesNotMatch(run(), /No OpenAI key|fake-openai-key/);
+  assert.deepEqual(readdirSync(home), []);
 });
 
 test("uninstall: removes Jevis and leaves the rest, down to an empty hooks key", () => {

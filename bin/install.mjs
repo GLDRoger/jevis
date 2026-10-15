@@ -8,6 +8,7 @@
  *   node bin/install.mjs --dry-run           # print the new config, write nothing
  *   node bin/install.mjs --jev-url http://127.0.0.1:8000/v1/systemone   # a self-hosted Laya instead of TypeSafe (typesafe to go back)
  *   node bin/install.mjs --critic codex      # who reviews visual work: claude (default), codex, or off
+ *   node bin/install.mjs --decider luna      # jev (default) or luna
  *   node bin/install.mjs --uninstall         # remove Jevis's hooks
  *
  * Every existing file we write is backed up in ~/.jevis/backups/<time>/. Hooks that
@@ -23,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import { SETTINGS, configFile, readConfig, writeConfig } from "../src/config.mjs";
 import { ensureDir, jevisHome } from "../src/state.mjs";
 import { isQualifiedPath, onPath } from "../src/paths.mjs";
+import { decider, lunaKey } from "../src/jev.mjs";
 export { findOnPath, onPath } from "../src/paths.mjs";
 
 const JEVIS = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -112,10 +114,11 @@ export function carriedSettings(config, { platform = process.platform } = {}) {
  * carried from older hook commands where the file has none yet. A value of
  * null removes a setting, so its default applies.
  */
-export function settingsChanges({ shadow = false, live = false, jevUrl = null, critic = null } = {}, { carried = {}, saved = {} } = {}) {
+export function settingsChanges({ shadow = false, live = false, jevUrl = null, critic = null, decider = null } = {}, { carried = {}, saved = {} } = {}) {
   if (shadow && live) throw new Error("--shadow and --live contradict each other");
   if (jevUrl && !["typesafe", "default"].includes(jevUrl) && !SETTINGS.JEVIS_JEV_URL.ok(jevUrl)) throw new Error(`--jev-url must be a plain http(s) URL, or typesafe for the default, got ${jevUrl}`);
   if (critic && !CRITICS.includes(critic)) throw new Error(`--critic must be one of ${CRITICS.join(", ")}, got ${critic}`);
+  if (decider !== null && !["jev", "luna"].includes(decider)) throw new Error(`--decider must be one of jev, luna, got ${decider}`);
   const changes = {};
   for (const [key, value] of Object.entries(carried)) if (saved[key] === undefined) changes[key] = value;
   if (shadow) changes.JEVIS_MODE = "shadow";
@@ -123,6 +126,7 @@ export function settingsChanges({ shadow = false, live = false, jevUrl = null, c
   if (jevUrl) changes.JEVIS_JEV_URL = ["typesafe", "default"].includes(jevUrl) ? null : jevUrl;
   // claude is the default, so choosing it removes the setting.
   if (critic) changes.JEVIS_CRITIC = critic === "claude" ? null : critic;
+  if (decider) changes.JEVIS_DECIDER = decider === "jev" ? null : decider;
   return changes;
 }
 
@@ -192,7 +196,7 @@ function main(argv) {
   const has = (f) => argv.includes(`--${f}`);
   const pick = argv.includes("--harness") ? argv[argv.indexOf("--harness") + 1].split(",") : Object.keys(TARGETS);
   const value = (f) => (argv.includes(`--${f}`) ? argv[argv.indexOf(`--${f}`) + 1] : null);
-  const opts = { uninstall: has("uninstall"), shadow: has("shadow"), live: has("live"), jevUrl: value("jev-url"), critic: value("critic") };
+  const opts = { uninstall: has("uninstall"), shadow: has("shadow"), live: has("live"), jevUrl: value("jev-url"), critic: value("critic"), decider: value("decider") };
   const dry = has("dry-run");
   // Only the words the hook commands contain must survive every shell; other paths are opened by Node, not a shell.
   for (const path of [CLI, process.execPath]) word(path);
@@ -214,7 +218,9 @@ function main(argv) {
     uninstall: opts.uninstall,
     node: process.platform === "win32" ? process.execPath : nodeIn(befores[harness]) ?? process.execPath,
   })]));
-  const usesTypeSafe = !process.env.JEVIS_JEV_URL && !settings.JEVIS_JEV_URL;
+  const luna = decider({ ...settings, ...process.env }) === "luna";
+  const usesTypeSafe = !luna && !process.env.JEVIS_JEV_URL && !settings.JEVIS_JEV_URL;
+  if (!opts.uninstall && luna && !lunaKey()) console.log("No OpenAI key in JEVIS_LUNA_KEY, OPENAI_API_KEY, or ~/.jevis/secrets/openai_api_key: Jevis will install but do nothing until one is there (mode 600 for the file).");
   if (!opts.uninstall && usesTypeSafe && !existsSync(join(jevisHome(), "secrets", "typesafe_api_key")) && !process.env.TYPESAFE_API_KEY && !process.env.JEVIS_JEV_KEY) {
     console.log("No TypeSafe key in ~/.jevis/secrets/typesafe_api_key: Jevis will install but do nothing until one is there (mode 600), or reinstall with --jev-url for a Laya server.");
   }

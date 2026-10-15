@@ -18,13 +18,13 @@ You need Node 22 or newer.
 git clone https://github.com/GLDRoger/jevis.git
 cd jevis
 npm ci
-npm test        # offline: a scripted decision model stands in for Jev
+npm test        # offline: a scripted decision model stands in for Jev and Luna
 npm run lint    # checks every wiki entry against WIKI.md
 ```
 
 Both run in CI on every pull request and must pass before merging.
 
-Live checks (`node bin/jevis.mjs ask`, `node eval/slop.mjs`, the simulations) call the decision model, so they need a TypeSafe key or a self-hosted server (see the README). CI doesn't run them. When your change depends on them, paste their output into the pull request.
+Live checks (`node bin/jevis.mjs ask`, `node eval/slop.mjs`, the simulations) call the decision model, so they need a TypeSafe key, an OpenAI key (with `JEVIS_DECIDER=luna`), or a self-hosted server (see the README). A change to how questions are asked or answered should be checked on both deciders: run the batteries once as is and once with `JEVIS_DECIDER=luna`, and report both. CI doesn't run them. When your change depends on them, paste their output into the pull request.
 
 ## Adding or changing a lesson
 

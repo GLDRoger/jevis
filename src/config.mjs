@@ -34,18 +34,22 @@ export const SETTINGS = {
   JEVIS_CRITIC_MODEL: { ok: text, help: "the model the critic uses" },
   JEVIS_DESIGN_LAW: { ok: text, help: "a Markdown file of your own design rules" },
   JEVIS_WIKI: { ok: absolutePaths, env: (v) => [v].flat().join(delimiter), help: "absolute lesson folders, replacing the defaults" },
+  JEVIS_DECIDER: { ok: oneOf("jev", "luna"), help: "decision model provider: jev or luna" },
+  JEVIS_LUNA_MODEL: { ok: text, help: "the OpenAI Decisions model sent with each Luna call" },
   JEVIS_JEV_URL: { ok: httpUrl, help: "a /v1/systemone server instead of TypeSafe" },
   JEVIS_JEV: { ok: oneOf("on", "off"), help: "off disables decision-model calls; hooks pass through" },
   JEVIS_JEV_MODEL: { ok: text, help: "the model field sent with each call" },
   JEVIS_JEV_CHUNK: { ok: number, env: String, help: "questions per request" },
   JEVIS_TIMEOUT_MS: { ok: number, env: String, help: "how long a hook waits for the decision model" },
-  JEVIS_RECORD: { ok: oneOf("on", "off", true, false), env: (v) => (v === false || v === "off" ? "off" : "on"), help: "off keeps no record of Jev calls" },
+  JEVIS_RECORD: { ok: oneOf("on", "off", true, false), env: (v) => (v === false || v === "off" ? "off" : "on"), help: "off keeps no record of decision-model calls" },
 };
 
 const REFUSED = {
   JEVIS_HOME: "JEVIS_HOME cannot be set here: this file lives in it",
   JEVIS_JEV_KEY: "the API key belongs in ~/.jevis/secrets/typesafe_api_key (mode 600), not in the settings file",
   TYPESAFE_API_KEY: "the API key belongs in ~/.jevis/secrets/typesafe_api_key (mode 600), not in the settings file",
+  JEVIS_LUNA_KEY: "the API key belongs in ~/.jevis/secrets/openai_api_key (mode 600), not in the settings file",
+  OPENAI_API_KEY: "the API key belongs in ~/.jevis/secrets/openai_api_key (mode 600), not in the settings file",
 };
 
 export const configFile = () => join(jevisHome(), "config.json");

@@ -62,5 +62,5 @@ export function outageLine({ now = Date.now() } = {}) {
   if (!(health?.count >= FAILURE_STREAK) || !Number.isFinite(health.since) || !Number.isFinite(health.lastAt) || now < health.lastAt || now - health.lastAt > FAILURE_WINDOW) return null;
   const time = new Date(health.since).toISOString().slice(11, 16);
   const kind = health.status === 402 ? "HTTP 402 billing" : `${health.status ? `HTTP ${health.status} ` : ""}${health.class}`;
-  return `Jevis: Jev unavailable since ${time} UTC (${kind}). Hooks are passing everything through.`;
+  return `Jevis: ${process.env.JEVIS_DECIDER === "luna" ? "GPT-6 Luna" : "Jev"} unavailable since ${time} UTC (${kind}). Hooks are passing everything through.`;
 }

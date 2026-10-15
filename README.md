@@ -4,9 +4,9 @@ Jevis is a set of hooks that gives a coding agent a second pair of eyes. It read
 
 It was built for **Codex**, where it helped most. It also improved **Claude Code** in the same tests. It should help any agent harness that supports hooks, because what it adds (lessons at the right moment, a refusal before a mistake, a review before "done") doesn't depend on the model underneath.
 
-The decision model is TypeSafe's hosted [Jev](https://typesafe.ai), or any server that speaks the same API, such as a self-hosted [Laya](https://github.com/NandhaKishorM/laya) (with caveats, [below](#laya-self-hosted)).
+The decision model is TypeSafe's hosted [Jev](https://typesafe.ai), GPT-6 Luna through OpenAI's Decisions API, or any Jev-compatible server such as a self-hosted [Laya](https://github.com/NandhaKishorM/laya) (with caveats, [below](#laya-self-hosted)).
 
-Some lesson questions now have exact code rules: destructive git commands, em dashes in interface prose, literal gradient text, and emoji feature markers. Those skip the pattern question when code can prove the answer. User-permission exceptions, unfamiliar syntax, and design judgments still go to Jev; see [`decide` in the wiki format](WIKI.md#format).
+Some lesson questions now have exact code rules: destructive git commands, em dashes in interface prose, literal gradient text, and emoji feature markers. Those skip the pattern question when code can prove the answer. User-permission exceptions, unfamiliar syntax, and design judgments still go to the active decision model; see [`decide` in the wiki format](WIKI.md#format).
 
 <img src="docs/media/before-after.jpg" width="560" alt="The same pottery-studio prompt given to Codex (GPT-6 Sol) twice. Bare, it made a plain two-column page with a grey 'Studio photo to add' placeholder. With Jevis, it made a full-bleed photo of hands throwing a pot with the headline 'Clock off. Clay on.'">
 
@@ -143,7 +143,7 @@ The maintainer's tier list, current as of 28 September 2026:
 
 ## Install
 
-You need Node 22 or newer and a TypeSafe key (or your own Jev-compatible server). Everything else is optional: the design and film review also needs Google Chrome and the `claude` or `codex` CLI, and `ffmpeg` lets film reviews check the soundtrack.
+You need Node 22 or newer and a TypeSafe or OpenAI key (or your own Jev-compatible server). Everything else is optional: the design and film review also needs Google Chrome and the `claude` or `codex` CLI, and `ffmpeg` lets film reviews check the soundtrack.
 
 ```sh
 git clone https://github.com/GLDRoger/jevis.git ~/code/jevis
@@ -152,7 +152,7 @@ npm install
 npm test                       # offline, with a scripted decision model
 ```
 
-Give Jevis a TypeSafe key (next section), then install the hooks:
+Give Jevis a decision-model key (see [below](#choosing-the-decision-model)), then install the hooks:
 
 Alternatively, use the [native Codex plugin](#native-codex-plugin) below. Choose one hook installation method per harness so Jevis does not run twice.
 
@@ -183,6 +183,7 @@ node bin/install.mjs --shadow            # Jevis logs what it would do and chang
 node bin/install.mjs --live              # switch shadow mode off
 node bin/install.mjs --harness codex     # one harness only
 node bin/install.mjs --jev-url URL       # use a self-hosted server instead of TypeSafe
+node bin/install.mjs --decider luna      # use GPT-6 Luna (jev to go back)
 node bin/install.mjs --critic off        # no design review; every other check still runs (or --critic codex)
 node bin/install.mjs --uninstall         # remove Jevis's hooks
 ```
@@ -213,13 +214,13 @@ The plugin uses Node 22+ on PATH and the same `~/.jevis` settings, personal wiki
 
 **Migration:** first inspect `node bin/install.mjs --harness codex --uninstall --dry-run`. If you choose to switch, run it without `--dry-run` before enabling the plugin hooks. This removes only the standalone Codex Jevis entries and preserves other hooks and Claude Code. Do not run both sources: Codex runs matching hooks from every source, and duplicate Jevis hooks share counters and logs.
 
-**Check it:** use `codex plugin list` for installation, `/hooks` for enablement and trust, and `node /absolute/path/to/installed/jevis/bin/jevis.mjs stats` for actual activity. The current `doctor` checks standalone harness hook files, not plugin installation or trust; its "not installed" warning alone is not evidence that the plugin failed. Configure a TypeSafe key or your own Jev endpoint as described below, then try shadow mode before live use. Without that backend, Jevis fails open; installation alone does not prove a lesson fired.
+**Check it:** use `codex plugin list` for installation, `/hooks` for enablement and trust, and `node /absolute/path/to/installed/jevis/bin/jevis.mjs stats` for actual activity. The current `doctor` checks standalone harness hook files, not plugin installation or trust; its "not installed" warning alone is not evidence that the plugin failed. Configure a TypeSafe or OpenAI key, or your own Jev endpoint as described below, then try shadow mode before live use. Without that backend, Jevis fails open; installation alone does not prove a lesson fired.
 
 Packaging and trust follow the [OpenAI plugin format](https://developers.openai.com/plugins/build/plugins) and [Codex hook runtime](https://learn.chatgpt.com/docs/hooks). Nothing is published to the public plugin directory by these local commands.
 
 ### The design review
 
-After a turn of visual work (a page, a component, a film), Jevis renders the result, or samples a film's frames, in headless Chrome and hands the screenshots to a second model, which reviews it as a designer who didn't make it and can send the work back. That second model is not Jev: it runs through a coding agent's CLI, on your own plan.
+After a turn of visual work (a page, a component, a film), Jevis renders the result, or samples a film's frames, in headless Chrome and hands the screenshots to a second model, which reviews it as a designer who didn't make it and can send the work back. That second model is separate from the decision model: it runs through a coding agent's CLI, on your own plan.
 
 | Install with | Who reviews | Needs |
 |---|---|---|
@@ -227,15 +228,31 @@ After a turn of visual work (a page, a component, a film), Jevis renders the res
 | `--critic codex` | Codex, through the `codex` CLI | Google Chrome, `codex` signed in |
 | `--critic off` | nobody | nothing |
 
-Only the review needs these. The notes, refusals and "done" checks run on Jev either way. The installer ends with one line saying whether the review can run on this machine. If Chrome or the CLI is missing, the review is skipped, not failed. `JEVIS_CRITIC_MODEL` picks the reviewer's model.
+Only the review needs these. The notes, refusals and "done" checks run on the active decision model either way. The installer ends with one line saying whether the review can run on this machine. If Chrome or the CLI is missing, the review is skipped, not failed. `JEVIS_CRITIC_MODEL` picks the reviewer's model.
 
 ## Choosing the decision model
 
-Jevis asks every question as a yes/no with a probability, in one parallel call per event. Any server that speaks TypeSafe's `POST /v1/systemone` protocol works.
+Jevis asks every question as a yes/no with a probability, in parallel calls per event. It supports two hosted decision models as equals, and any server that speaks TypeSafe's `POST /v1/systemone` protocol:
+
+- **TypeSafe Jev** (`jev-1.14.0`, the default)
+- **GPT-6 Luna**, through OpenAI's `POST /v1/decisions`. Select it with `--decider luna`.
+
+Every hook, setting, installer option, `doctor` check, outage note, call record, and `jevis stats` view works the same with either. What differs is how well today's lessons are tuned to each. Every lesson's `min` and `unless_max` threshold was set against Jev's probabilities, and Luna's are spread differently. Measured on Oct 15 2026 with the shipped lessons:
+
+| | Jev 1.14 | GPT-6 Luna |
+|---|---|---|
+| Design battery (`eval/slop.mjs`) | 66 to 69 of 70 | 59 of 70 |
+| Tool battery (`eval/tools.mjs`) | 30 of 34 | 24 of 34 |
+| Real turn endings it would send back (`eval/stops.mjs`, 406 turns) | 2.0% | 12.1% |
+| Median / slowest call, 66 questions, 10 runs | 357 ms / 390 ms | 383 ms / 1,574 ms |
+| Input price per million tokens (output free) | $0.042 | $0.10 |
+| Questions per request | any that fit 64k tokens | 200 |
+
+Most of Luna's misses are on the `unless` question ("did the user ask for exactly this?"): it answers yes to commands like `git reset --hard` that nobody asked for, so the refusal stands down. On turn endings it leans the other way and sends back about one in eight. To run Jevis on Luna, start in shadow mode (`--decider luna --shadow`) and read `jevis stats --near`, which judges thresholds against Luna's own recorded answers, never Jev's. Jev remains the recommendation until the thresholds have been tuned for Luna.
 
 ### TypeSafe Jev (recommended)
 
-This is what every result above used. Answers typically come back in under half a second, even for hundreds of questions. At the time of writing, [TypeSafe listed](https://typesafe.ai) $42 per billion input tokens ($0.042 per million), with output free. In the maintainer's heavy agentic use, that has come to between $0.20 and $2 a day.
+Jevis pins TypeSafe to `jev-1.14.0`; `JEVIS_JEV_MODEL` overrides it. Jev is what every result above used. Answers typically come back in under half a second, even for hundreds of questions. At the time of writing, [TypeSafe listed](https://typesafe.ai) $42 per billion input tokens ($0.042 per million), with output free. In the maintainer's heavy agentic use, that has come to between $0.20 and $2 a day.
 
 1. Get a key from the [TypeSafe console](https://console.typesafe.ai). The docs are at [docs.typesafe.ai](https://docs.typesafe.ai).
 2. Save it where only you can read it:
@@ -248,6 +265,36 @@ This is what every result above used. Answers typically come back in under half 
    Or set `TYPESAFE_API_KEY` in the environment your agent runs in. The key file is outside the repo and never committed.
 
 Jev's latency has a long tail: occasionally a call takes several seconds. Jevis therefore sends the same request again at 350 ms and 750 ms and uses the first answer back. At these prices, the duplicates cost next to nothing.
+
+### GPT-6 Luna (OpenAI Decisions API)
+
+Luna is OpenAI's decision model, served at `https://api.openai.com/v1/decisions` as `gpt-6-luna` (the [Decisions guide](https://developers.openai.com/api/docs/guides/decisions); the API is in public beta). At the time of writing, input costs $0.10 per million tokens, with output free. A Jevis call bills about twice as many tokens on Luna as on Jev, so a call costs roughly five times as much: about $0.0016 for a typical 66-question tool check.
+
+1. Get a key from the [OpenAI platform](https://platform.openai.com/api-keys) and save it where only you can read it:
+
+   ```sh
+   mkdir -p ~/.jevis/secrets && chmod 700 ~/.jevis ~/.jevis/secrets
+   printf '%s' 'YOUR_KEY' > ~/.jevis/secrets/openai_api_key && chmod 600 ~/.jevis/secrets/openai_api_key
+   ```
+
+   Or set `JEVIS_LUNA_KEY` or `OPENAI_API_KEY` in the environment your agent runs in. Jevis checks those in that order, then the file. Luna always needs a key.
+2. Select it:
+
+   ```sh
+   node bin/install.mjs --decider luna   # --decider jev goes back
+   node bin/jevis.mjs doctor             # makes one live Luna call
+   ```
+
+Both keys can sit in `~/.jevis/secrets/` at once, so switching is one installer flag. `JEVIS_LUNA_MODEL` picks another Decisions model when OpenAI adds one. `JEVIS_JEV_URL` and `JEVIS_JEV_MODEL` apply only to Jev.
+
+How Jevis talks to it:
+- Each lesson's question becomes a Decisions `predicate`, and its `yes`/`no` wording is folded into the instructions, because the API has no criteria field.
+- The masked state is sent as JSON text.
+- Sets over 200 questions are split into parallel calls.
+- Luna's latency has a tail too, so it gets the same 350 ms and 750 ms duplicate requests as Jev.
+- A question Luna refuses has no score, and that lesson stands aside, as with any failure.
+
+Every call is recorded with `decider` and `deciderModel`. `jevis stats --near` reads only the active decider's records. `jevis export` writes only Jev's, because it builds training labels for Laya, a Jev-compatible model.
 
 ### Laya, self-hosted
 
@@ -284,11 +331,14 @@ The environment wins over the file, so `JEVIS_DISABLE=1` in one terminal still t
 
 | Variable | Default | What it does |
 |---|---|---|
-| `JEVIS_JEV_URL` | TypeSafe's endpoint | Any `/v1/systemone` server, such as `http://127.0.0.1:8000/v1/systemone` for Laya |
+| `JEVIS_DECIDER` | `jev` | Decision provider: `jev` or `luna`. The installer's `--decider` sets it. |
+| `JEVIS_LUNA_MODEL` | `gpt-6-luna` | The model sent to OpenAI Decisions |
+| `JEVIS_LUNA_KEY` / `OPENAI_API_KEY` | `~/.jevis/secrets/openai_api_key` | Luna bearer key, checked in the listed order before the file. Required for Luna; keep keys out of config.json. |
+| `JEVIS_JEV_URL` | TypeSafe's endpoint | For the Jev decider only: any `/v1/systemone` server, such as `http://127.0.0.1:8000/v1/systemone` for Laya |
 | `JEVIS_JEV=off` | on | Disable decision-model calls; hooks pass through. Unlike `JEVIS_DISABLE`, local evidence recording still runs. |
 | `JEVIS_JEV_KEY` / `TYPESAFE_API_KEY` | `~/.jevis/secrets/typesafe_api_key` | The bearer key. Optional for a self-hosted server. |
-| `JEVIS_JEV_MODEL` | `jev-latest` on TypeSafe; unset elsewhere | The `model` field sent with each call |
-| `JEVIS_JEV_CHUNK` | 200 on TypeSafe; 64 elsewhere | Questions per request; larger sets are split into parallel calls |
+| `JEVIS_JEV_MODEL` | `jev-1.14.0` on TypeSafe; unset elsewhere | The `model` field sent with each Jev call |
+| `JEVIS_JEV_CHUNK` | 200 on TypeSafe or Luna; 64 on self-hosted Jev | Questions per request; larger sets are split into parallel calls |
 | `JEVIS_TIMEOUT_MS` | 3000 prompt, 1500 tool, 3000 stop | How long a hook waits for the decision model before standing aside |
 | `JEVIS_MODE=shadow` | off | Log what would have happened and change nothing |
 | `JEVIS_DISABLE=1` | off | Turn Jevis off (for one session, if set there) |
@@ -299,7 +349,7 @@ The environment wins over the file, so `JEVIS_DISABLE=1` in one terminal still t
 | `JEVIS_DESIGN_LAW` | `~/.jevis/design-law.md`, else `~/.claude/slop.md` or `~/.codex/slop.md`, if present | A Markdown file of your own design rules. When it exists, the agent is told to read it on visual work, and the critic judges against it. |
 | `JEVIS_WIKI` | `./wiki`, then `~/.jevis/wiki`, then a trusted project's `.jevis/wiki` | Lesson folders separated by `:` on macOS/Linux or `;` on Windows, later ones winning. Windows paths must name a drive (`C:/wiki`) or UNC share (`\\server\share`). Replaces all the defaults. |
 | `JEVIS_HOME` | `~/.jevis` | Where sessions, logs, backups, and the key live |
-| `JEVIS_RECORD=off` | on | Keep no record of Jev calls (`~/.jevis/jev/calls.jsonl`, the training data for a local model) |
+| `JEVIS_RECORD=off` | on | Keep no record of decision-model calls (`~/.jevis/jev/calls.jsonl`, the training data for a local model) |
 
 ## Other agent harnesses
 
@@ -332,7 +382,7 @@ The entries the installer writes, if you'd rather edit your config by hand:
 
 Both harnesses register `PostCompact` to reset shown lessons after compaction. `SessionStart` with source `compact` also resets them; neither path resets the once-per-session outage warning. See the [Claude hook reference](https://code.claude.com/docs/en/hooks) and [Codex hook reference](https://learn.chatgpt.com/docs/hooks).
 
-After three consecutive Jev failures within ten minutes, the next session start or prompt adds one short outage note (never in shadow mode). A successful call clears the streak; `jevis doctor` reports failure classes and streak windows from the recent log. Log and session/state writes are best-effort.
+After three consecutive decision-model failures within ten minutes, the next session start or prompt adds one short outage note (never in shadow mode). A successful call clears the streak; `jevis doctor` reports failure classes and streak windows from the recent log. Log and session/state writes are best-effort.
 
 `jevis gate-replay [--file ~/.jevis/log.jsonl] [--json]` audits Bash gates offline: judged/skipped counts, lost historical fires, and summed hook wait saved. Clipped inputs remain unknown, and historical optional lesson fires are audited even when disabled today. This estimates cumulative wait, not elapsed session wall time.
 
@@ -464,7 +514,7 @@ The last confirmation round passed every gate except time.
   - provider tokens.
 
   Variable names stay (`DB_PASSWORD=[redacted]`), so the model can still read the command.
-- **What leaves your machine.** The masked state (your message, the command or the lines an edit adds, the agent's final message, and file names) goes to the decision model. Screenshots, frames, and the request go to the critic (the Claude or Codex CLI you already use).
+- **What leaves your machine.** The masked state (your message, the command or the lines an edit adds, the agent's final message, and file names) goes to the decision model you chose: TypeSafe for Jev, OpenAI for Luna, or your own server. Screenshots, frames, and the request go to the critic (the Claude or Codex CLI you already use).
 - **What stays on your machine.** Sessions, logs, config backups, and the call record live in `~/.jevis`, which Jevis keeps readable only by you (0700). The call record is the largest: in the maintainer's heavy use it grew about 60 MB a day before plain reads stopped calling Jev and answers were stored as bare probabilities, changes that cut each day's record by roughly half. Set `JEVIS_RECORD=off` if you won't train a local model. `jevis export` writes its training set to `~/.jevis/export/` unless you pick another folder, private like the rest.
 
 ## Contributing
