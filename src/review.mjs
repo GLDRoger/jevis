@@ -4,8 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 import { ensureDir, jevisHome } from "./state.mjs";
-import { insideFolder } from "./paths.mjs";
-import { findOnPath } from "../bin/install.mjs";
+import { findOnPath, insideFolder } from "./paths.mjs";
 import { redact } from "./redact.mjs";
 import { loadWiki, wikiFor } from "./wiki.mjs";
 

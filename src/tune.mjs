@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import { join } from "node:path";
 import { AXES, axisKey } from "./axes.mjs";
 import { inputMarks } from "./context.mjs";
+import { codeDecision } from "./rules.mjs";
 import { question, unlessKey, unlessQuestion } from "./engine.mjs";
 import { jevisHome } from "./state.mjs";
 import { eachJsonl } from "./transcript.mjs";
@@ -84,6 +85,8 @@ export function tune(all, { file = join(jevisHome(), "jev", "calls.jsonl"), ques
     // The facts as the hook would compute them today; only ran_before (this session's earlier commands) is taken from the record.
     const state = r.event === "tool" ? { ...r.state, marks: inputMarks(r.state?.input ?? "", { tool: r.state?.tool, ranBefore: r.state?.marks?.ran_before === true }) } : r.state;
     for (const e of byEvent[r.event]) {
+      // Old model scores aren't calibration data for a now-exact code rule.
+      if (e.decide && codeDecision(e.decide, state) !== null) continue;
       const p = valueOf(r.answers[e.id]);
       // Only calls the entry would be asked about today: its tools, model family, and facts, whatever they were then.
       if (p === null || !applies(e, { event: r.event, tool: r.state?.tool ?? null, model: r.model }) || !factsHold(e.when, { event: r.event, state })) continue;

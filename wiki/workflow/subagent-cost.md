@@ -1,9 +1,9 @@
 ---
 event: prompt
-ask: Does `request` ask for work one agent can do, without mentioning subagents, other agents, or parallel workers?
+ask: Does `request` ask for bounded work one agent can do, without asking for delegation, and is it a direct user request rather than a builder brief, memory-writing task, or automatic thread-title request?
 yes: A task that doesn't mention delegation
-no: The user asks for subagents, parallel agents, background agent jobs, or another model
-when: { delegation: "<0.3", wants_change: ">=0.6" }
+no: The user asks for subagents, parallel agents, background agent jobs, or another model; a builder brief says to do the task yourself; memory-writing or automatic title-generation work
+when: { delegation: "<0.3", wants_change: ">=0.6", agent.origin: person }
 family: gpt
 action: context
 title: Subagents spend the user's limits

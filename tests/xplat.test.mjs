@@ -169,12 +169,12 @@ test("session save retries Windows sharing failures, and keeps the previous file
   assert.deepEqual(waits, [25, 25]);
   attempts = 0;
   waits.length = 0;
-  assert.throws(() => saveSession("retry", { turn: 8 }, { platform: "win32", wait: (ms) => waits.push(ms), rename: () => { attempts++; throw Object.assign(new Error("busy"), { code: "EBUSY" }); } }));
+  assert.equal(saveSession("retry", { turn: 8 }, { platform: "win32", wait: (ms) => waits.push(ms), rename: () => { attempts++; throw Object.assign(new Error("busy"), { code: "EBUSY" }); } }), false);
   assert.equal(attempts, 5);
   assert.equal(waits.reduce((a, b) => a + b, 0), 100);
   assert.equal(loadSession("retry").turn, 7);
   assert.equal(readdirSync(join(process.env.JEVIS_HOME, "sessions")).some((f) => f.endsWith(".tmp")), false);
-  assert.throws(() => saveSession("retry", { turn: 9 }, { platform: "linux", wait: () => assert.fail("POSIX must not wait"), rename: () => { throw new Error("disk failure"); } }));
+  assert.equal(saveSession("retry", { turn: 9 }, { platform: "linux", wait: () => assert.fail("POSIX must not wait"), rename: () => { throw new Error("disk failure"); } }), false);
   assert.equal(loadSession("retry").turn, 7);
 });
 

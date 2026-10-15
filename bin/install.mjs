@@ -10,7 +10,7 @@
  *   node bin/install.mjs --critic codex      # who reviews visual work: claude (default), codex, or off
  *   node bin/install.mjs --uninstall         # remove Jevis's hooks
  *
- * Every write is preceded by a backup in ~/.jevis/backups/<time>/. Hooks that
+ * Every existing file we write is backed up in ~/.jevis/backups/<time>/. Hooks that
  * are not Jevis's are left exactly as they are. Running it twice gives the
  * same config. Options are saved in ~/.jevis/config.json, not on the hook
  * commands: they last until changed, and the commands run in any shell.
@@ -18,11 +18,12 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, delimiter, dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SETTINGS, configFile, readConfig, writeConfig } from "../src/config.mjs";
 import { ensureDir, jevisHome } from "../src/state.mjs";
-import { isQualifiedPath } from "../src/paths.mjs";
+import { isQualifiedPath, onPath } from "../src/paths.mjs";
+export { findOnPath, onPath } from "../src/paths.mjs";
 
 const JEVIS = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CLI = join(JEVIS, "bin", "jevis.mjs");
@@ -68,20 +69,6 @@ const CHROME = {
   linux: ["/opt/google/chrome/chrome", "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable"],
   win32: [join(process.env.PROGRAMFILES ?? "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe")],
 };
-
-/** Whether a command is on PATH, found without running anything. */
-export function findOnPath(cmd, path = process.env.PATH ?? "", platform = process.platform) {
-  if (!cmd) return null;
-  const suffixes = platform === "win32" ? (/\.(exe|cmd|bat)$/i.test(cmd) ? [""] : [".exe", ".cmd", ".bat"]) : ["", ".exe"];
-  for (const d of path.split(platform === "win32" ? ";" : delimiter).filter(Boolean)) {
-    for (const suffix of suffixes) {
-      const file = join(platform === "win32" ? d.replace(/^"|"$/g, "") : d, `${cmd}${suffix}`);
-      if (existsSync(file)) return file;
-    }
-  }
-  return null;
-}
-export const onPath = (cmd, path = process.env.PATH ?? "", platform = process.platform) => findOnPath(cmd, path, platform) !== null;
 
 /** One line on whether the design and film review can run with this critic, and what to do if not. */
 export function reviewStatus(critic, { chrome = (CHROME[process.platform] ?? []).some(existsSync), cli = onPath(critic) } = {}) {
@@ -151,19 +138,30 @@ export function hookCommand(event, { platform = process.platform, execPath = pro
   return `${node} ${script} hook ${event}`;
 }
 
-/** Jevis's entries for one harness: plain commands with no settings on them. Claude Code filters tools by matcher; Codex sends every tool. */
+/** Both harnesses support matchers; Codex aliases apply_patch to Edit/Write.
+ * PostCompact resets notes after compaction, not before it.
+ */
 export function jevisHooks(harness, { node = process.execPath, execPath = node, cli = CLI, platform = process.platform, shortPath = windowsShortPath } = {}) {
   const prefix = hookCommand("", { platform, execPath, cli, shortPath });
   const hook = (event, timeout, matcher) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command: `${prefix}${event}`, timeout }] }];
   const out = {
     UserPromptSubmit: hook("prompt", 10),
-    PreToolUse: hook("tool", 10, harness === "claude" ? "^(Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__.*)$" : undefined),
+    PreToolUse: hook("tool", 10, "^(Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__.*)$"),
+    PostToolUse: hook("post", 10, "^(Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__.*)$"),
     // The design review renders the page and waits on a critic: about 30-90 s a round.
     Stop: hook("stop", 420),
     SessionStart: hook("session", 10),
+    PostCompact: hook("session", 10),
   };
-  if (harness === "codex") out.PostCompact = hook("session", 10);
+  if (harness === "claude") out.PostToolUseFailure = hook("post", 10, "^(Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__.*)$");
   return out;
+}
+
+function backup(file, name, stamp) {
+  if (!existsSync(file)) return;
+  const copy = join(ensureDir("backups", stamp), name);
+  copyFileSync(file, copy);
+  if (process.platform !== "win32") chmodSync(copy, 0o600);
 }
 
 /** The config with any earlier Jevis entries removed and, unless uninstalling, Jevis's added. */
@@ -223,7 +221,10 @@ function main(argv) {
   if (Object.keys(changes).length) {
     console.log(`\nsettings: ${configFile()}`);
     for (const [k, v] of Object.entries(changes)) console.log(v === null ? `  - ${k} (back to its default)` : `  + ${k}=${JSON.stringify(v)}`);
-    if (!dry) writeConfig(changes);
+    if (!dry) {
+      backup(configFile(), "config.json", stamp);
+      writeConfig(changes);
+    }
   }
   for (const harness of pick) {
     const file = TARGETS[harness];
@@ -232,12 +233,8 @@ function main(argv) {
     for (const r of removed) console.log(`  - ${r}`);
     for (const [event, groups] of Object.entries(config.hooks ?? {})) for (const g of groups) for (const h of g.hooks) if (isJevis(h.command)) console.log(`  + ${event}: ${h.command}`);
     if (dry) continue;
-    if (existsSync(file)) {
-      // A settings file can hold API keys in its env block: the copy is private whatever the original's mode.
-      const copy = join(ensureDir("backups", stamp), `${harness}-${basename(file)}`);
-      copyFileSync(file, copy);
-      if (process.platform !== "win32") chmodSync(copy, 0o600);
-    }
+    // A settings file can hold API keys: backups are private regardless of its mode.
+    backup(file, `${harness}-${basename(file)}`, stamp);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
   }

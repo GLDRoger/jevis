@@ -50,7 +50,7 @@ test("doctor: hooks are ok when every event runs an existing node and this check
 });
 
 test("doctor: every installed handler must match its event, including duplicate hooks", () => {
-  const handlers = { UserPromptSubmit: "prompt", PreToolUse: "tool", Stop: "stop", SessionStart: "session", PostCompact: "session" };
+  const handlers = { UserPromptSubmit: "prompt", PreToolUse: "tool", PostToolUse: "post", PostToolUseFailure: "post", Stop: "stop", SessionStart: "session", PostCompact: "session" };
   for (const harness of ["claude", "codex"]) {
     const good = plan({}, harness, { node: process.execPath, cli: CLI }).config;
     for (const [event, groups] of Object.entries(good.hooks)) {

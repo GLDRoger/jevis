@@ -1,10 +1,11 @@
 import { AXES, axisKey } from "./axes.mjs";
 import { inputMarks } from "./context.mjs";
 import { askJev } from "./jev.mjs";
+import { codeDecision } from "./rules.mjs";
 import { candidates, conditionsHold, factsHold, loadWiki } from "./wiki.mjs";
 
 /**
- * One event through Jev: the axes (the profile) and every candidate entry's
+ * One event through code and Jev: the axes (the profile) and unresolved entries'
  * question go out in a single call; an entry fires when its answer clears its
  * `min` and its `when` holds. Code decides what happens next; Jev only answers.
  */
@@ -24,14 +25,27 @@ export async function evaluate({ event, state, tool = null, model = null, harnes
   const pool = candidates(wiki.entries, { event, tool, model }).filter((e) => factsHold(e.when, { event, state }));
   // A tool call no entry could apply to costs no call at all.
   if (event === "tool" && !pool.length) return { skipped: "no entries", profile: {}, scores: {}, fired: [], ms: 0 };
-  const questions = {};
-  if (axes) for (const [id, q] of Object.entries(AXES[event] ?? {})) questions[axisKey(id)] = q;
+  const code = {};
   for (const e of pool) {
-    questions[e.id] = question(e);
-    if (e.unless) questions[unlessKey(e.id)] = unlessQuestion(e);
+    if (!e.decide) continue;
+    const v = codeDecision(e.decide, { ...state, tool: tool ?? state.tool });
+    if (v !== null) code[e.id] = v;
   }
-  const { answers, ms, error } = await askJev({ state, questions, event, sessionId, harness, model, timeoutMs, record });
-  if (!answers) return { error, profile: {}, scores: {}, fired: [], ms };
+  const questions = {};
+  // Preserve the diagnostic profile on model-reviewed events, but don't call
+  // Jev solely to log axes when code has settled every lesson and its gates.
+  const needsModel = event !== "tool" || pool.some((e) => !(e.id in code) || code[e.id] && e.unless);
+  if (axes) for (const [id, q] of Object.entries(AXES[event] ?? {})) {
+    if (needsModel || pool.some((e) => code[e.id] && id in (e.when ?? {}))) questions[axisKey(id)] = q;
+  }
+  for (const e of pool) {
+    if (!(e.id in code)) questions[e.id] = question(e);
+    if (e.unless && code[e.id] !== false) questions[unlessKey(e.id)] = unlessQuestion(e);
+  }
+  const jevQuestions = Object.keys(questions).length;
+  const { answers, ms, error, errorClass } = jevQuestions ? await askJev({ state, questions, event, sessionId, harness, model, timeoutMs, record }) : { answers: {}, ms: 0 };
+  // An unavailable exception must never turn a code match into a refusal.
+  if (!answers) return { error, errorClass, profile: {}, scores: {}, unless: {}, fired: [], ms, code, jevQuestions };
   const value = (a) => (typeof a?.noul === "number" ? a.noul : null);
   const profile = {};
   for (const id of Object.keys(AXES[event] ?? {})) {
@@ -41,12 +55,12 @@ export async function evaluate({ event, state, tool = null, model = null, harnes
   const scores = {};
   const unless = {};
   for (const e of pool) {
-    const v = value(answers[e.id]);
+    const v = e.id in code ? Number(code[e.id]) : value(answers[e.id]);
     if (v !== null) scores[e.id] = round(v);
     const u = e.unless ? value(answers[unlessKey(e.id)]) : null;
     if (u !== null) unless[e.id] = round(u);
   }
   const holds = (e) => (scores[e.id] ?? 0) >= e.min && (!e.unless || (unless[e.id] ?? 1) < e.unless_max) && conditionsHold(e.when, { profile, state });
   const fired = pool.filter(holds).sort((a, b) => scores[b.id] - scores[a.id]);
-  return { profile, scores, unless, fired, ms, pool: pool.length };
+  return { profile, scores, unless, fired, ms, pool: pool.length, code, jevQuestions };
 }

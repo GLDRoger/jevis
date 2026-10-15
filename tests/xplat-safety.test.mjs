@@ -41,7 +41,7 @@ test("Stop save failure fails open before returning a block", () => {
   assert.equal(result.stdout, "", "the unpersisted block must never reach the harness");
   const rows = readFileSync(join(env.JEVIS_HOME, "log.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
   assert.deepEqual(rows.find((row) => row.event === "stop").acted, ["stop"], "the decision really selected a block");
-  assert.ok(rows.some((row) => row.event === "hook-error" && row.hook === "stop"));
+  assert.equal(rows.some((row) => row.event === "hook-error"), false, "best-effort state failure is not a hook error");
   assert.deepEqual(readdirSync(sessions), ["cannot-save.json"], "failed temporary writes are cleaned up");
 });
 

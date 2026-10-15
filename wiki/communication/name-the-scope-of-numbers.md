@@ -4,6 +4,7 @@ ask: Does `request` ask for a number, rate, count, total, estimate, or the statu
 yes: Asks how many, what rate, how far along, whether something is done, or what a figure means
 no: Asks for a change and no report
 family: gpt
+when: { agent.origin: person }
 action: context
 title: Every number carries its scope
 source: |

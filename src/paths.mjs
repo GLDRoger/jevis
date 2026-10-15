@@ -1,4 +1,19 @@
-import { delimiter, posix, win32 } from "node:path";
+import { existsSync } from "node:fs";
+import { delimiter, join, posix, win32 } from "node:path";
+
+/** Whether a command is on PATH, found without running anything. */
+export function findOnPath(cmd, path = process.env.PATH ?? "", platform = process.platform) {
+  if (!cmd) return null;
+  const suffixes = platform === "win32" ? (/\.(exe|cmd|bat)$/i.test(cmd) ? [""] : [".exe", ".cmd", ".bat"]) : ["", ".exe"];
+  for (const d of path.split(platform === "win32" ? ";" : delimiter).filter(Boolean)) {
+    for (const suffix of suffixes) {
+      const file = join(platform === "win32" ? d.replace(/^"|"$/g, "") : d, `${cmd}${suffix}`);
+      if (existsSync(file)) return file;
+    }
+  }
+  return null;
+}
+export const onPath = (cmd, path = process.env.PATH ?? "", platform = process.platform) => findOnPath(cmd, path, platform) !== null;
 
 /** Folder lists use the shell platform's separator, not the colon in a drive letter. */
 export const splitFolders = (value, separator = delimiter) => String(value ?? "").split(separator).filter(Boolean);

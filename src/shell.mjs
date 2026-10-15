@@ -38,9 +38,11 @@ const hiddenGlob = (word) => /^\.|\/\./.test(word);
  * could write or run something unseen: command or process substitution,
  * variable expansion, a heredoc, a subshell, output redirected anywhere but
  * /dev/null or another descriptor, or a glob into hidden files. Quoting and
- * escapes follow bash, so a word here is the word bash runs.
+ * escapes follow bash, so a word here is the word bash runs. Optional
+ * `effects` analysis accepts literal file redirects and quoted heredocs;
+ * it never expands or executes input. plainRead uses the strict default.
  */
-export function segments(command) {
+export function segments(command, { effects = null } = {}) {
   const text = String(command ?? "");
   const out = [];
   let words = [];
@@ -48,6 +50,7 @@ export function segments(command) {
   let quote = null;
   let globbed = false;
   let unsafe = false;
+  let needsCommand = false;
   const endWord = () => {
     if (word !== null) {
       // A cd glob is not a literal folder and can expand to several operands.
@@ -59,7 +62,10 @@ export function segments(command) {
   };
   const endSegment = () => {
     endWord();
-    if (words.length) out.push(words);
+    if (words.length) {
+      out.push(words);
+      needsCommand = false;
+    }
     words = [];
   };
   for (let i = 0; i < text.length; i += 1) {
@@ -83,17 +89,25 @@ export function segments(command) {
       quote = c;
       word ??= "";
     } else if (c === "\\") {
+      if (next === undefined) return null;
       if (next === "\n") i += 1;
       else if (next !== undefined) word = (word ?? "") + text[(i += 1)];
     } else if (c === " " || c === "\t") endWord();
     // A # is not taken as a comment: zsh only has comments in an interactive shell with INTERACTIVE_COMMENTS set,
     // so `ls #; rm x` can run rm. The words after it are checked like any others.
-    else if (c === "\n" || c === ";") endSegment();
-    else if (c === "&" && next === "&") {
+    else if (c === "\n" || c === ";") {
+      if (effects && c === ";" && needsCommand && word === null && !words.length) return null;
       endSegment();
+    }
+    else if (c === "&" && next === "&") {
+      if (effects && word === null && !words.length) return null;
+      endSegment();
+      needsCommand = true;
       i += 1;
     } else if (c === "|") {
+      if (effects && word === null && !words.length) return null;
       endSegment();
+      needsCommand = true;
       if (next === "|" || next === "&") i += 1;
     } else if (c === ">" || c === "<" || (c === "&" && next === ">")) {
       // A bare descriptor number before the operator (2>) belongs to it, not to the command.
@@ -101,6 +115,25 @@ export function segments(command) {
       endWord();
       let j = c === "&" ? i + 2 : i + 1;
       if (c === "<") {
+        // Fact analysis may inspect a literal heredoc without executing its
+        // body. Expansion-enabled bodies stay unknown, even when empty.
+        if (effects && next === "<" && text[j + 1] !== "<") {
+          const tail = text.slice(j + 1);
+          const match = tail.match(/^\s*(['"])([\w-]+)\1[^\n]*\n/);
+          if (!match) return null;
+          const start = j + 1 + match[0].length;
+          const end = text.slice(start).match(new RegExp(`(?:^|\\n)${match[2]}(?:\\n|$)`));
+          if (!end) return null;
+          // Parse the header's remaining redirects, then resume after the body.
+          const header = match[0].slice(match[0].indexOf(match[1], match[0].indexOf(match[1]) + 1) + 1).trim();
+          const rest = segments(`${words.map((w) => JSON.stringify(w)).join(" ")} ${header}`, { effects });
+          if (!rest || rest.length !== 1) return null;
+          out.push(rest[0]);
+          needsCommand = false;
+          words = [];
+          i = start + end.index + end[0].length - 1;
+          continue;
+        }
         if (next === "<" || next === "(" || next === ">") return null;
       } else {
         if (text[j] === ">") j += 1;
@@ -115,12 +148,16 @@ export function segments(command) {
         }
       }
       while (text[j] === " " || text[j] === "\t") j += 1;
-      const target = text.slice(j).match(/^[^\s;&|<>()]+/)?.[0];
-      if (!target) return null;
-      if (c !== "<" && target !== "/dev/null") return null;
+      const raw = text.slice(j).match(/^(?:'[^']*'|"[^"$`\\]*"|[^\s;&|<>()'"$`\\]+)/)?.[0];
+      const target = raw?.replace(/^(['"])(.*)\1$/, "$2");
+      if (!target || (text[j + raw.length] && !/[\s;&|<>]/.test(text[j + raw.length]))) return null;
+      if (c !== "<" && target !== "/dev/null") {
+        if (!effects) return null;
+        effects.writes = true;
+      }
       // bash opens a network connection for /dev/tcp and /dev/udp redirections, and expands a glob target.
       if (/^\/dev\/(tcp|udp)\//.test(target) || /[*?[]/.test(target)) return null;
-      i = j + target.length - 1;
+      i = j + raw.length - 1;
     } else if (c === "&") endSegment();
     else if (c === "`" || c === "(" || c === ")" || c === "{" || c === "}") return null;
     else if (c === "$") {
@@ -133,7 +170,7 @@ export function segments(command) {
   }
   if (quote) return null;
   endSegment();
-  return unsafe ? null : out;
+  return unsafe || effects && needsCommand ? null : out;
 }
 
 const positional = (args) => args.filter((a) => !a.startsWith("-"));
@@ -346,7 +383,7 @@ function gh(args) {
  * unless given --record, and the sample they judge is test data, not work:
  * judging it would refuse the very dry runs the Jevis skill asks for.
  */
-const JEVIS_READS = ["ask", "lint", "stats", "replay", "doctor", "mine"];
+const JEVIS_READS = ["ask", "lint", "stats", "replay", "gate-replay", "doctor", "mine"];
 const jevisCli = (args) => JEVIS_READS.includes(args[0]) && !args.includes("--record");
 /** This checkout's own CLI: by absolute or ~ path, or bin/jevis.mjs from a Jevis checkout's root. */
 const OWN_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "jevis.mjs");
@@ -398,5 +435,9 @@ export function plainRead(command) {
   if (!text || text.length > 4000 || SECRETISH.test(text)) return false;
   const parts = segments(text);
   if (!parts?.length) return false;
-  return parts.every(([program, ...args]) => Object.hasOwn(READERS, program) && READERS[program](args));
+  return parts.every(readOnlyWords);
 }
+
+/** Program/argument proof shared with Bash effect marks; ignores secret
+ * names, since reading a credential is not the same as executing code. */
+export const readOnlyWords = ([program, ...args]) => Object.hasOwn(READERS, program) && READERS[program](args);
