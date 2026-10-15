@@ -5,7 +5,7 @@ description: Change what Jevis does for your coding agents. Add, tune, replace, 
 
 # Changing Jevis
 
-Jevis is a set of agent hooks. At three moments it asks a decision model yes/no questions about what is happening, then acts on the answers:
+Jevis is a set of agent hooks. At three moments it asks a decision model (TypeSafe's Jev or OpenAI's GPT-6 Luna, set by `JEVIS_DECIDER`) yes/no questions about what is happening, then acts on the answers:
 - `prompt`: the user sent a message;
 - `tool`: the agent is about to run a command or make an edit;
 - `stop`: the agent is about to end its turn.
@@ -36,7 +36,7 @@ Then find the row:
 | make a lesson fire more or less often | its `ask`, `yes`, and `no` wording first, `min` second | the entry; measure with `jevis stats --near` |
 | turn on the shipped optional safety entries | configuration | `JEVIS_ENABLE` in `~/.jevis/config.json` (README, Configuration) |
 | use another decision model, act only in some folders, go quiet, change the reviewer | configuration | `~/.jevis/config.json` (README, Configuration) |
-| judge a fact the state doesn't carry, such as a count or an exact character | code: compute it as a fact | `src/context.mjs` or `src/hooks.mjs`, then WIKI.md, "The state Jev reads" |
+| judge a fact the state doesn't carry, such as a count or an exact character | code: compute it as a fact | `src/context.mjs` or `src/hooks.mjs`, then WIKI.md, "The state the decision model reads" |
 | gate many entries on one new shared question | code: a new axis | `src/axes.mjs`, then WIKI.md, "Axes" |
 | change how pages or films are reviewed when a turn ends | code | `src/review.mjs` (`criticPrompt`, `REVIEW_ROUNDS`) |
 
@@ -100,13 +100,13 @@ The change is live on the next hook call. Nothing needs reinstalling.
      "Fixed and tested."
    ```
 
-   For an entry with a `family:`, add a model from that family, such as `--model gpt-6-sol` or `--model claude-opus-5-5`. Without `--model`, entries of both families are asked, as they are for Gemini, Grok, and other models. The output shows each firing entry's probability and the closest ones that did not fire. The hit should clear `min` with room to spare, and each look-alike should sit well below it, ideally under 0.5. When a case lands near the line, rewrite `ask`, `yes`, and `no` rather than moving `min`.
+   For an entry with a `family:`, add a model from that family, such as `--model gpt-6-sol` or `--model claude-opus-5-5`. Without `--model`, entries of both families are asked, as they are for Gemini, Grok, and other models. The output shows each firing entry's probability and the closest ones that did not fire. The hit should clear `min` with room to spare, and each look-alike should sit well below it, ideally under 0.5. When a case lands near the line, rewrite `ask`, `yes`, and `no` rather than moving `min`. Check the cases on the decider the user runs: Jev and GPT-6 Luna place the same case differently.
 3. Replay real history when the user has it: `jevis replay <session file or id>` on a session where the failure happened and on one where it didn't.
    When you change an existing lesson, `jevis stats --near` shows it against every recorded answer to its current question: how often it would fire today, how often it landed within 0.1 of `min`, and how often `unless` or `when` stood it down. A reworded `ask` starts from zero there, since the old answers were to a different question.
 4. For code changes, add a test beside the existing ones and run `npm test`. Document any new fact or axis in `WIKI.md`.
 5. For a contribution to the shipped `slop/` area, add a telltale case and its look-alikes to `eval/slop-cases.mjs`, then run `node eval/slop.mjs`. Every case must stay right.
 
-`jevis ask` calls the configured decision model, so it needs a TypeSafe key or a running self-hosted server. If it reports an error, say the change is untested rather than implying it works. If Jevis itself seems not to run, `jevis doctor` checks the installation end to end. For a new `deny` or `block`, suggest the user run Jevis in shadow mode (`node bin/install.mjs --shadow`, then `--live`) for a few days and read `jevis stats`.
+`jevis ask` calls the configured decision model, so it needs a TypeSafe key, an OpenAI key with `JEVIS_DECIDER=luna`, or a running self-hosted server. Thresholds were tuned on Jev: when the user runs Luna, test with `JEVIS_DECIDER=luna jevis ask ...` too, and report both probabilities. If it reports an error, say the change is untested rather than implying it works. If Jevis itself seems not to run, `jevis doctor` checks the installation end to end. For a new `deny` or `block`, suggest the user run Jevis in shadow mode (`node bin/install.mjs --shadow`, then `--live`) for a few days and read `jevis stats`.
 
 ## 4. Report back
 

@@ -167,7 +167,7 @@ footer { border-top: 1px solid var(--rule); padding: 24px 0 48px; color: var(--m
 
   <main>
     <h1>What Jevis does at each step</h1>
-    <p class="lede">Jevis watches a coding agent at six moments. At each one it reads what is happening, asks Jev (a fast yes-or-no model) a set of questions, and either stays quiet or steers: it names what the agent is doing wrong and what to do instead.</p>
+    <p class="lede">Jevis watches a coding agent at six moments. At each one it reads what is happening, asks a fast yes-or-no decision model (TypeSafe&rsquo;s Jev, or OpenAI&rsquo;s GPT-6 Luna) a set of questions, and either stays quiet or steers: it names what the agent is doing wrong and what to do instead.</p>
 
     <ul class="key" aria-label="What can come back">
       <li><span class="swatch s-add" aria-hidden="true"></span><b>Adds a note</b><span>nothing is stopped</span></li>
@@ -213,11 +213,11 @@ footer { border-top: 1px solid var(--rule); padding: 24px 0 48px; color: var(--m
     <div class="always">
       <section>
         <h2>Secrets never leave the machine</h2>
-        <p>Before Jev or the critic sees anything, Jevis masks private keys (SSH, PEM, PGP), card numbers that pass the Luhn check and their security codes, passwords in assignments, JSON, flags, URLs and headers, and provider tokens (OpenAI, Anthropic, Stripe, GitHub, AWS, Google, Slack and more). The name stays, so <code>DB_PASSWORD=[redacted]</code> still reads as a database login. The same mask applies to everything Jevis writes to disk.</p>
+        <p>Before the decision model or the critic sees anything, Jevis masks private keys (SSH, PEM, PGP), card numbers that pass the Luhn check and their security codes, passwords in assignments, JSON, flags, URLs and headers, and provider tokens (OpenAI, Anthropic, Stripe, GitHub, AWS, Google, Slack and more). The name stays, so <code>DB_PASSWORD=[redacted]</code> still reads as a database login. The same mask applies to everything Jevis writes to disk.</p>
       </section>
       <section>
         <h2>When Jevis is unsure, it gets out of the way</h2>
-        <p>No key, Jev down, a slow answer, a crash, or a critic that fails: every one of these ends in "stays quiet". Jevis sends a second request after 700 ms and takes whichever answers first, so a slow reply rarely costs a check. The worst case is the agent working as if Jevis were not there.</p>
+        <p>No key, the decision model down, a refused question, a slow answer, a crash, or a critic that fails: every one of these ends in "stays quiet". Jevis sends the same request again at 350 ms and 750 ms and takes whichever answers first, so a slow reply rarely costs a check. The worst case is the agent working as if Jevis were not there.</p>
       </section>
     </div>
 
@@ -333,7 +333,7 @@ const LANES = [
     trigger: "The conversation is compacted", hook: "SessionStart · PostCompact",
     detail: "When the context is summarized or cleared.",
     reads: "Only which lessons this session has already been given.",
-    asks: "Nothing. No call to Jev.",
+    asks: "Nothing. No call to the decision model.",
     decide: "Was the context compacted or cleared?",
     outs: [
       { kind: "quiet", label: "Returns nothing", when: "always",

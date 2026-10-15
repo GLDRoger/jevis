@@ -2,6 +2,8 @@ import { readdirSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { replay } from "../src/replay.mjs";
+import { decider, jevModel, lunaModel } from "../src/jev.mjs";
+console.log(`decider: ${decider()} (${decider() === "luna" ? lunaModel() : jevModel() ?? "server default"})`);
 
 /**
  * Replays turn endings from recent real sessions through the stop entries.

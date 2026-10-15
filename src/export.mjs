@@ -89,7 +89,8 @@ export function exportDataset({ out, home = jevisHome(), events = ["prompt", "to
   const calls = join(home, "jev", "calls.jsonl");
   if (!existsSync(calls)) throw new Error(`no call record at ${calls}: Jevis records calls unless JEVIS_RECORD=off`);
   const keep = (line) => events.some((ev) => line.includes(`"event":"${ev}"`));
-  const usable = (r) => events.includes(r.event) && !(since && Date.parse(r.at) < since) && !r.error && r.answers;
+  const jevRow = (r) => r.decider === undefined || r.decider === "jev";
+  const usable = (r) => jevRow(r) && events.includes(r.event) && !(since && Date.parse(r.at) < since) && !r.error && r.answers;
   const sessionOf = (r) => r.sessionId ?? "no session";
   const counts = new Map();
   eachJsonl(calls, (r) => usable(r) && counts.set(sessionOf(r), (counts.get(sessionOf(r)) ?? 0) + 1), { keep });
@@ -111,10 +112,11 @@ export function exportDataset({ out, home = jevisHome(), events = ["prompt", "to
     return sets.get(version);
   };
   const seen = new Set();
-  const n = { train: 0, test: 0, questions: 0, errors: 0, duplicates: 0, unanswerable: 0, sessions: new Set() };
+  const n = { train: 0, test: 0, questions: 0, errors: 0, duplicates: 0, unanswerable: 0, otherDeciders: 0, sessions: new Set() };
   try {
     eachJsonl(calls, (r) => {
       if (!events.includes(r.event) || (since && Date.parse(r.at) < since)) return;
+      if (!jevRow(r)) return void (n.otherDeciders += 1);
       if (r.error || !r.answers) return void (n.errors += 1);
       const qs = questionSet(r.version);
       if (!qs) return void (n.unanswerable += 1);
@@ -142,7 +144,7 @@ export function exportDataset({ out, home = jevisHome(), events = ["prompt", "to
   } finally {
     for (const w of Object.values(writers)) w.close();
   }
-  return { files, train: n.train, test: n.test, questions: n.questions, sessions: n.sessions.size, errors: n.errors, duplicates: n.duplicates, unanswerable: n.unanswerable };
+  return { files, train: n.train, test: n.test, questions: n.questions, sessions: n.sessions.size, errors: n.errors, duplicates: n.duplicates, unanswerable: n.unanswerable, otherDeciders: n.otherDeciders };
 }
 
 export function formatExport(r) {
@@ -151,6 +153,7 @@ export function formatExport(r) {
     `  ${r.files.train}`,
     `  ${r.files.test}`,
     `Left out: ${r.errors} failed calls, ${r.duplicates} repeats, ${r.unanswerable} with no yes/no answers or a missing question set.`,
+    ...(r.otherDeciders ? [`Skipped ${r.otherDeciders} non-Jev calls (including Luna): Laya training exports keep only Jev labels.`] : []),
     "",
     "The rows hold your prompts, commands, and file names. Secrets that Jevis's masking recognizes are masked (again, with today's rules); anything it does not recognize, and everything else, is as you wrote it. Upload them only as a private dataset.",
     "",

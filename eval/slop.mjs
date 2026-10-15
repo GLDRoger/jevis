@@ -1,8 +1,10 @@
 import { evaluate } from "../src/engine.mjs";
 import { inputMarks, toolInput } from "../src/context.mjs";
 import { CASES } from "./slop-cases.mjs";
+import { decider, jevModel, lunaModel } from "../src/jev.mjs";
+console.log(`decider: ${decider()} (${decider() === "luna" ? lunaModel() : jevModel() ?? "server default"})`);
 
-/** Live Jev over the slop battery. A case passes when the slop denies that fire are exactly the ones it wants. */
+/** The live decision model (Jev or Luna, per JEVIS_DECIDER) over the slop battery. A case passes when the slop denies that fire are exactly the ones it wants. */
 const only = process.argv[2];
 let ok = 0;
 let codeCases = 0;
@@ -25,6 +27,6 @@ const rows = await Promise.all(CASES.filter((c) => !only || c.name.includes(only
 }));
 console.log(rows.join("\n"));
 console.log(`${ok}/${rows.length}`);
-console.log(`At least one code-decided lesson: ${codeCases}/${rows.length} cases; positives still ask Jev for permission.`);
+console.log(`At least one code-decided lesson: ${codeCases}/${rows.length} cases; positives still ask the decision model for permission.`);
 console.log(`Code decisions by lesson: ${JSON.stringify(decisions)}`);
 if (ok !== rows.length) process.exitCode = 1;
