@@ -388,6 +388,42 @@ After three consecutive decision-model failures within ten minutes, the next ses
 
 The Stop timeout is 420 s because a review renders the page and waits for the critic, which takes about 30 to 90 s per round.
 
+### Gemini CLI and Antigravity CLI
+
+These harnesses use `bin/google-hook.mjs` rather than the shared hook protocol above. Configure them manually; the installer does not register these adapters. Replace `<repo>` in every command with the absolute path to your Jevis checkout. Keep the quotes around the script path, especially if it contains spaces. Merge these entries into your existing configuration rather than replacing other settings or hooks.
+
+**Gemini CLI:** add these events under `hooks` in `~/.gemini/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node \"<repo>/bin/google-hook.mjs\" gemini-cli SessionStart", "timeout": 10000 }] }],
+    "BeforeAgent": [{ "hooks": [{ "type": "command", "command": "node \"<repo>/bin/google-hook.mjs\" gemini-cli BeforeAgent", "timeout": 10000 }] }],
+    "BeforeTool": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node \"<repo>/bin/google-hook.mjs\" gemini-cli BeforeTool", "timeout": 10000 }] }],
+    "AfterTool": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node \"<repo>/bin/google-hook.mjs\" gemini-cli AfterTool", "timeout": 10000 }] }],
+    "AfterAgent": [{ "hooks": [{ "type": "command", "command": "node \"<repo>/bin/google-hook.mjs\" gemini-cli AfterAgent", "timeout": 420000 }] }]
+  }
+}
+```
+
+**Antigravity CLI:** add this named hook to `~/.gemini/config/hooks.json` (global) or `.agents/hooks.json` (workspace). Unlike Gemini CLI, this file has no top-level `hooks` wrapper, and lifecycle events contain handlers directly:
+
+```json
+{
+  "jevis": {
+    "SessionStart": [{ "type": "command", "command": "node \"<repo>/bin/google-hook.mjs\" antigravity SessionStart", "timeout": 10 }],
+    "PreInvocation": [{ "type": "command", "command": "node \"<repo>/bin/google-hook.mjs\" antigravity PreInvocation", "timeout": 10 }],
+    "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node \"<repo>/bin/google-hook.mjs\" antigravity PreToolUse", "timeout": 10 }] }],
+    "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node \"<repo>/bin/google-hook.mjs\" antigravity PostToolUse", "timeout": 10 }] }],
+    "Stop": [{ "type": "command", "command": "node \"<repo>/bin/google-hook.mjs\" antigravity Stop", "timeout": 420 }]
+  }
+}
+```
+
+Gemini CLI timeouts are in **milliseconds**; Antigravity timeouts are in **seconds**. Tool matchers cover all tools, including file reads. Jevis denies remain denies; otherwise Antigravity receives `allow`, leaving its next hook or native permission policy in control. Stop checks run on `model_stop` (and the legacy `NO_TOOL_CALL`), not errors or execution limits.
+
+See the [Gemini CLI hooks documentation](https://geminicli.com/docs/hooks/) and [Antigravity hooks documentation](https://antigravity.google/docs/hooks) for configuration details. Inspect loaded hooks with `/hooks panel` in Gemini CLI or `/hooks` in Antigravity CLI. These adapters have automated protocol tests; live authenticated sessions in either harness have not been verified here.
+
 ## How it works
 
 Each event produces two sets of yes/no questions, sent to the decision model in one call:

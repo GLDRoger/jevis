@@ -18,6 +18,16 @@
 
 const MASK = "[redacted]";
 
+/** A digit run inside a UUID is an id, not a card: session ids must survive masking intact. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function inUuid(text, at, length) {
+  let start = at;
+  let end = at + length;
+  while (start > 0 && /[0-9a-f-]/i.test(text[start - 1])) start -= 1;
+  while (end < text.length && /[0-9a-f-]/i.test(text[end])) end += 1;
+  return UUID.test(text.slice(start, end));
+}
+
 /** Luhn checksum: what separates a card number from any other 13-19 digit run. */
 export function luhn(digits) {
   let sum = 0;
@@ -95,7 +105,7 @@ const RULES = [
   [/\bBearer\s+[A-Za-z0-9._~+/-]{16,}=*/g, () => `Bearer ${MASK}`],
   [/\b[0-9a-f]{40,}\b/gi, () => MASK],
   // Card numbers: 13-19 digits, optionally grouped by spaces or dashes, that pass the Luhn check.
-  [/(?<![\d.])\d(?:[ -]?\d){12,18}(?![\d.])/g, (m) => (luhn(m.replace(/[ -]/g, "")) ? "[redacted card number]" : m)],
+  [/(?<![\d.])\d(?:[ -]?\d){12,18}(?![\d.])/g, (m, at, text) => (luhn(m.replace(/[ -]/g, "")) && !inUuid(text, at, m.length) ? "[redacted card number]" : m)],
 ];
 
 export function redact(text) {
