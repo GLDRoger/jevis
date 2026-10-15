@@ -10,6 +10,22 @@ process.env.JEVIS_HOME = mkdtempSync(join(tmpdir(), "jevis-config-home-"));
 const { applyConfig, readConfig, settingSources, writeConfig } = await import("../src/config.mjs");
 const CLI = fileURLToPath(new URL("../bin/jevis.mjs", import.meta.url));
 
+test("settings: decider selection and Luna model are valid, API keys are refused", () => {
+  const file = join(process.env.JEVIS_HOME, "luna.json");
+  for (const decider of ["jev", "luna"]) {
+    writeFileSync(file, JSON.stringify({ JEVIS_DECIDER: decider, JEVIS_LUNA_MODEL: "custom-luna" }));
+    assert.deepEqual(readConfig(file).values, { JEVIS_DECIDER: decider, JEVIS_LUNA_MODEL: "custom-luna" });
+    assert.deepEqual(readConfig(file).errors, []);
+  }
+  writeFileSync(file, JSON.stringify({ JEVIS_DECIDER: "bogus", OPENAI_API_KEY: "fake-key", JEVIS_LUNA_KEY: "fake-key" }));
+  const c = readConfig(file);
+  assert.deepEqual(c.values, {});
+  assert.equal(c.errors.length, 3);
+  assert.match(c.errors[0], /JEVIS_DECIDER.*not valid/);
+  assert.ok(c.errors.slice(1).every((e) => e.includes("~/.jevis/secrets/openai_api_key")));
+  assert.ok(!JSON.stringify(c.errors).includes("fake-key"));
+});
+
 test("settings: valid values are read as the environment spells them; problems are named, never thrown", () => {
   const file = join(process.env.JEVIS_HOME, "config.json");
   writeFileSync(file, JSON.stringify({ JEVIS_MODE: "shadow", JEVIS_ENABLE: ["safety", "slop/marquee"], JEVIS_SCOPE: ["/a", "/b"], JEVIS_DISABLE: false, JEVIS_RECORD: false, JEVIS_TIMEOUT_MS: 2500, JEVIS_CRITIC: "gemini", JEVIS_HOME: "/x", TYPESAFE_API_KEY: "k", NOPE: 1 }));

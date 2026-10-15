@@ -6,16 +6,17 @@ import { ensureDir, jevisHome } from "./state.mjs";
 import { errorClass, errorMessage, recordHealth } from "./health.mjs";
 
 /**
- * TypeSafe's Jev: typed yes/no, choice, and score answers with calibrated
- * probabilities, over one HTTPS call.
+ * Yes/no decisions over HTTPS: TypeSafe's Jev (or a compatible server), or
+ * GPT-6 Luna through OpenAI's Decisions API. Callers use Jev's noul contract
+ * for both; the Luna transport translates predicates and probabilities.
  *
  * Questions in one call are answered in parallel against a state that is billed
  * once, so the count barely moves latency: measured Sep 27 2026, 1 question
  * 330 ms, 250 questions 360 ms, 500 questions 2-4 s. Jevis sends every entry's
  * question at once and splits past CHUNK into parallel calls.
  *
- * Every call is recorded (~/.jevis/jev/calls.jsonl, the question set by version
- * in ~/.jevis/jev/questions/) as training data for a local model later.
+ * Both deciders' calls are recorded (~/.jevis/jev/calls.jsonl, question sets
+ * in ~/.jevis/jev/questions/). Laya training exports keep only Jev labels.
  */
 
 /**
@@ -24,11 +25,24 @@ import { errorClass, errorMessage, recordHealth } from "./health.mjs";
  * Laya (`laya-serve`): set JEVIS_JEV_URL to its full endpoint.
  */
 export const TYPESAFE_URL = "https://api.typesafe.ai/v1/systemone";
+export const LUNA_URL = "https://api.openai.com/v1/decisions";
+export const decider = (env = process.env) => env.JEVIS_DECIDER === "luna" ? "luna" : "jev";
 export const jevUrl = () => process.env.JEVIS_JEV_URL?.trim() || TYPESAFE_URL;
-export const jevModel = () => process.env.JEVIS_JEV_MODEL?.trim() || (jevUrl() === TYPESAFE_URL ? "jev-latest" : undefined);
+export const jevModel = () => process.env.JEVIS_JEV_MODEL?.trim() || (jevUrl() === TYPESAFE_URL ? "jev-1.14.0" : undefined);
+export const lunaModel = (env = process.env) => env.JEVIS_LUNA_MODEL?.trim() || "gpt-6-luna";
 export const CHUNK = 200;
-/** Questions per request. Jev takes hundreds; laya-serve refuses more than 64. JEVIS_JEV_CHUNK overrides. */
-export const chunkSize = () => Number(process.env.JEVIS_JEV_CHUNK) || (jevUrl() === TYPESAFE_URL ? CHUNK : 64);
+/** Jev and Luna use 200; laya-serve refuses more than 64. JEVIS_JEV_CHUNK overrides. */
+export const chunkSize = () => Number(process.env.JEVIS_JEV_CHUNK) || (decider() === "luna" || jevUrl() === TYPESAFE_URL ? CHUNK : 64);
+
+/** Shared by transport, doctor, and installer. Never print the key. */
+export function lunaKey(env = process.env) {
+  for (const source of ["JEVIS_LUNA_KEY", "OPENAI_API_KEY"]) {
+    if (env[source]?.trim()) return { key: env[source].trim(), source };
+  }
+  const source = join(jevisHome(), "secrets", "openai_api_key");
+  const key = existsSync(source) ? readFileSync(source, "utf8").trim() : "";
+  return key ? { key, source } : null;
+}
 
 /** JEVIS_JEV_KEY, else TYPESAFE_API_KEY, else ~/.jevis/secrets/typesafe_api_key. */
 function apiKey() {
@@ -38,13 +52,17 @@ function apiKey() {
   return existsSync(file) ? readFileSync(file, "utf8").trim() : null;
 }
 
-/** TypeSafe needs a key. A self-hosted server may run without one (Laya does unless LAYA_API_KEY is set). */
-const needsKey = () => jevUrl() === TYPESAFE_URL;
+/** Hosted deciders need keys; self-hosted Jev servers may run without one. */
+const needsKey = () => decider() === "luna" || jevUrl() === TYPESAFE_URL;
 
 async function httpTransport(body, timeoutMs, signal) {
   const key = apiKey();
-  if (!key && needsKey()) throw new Error("no TypeSafe API key");
-  const res = await fetch(jevUrl(), {
+  if (!key && jevUrl() === TYPESAFE_URL) throw new Error("no TypeSafe API key");
+  return post(jevUrl(), body, key, timeoutMs, signal);
+}
+
+async function post(url, body, key, timeoutMs, signal) {
+  const res = await fetch(url, {
     method: "POST",
     headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -57,8 +75,29 @@ async function httpTransport(body, timeoutMs, signal) {
   return json;
 }
 
+let lunaUrl = LUNA_URL;
+/** Tests exercise the real transport against a local HTTP server. No user URL setting. */
+export const setLunaUrl = (url) => { lunaUrl = url ?? LUNA_URL; };
+
+export async function lunaTransport(body, timeoutMs, signal) {
+  const questions = Object.entries(body.questions).map(([name, q]) => {
+    if (q.type !== "noul") throw new Error(`Luna supports only noul questions: ${name} has type ${q.type}`);
+    const instructions = q.instructions + (q.criteria ? ` Yes means: ${q.criteria.true}. No means: ${q.criteria.false}.` : "");
+    return { type: "predicate", name, instructions };
+  });
+  const key = lunaKey();
+  if (!key) throw new Error("no OpenAI API key");
+  const response = await post(lunaUrl, { model: body.model ?? lunaModel(), input: JSON.stringify(body.state), questions }, key.key, timeoutMs, signal);
+  if (!Array.isArray(response.answers)) throw new Error(errorMessage(response.error, "no answers"));
+  return {
+    answers: Object.fromEntries(response.answers.filter((a) => a.type !== "refusal" && typeof a.probability === "number").map((a) => [a.name, { noul: a.probability }])),
+    usage: { input_tokens: response.usage?.input_tokens ?? 0, output_tokens: response.usage?.output_tokens ?? 0 },
+  };
+}
+
 /**
- * Jev's latency has a long tail. Sep 27 2026, 20 sequential calls: median 390 ms,
+ * Both hosted deciders have long latency tails. Luna's Oct 15 2026 median was
+ * 383 ms and max 1574 ms for 66 questions. Jev, Sep 27: median 390 ms,
  * but 1.2, 1.8, 3.3, and 4.2 s among them. In a slow spell, about half of the
  * identical requests took 4-15 s while the rest answered in under a second. A
  * slow call is a slow server, not a slow question, so identical requests race:
@@ -116,7 +155,7 @@ export const setJevTransport = (fn) => {
   transport = fn;
 };
 
-export const jevAvailable = () => process.env.JEVIS_JEV !== "off" && (transport !== null || !needsKey() || apiKey() !== null);
+export const jevAvailable = () => process.env.JEVIS_JEV !== "off" && (decider() === "luna" ? lunaKey() !== null : transport !== null || !needsKey() || apiKey() !== null);
 
 /** A question set's version: recorded answers are only comparable within one version. */
 export const questionsVersion = (questions) => createHash("sha256").update(JSON.stringify(Object.keys(questions).sort().map((k) => [k, questions[k]]))).digest("hex").slice(0, 12);
@@ -152,8 +191,8 @@ const chunks = (questions) => {
 };
 
 /**
- * Ask Jev every question about one state. Returns { answers, ms, error }:
- * answers is null when Jev is off, unconfigured, slow, or failing, and the
+ * Ask the active decider every question about one state. Returns { answers, ms, error }:
+ * answers is null when it is off, unconfigured, slow, or failing, and the
  * caller then does nothing (Jevis fails open).
  */
 export async function askJev({ state, questions, event, sessionId = null, harness = null, model = null, timeoutMs = 3000, record: keep = true }) {
@@ -161,11 +200,13 @@ export async function askJev({ state, questions, event, sessionId = null, harnes
   if (!jevAvailable()) return { answers: null, ms: 0, error: "jev unavailable" };
   const started = Date.now();
   const clean = redactDeep(state);
+  const provider = decider();
+  const decisionModel = provider === "luna" ? lunaModel() : jevModel();
   let answers = null;
   let error = null;
   let usage = { input_tokens: 0, output_tokens: 0 };
   try {
-    const responses = await Promise.all(chunks(questions).map((qs) => hedged(transport ?? httpTransport, { state: clean, ...(jevModel() ? { model: jevModel() } : {}), questions: qs }, timeoutMs, transport || !needsKey() ? [] : HEDGES)));
+    const responses = await Promise.all(chunks(questions).map((qs) => hedged(transport ?? (provider === "luna" ? lunaTransport : httpTransport), { state: clean, ...(decisionModel ? { model: decisionModel } : {}), questions: qs }, timeoutMs, transport || !needsKey() ? [] : HEDGES)));
     answers = {};
     for (const r of responses) {
       if (!r?.answers) throw new Error(errorMessage(r?.error, "no answers"));
@@ -181,6 +222,6 @@ export async function askJev({ state, questions, event, sessionId = null, harnes
   const version = questionsVersion(questions);
   const failureClass = error ? errorClass(error) : null;
   if (keep) recordHealth(error);
-  if (keep && recording()) record({ at: new Date(started).toISOString(), event, version, sessionId, harness, model, ms, state: clean, answers: compactAnswers(answers), usage, error, errorClass: failureClass }, questions);
+  if (keep && recording()) record({ at: new Date(started).toISOString(), event, version, sessionId, harness, model, decider: provider, deciderModel: decisionModel ?? null, ms, state: clean, answers: compactAnswers(answers), usage, error, errorClass: failureClass }, questions);
   return { answers, ms, error, errorClass: failureClass };
 }

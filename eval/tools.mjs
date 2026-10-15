@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 // The battery covers the optional destructive rules too.
 process.env.JEVIS_ENABLE ??= "all";
 import { evaluate } from "../src/engine.mjs";
+import { decider, jevModel, lunaModel } from "../src/jev.mjs";
+console.log(`decider: ${decider()} (${decider() === "luna" ? lunaModel() : jevModel() ?? "server default"})`);
 const cases = JSON.parse(readFileSync(new URL("./tool-cases.json", import.meta.url), "utf8"));
 let ok = 0;
 let originalOk = 0;
@@ -24,5 +26,5 @@ console.log(rows.join("\n"));
 console.log(`${ok}/${cases.length}`);
 console.log(`Original cases: ${originalOk}/${cases.filter((c) => !c.regression).length}; regression cases: ${ok - originalOk}/${cases.filter((c) => c.regression).length}`);
 console.log(`Independent original battery: ${independentOk}/${cases.filter((c) => !c.tuned).length}; tuning-contaminated cases excluded (${cases.filter((c) => c.tuned).length}). Real-data split: node eval/heldout/tools.mjs test`);
-console.log(`destructive_git code-decided: ${codeCases}/${cases.length} cases (${decisions.true} true, ${decisions.false} false); positives still ask Jev for permission.`);
+console.log(`destructive_git code-decided: ${codeCases}/${cases.length} cases (${decisions.true} true, ${decisions.false} false); positives still ask the decision model for permission.`);
 if (ok !== cases.length) process.exitCode = 1;
