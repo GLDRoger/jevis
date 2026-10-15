@@ -27,12 +27,22 @@ export function antigravityMessages(path) {
   finally { if (fd !== undefined) closeSync(fd); }
 }
 
+function antigravityReceipt(row) {
+  const match = row?.type === 'GENERIC' && row.content?.match(/^Created At: ([^\n]+)\nCompleted At: ([^\n]+)\n\nThe command exited with code (-?\d+)\.\n(?:Output|Stdout):/);
+  if (!match) return undefined;
+  const time = value => {
+    const ms = Date.parse(value);
+    return Number.isFinite(ms) && ms >= 0 ? ms : null;
+  };
+  return { exit_code: Number(match[3]), execution: { start: time(match[1]), end: time(match[2]) } };
+}
+
 export function antigravityExitCode(row) {
-  const match = row?.type === 'GENERIC' && row.content?.match(/^Created At: [^\n]+\nCompleted At: [^\n]+\n\nThe command exited with code (-?\d+)\.\n(?:Output|Stdout):/);
-  return match ? Number(match[1]) : undefined;
+  return antigravityReceipt(row)?.exit_code;
 }
 
 export function googleTool(name, args = {}) {
+  if (['read_file', 'view_file'].includes(name)) return { tool: 'Read', input: { file_path: args.file_path ?? args.AbsolutePath } };
   if (['run_shell_command', 'run_command'].includes(name)) return { tool: 'Bash', input: { command: args.command ?? args.CommandLine ?? '' } };
   if (['write_file', 'write_to_file'].includes(name)) return { tool: 'Write', input: { file_path: args.file_path ?? args.TargetFile, content: args.content ?? args.CodeContent ?? '' } };
   if (['replace', 'replace_file_content'].includes(name)) return { tool: 'Edit', input: { file_path: args.file_path ?? args.TargetFile, old_string: args.old_string ?? args.TargetContent, new_string: args.new_string ?? args.ReplacementContent } };
@@ -66,8 +76,8 @@ export function antigravityReceiptRefreshes(input, rows, results) {
   return results.flatMap(row => {
     if (row.turnId !== input.turn_id || row.it?.type !== 'CommandExecution' || !row.it.id) return [];
     const receipt = rows.find(r => r.step_index?.toString() === row.it.id);
-    const exit = antigravityExitCode(receipt);
-    return exit === undefined ? [] : [{ ...input, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: row.it.command }, tool_use_id: row.it.id, tool_response: { exit_code: exit } }];
+    const response = antigravityReceipt(receipt);
+    return response === undefined ? [] : [{ ...input, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: row.it.command }, tool_use_id: row.it.id, tool_response: response }];
   });
 }
 
@@ -77,7 +87,7 @@ export function googleInput(provider, event, raw, rows = []) {
   if (!agy && raw.mcp_context?.server_name && raw.mcp_context?.tool_name) mapped.tool = `mcp__${raw.mcp_context.server_name}__${raw.mcp_context.tool_name}`;
   const { tool, input } = mapped;
   const toolRow = rows.find(r => r.type === 'GENERIC' && r.step_index === raw.stepIdx);
-  const commandExit = antigravityExitCode(toolRow);
+  const commandReceipt = antigravityReceipt(toolRow);
   const user = rows.filter(r => r.type === 'USER_INPUT').at(-1);
   const final = rows.filter(r => r.type === 'PLANNER_RESPONSE' && (!user || r.step_index > user.step_index)).at(-1);
   const events = { BeforeAgent: 'UserPromptSubmit', PreInvocation: 'UserPromptSubmit', BeforeTool: 'PreToolUse', PreToolUse: 'PreToolUse', AfterTool: 'PostToolUse', PostToolUse: 'PostToolUse', AfterAgent: 'Stop', Stop: 'Stop', SessionStart: 'SessionStart' };
@@ -99,12 +109,12 @@ export function googleInput(provider, event, raw, rows = []) {
     tool_use_id: agy ? raw.stepIdx?.toString() : raw.tool_use_id,
     // Only Antigravity's transport-generated completion header can prove a
     // command exit. Missing error alone may describe a background launch.
-    tool_response: agy ? { ...(commandExit !== undefined ? { exit_code: Number(commandExit) } : {}), is_error: !!raw.error } : geminiShellResponse(raw.tool_response, tool, input),
+    tool_response: agy ? { ...commandReceipt, is_error: !!raw.error } : geminiShellResponse(raw.tool_response, tool, input),
   };
 }
 
 export function googleOutput(provider, event, output) {
-  if (!output) return provider === 'antigravity' && event === 'PreToolUse' ? { decision: 'ask' } : {};
+  if (!output) return provider === 'antigravity' && event === 'PreToolUse' ? { decision: 'allow' } : {};
   const specific = output.hookSpecificOutput ?? {};
   const deny = specific.permissionDecision === 'deny' || output.decision === 'block';
   const reason = specific.permissionDecisionReason ?? output.reason;
@@ -113,7 +123,7 @@ export function googleOutput(provider, event, output) {
     if (specific.additionalContext && ['SessionStart', 'PreInvocation'].includes(event)) return { injectSteps: [{ ephemeralMessage: specific.additionalContext }] };
     // Antigravity PreToolUse has no context-injection output field. Notes have
     // already been selected by Jevis; the adapter runner queues them for the next invocation.
-    return event === 'PreToolUse' ? { decision: 'ask' } : {};
+    return event === 'PreToolUse' ? { decision: 'allow' } : {};
   }
   if (deny) return { decision: 'deny', reason };
   if (event === 'BeforeTool') return {}; // delivered by AfterTool, not ignored by Gemini
