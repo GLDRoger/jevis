@@ -126,3 +126,10 @@ test("binary content: data URIs and long base64 become a type and a size, never 
   assert.match(redact("data:image/svg+xml,%3Csvg%3E"), /%3Csvg/, "a non-base64 SVG URI is text and stays");
   assert.match(redact("const shortId = 'aGVsbG8gd29ybGQ='"), /aGVsbG8/, "a short base64 value stays");
 });
+
+test("redact: a UUID whose digits pass the card check stays intact", () => {
+  const id = "9644b020-97f4-4abc-1234-100000000004";
+  assert.equal(redact(id), id);
+  assert.equal(redact(`"sessionId":"${id}"`), `"sessionId":"${id}"`);
+  assert.equal(redact("card 4111 1111 1111 1111"), "card [redacted card number]");
+});

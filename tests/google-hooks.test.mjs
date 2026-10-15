@@ -99,7 +99,7 @@ test('Gemini retry prompts preserve the original user turn and tool evidence', a
   mkdirSync(join(dir,'sessions'));
   const state = { turn: 3, request: 'original request', googleRetryReason: 'Verify first', hookItems: [{ t: 1, it: { type: 'CommandExecution', command: 'npm test' } }], stop: { turn: 3, blocked: ['lesson'], reviews: 0 } };
   writeFileSync(join(dir,'sessions/gemini-cli-s.json'),JSON.stringify(state));
-  const result = spawnSync(process.execPath,['bin/google-hook.mjs','gemini-cli','BeforeAgent'], { cwd: fileURLToPath(new URL('..',import.meta.url)), input: JSON.stringify({ session_id:'s',cwd:'/w',prompt:'Verify first' }),encoding:'utf8',env:{...process.env,JEVIS_HOME:dir,JEVIS_DISABLE:'1'} });
+  const result = spawnSync(process.execPath,['bin/google-hook.mjs','gemini-cli','BeforeAgent'], { cwd: fileURLToPath(new URL('..',import.meta.url)), input: JSON.stringify({ session_id:'s',cwd:resolve('/w'),prompt:'Verify first' }),encoding:'utf8',env:{...process.env,JEVIS_HOME:dir,JEVIS_DISABLE:'1'} });
   assert.equal(result.status,0);assert.deepEqual(JSON.parse(result.stdout),{});
   const now=JSON.parse(readFileSync(join(dir,'sessions/gemini-cli-s.json'),'utf8'));
   assert.equal(now.turn,3);assert.equal(now.request,'original request');assert.deepEqual(now.hookItems,state.hookItems);assert.deepEqual(now.stop.blocked,['lesson']);assert.equal(now.googleRetryReason,undefined);
