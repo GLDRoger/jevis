@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jevis launch film</title>
+<style>
+  @font-face { font-family: "Tanker"; src: url("../fonts/Tanker-Regular.woff2") format("woff2"); }
+  html, body { margin: 0; height: 100%; background: #000; }
+  canvas { display: block; width: 100vw; height: 100vh; object-fit: contain; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="lessons.js"></script>
+<script id="film">
+'use strict';
+// Every frame is drawn here. draw(f) depends only on f, so any frame renders on its own.
+// Picture and sound share the beat grid below: the music is 124 BPM, first drop kick at 11.644 s.
+
+const W = 1920, H = 1080, FPS = 30, DUR = 62.5, N = Math.round(DUR * FPS);
+const BPM = 124, P = 60 / BPM, T0 = 11.644 - 24 * P;
+const b = (bar, beat = 0) => T0 + (bar * 4 + beat) * P;
+// The track plays 0 to bar 29, then jumps to its own outro (track bar 45) on the downbeat.
+const MUSIC = { cutFilm: b(29), resumeTrack: T0 + 45 * 4 * P, fadeOut: [DUR - 1.4, DUR] };
+
+const LESSONS = window.LESSONS || [];
+const C = { bg: '#0D1012', panel: '#121719', line: '#263035', ink: '#ECF0EC', dim: '#82918F', faint: '#3A4549', teal: '#65D9C5', red: '#FF5A4C' };
+const MONO = '"DejaVu Sans Mono", "Liberation Mono", Menlo, monospace';
+const DISP = 'Tanker, Impact, sans-serif';
+const SERIF = 'Caladea, "Liberation Serif", Georgia, serif';
+const SANS = 'Inter, "Liberation Sans", Arial, sans-serif';
+
+const clamp = (x, a = 0, b2 = 1) => Math.max(a, Math.min(b2, x));
+const lerp = (a, b2, k) => a + (b2 - a) * k;
+const seg = (t, a, b2) => clamp((t - a) / (b2 - a));
+const outCubic = k => 1 - Math.pow(1 - k, 3);
+const inOutCubic = k => k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+const outBack = k => { const c = 1.9; return 1 + (c + 1) * Math.pow(k - 1, 3) + c * Math.pow(k - 1, 2); };
+const outExpo = k => k >= 1 ? 1 : 1 - Math.pow(2, -10 * k);
+const hash = (a, b2 = 0, c = 0) => { let h = Math.imul(a | 0, 374761393) ^ Math.imul(b2 | 0, 668265263) ^ Math.imul(c | 0, 2147483647); h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+const age = (t, at) => t - at;
+const pulse = (t, at, k = 8) => t < at ? 0 : Math.exp(-(t - at) * k);
+const win = (t, a, b2, fin = .2, fout = .2) => Math.min(seg(t, a, a + fin), 1 - seg(t, b2 - fout, b2));
+
+// ---------- typed text: one registry drives the letters on screen and the key sounds ----------
+const TYPED = {};
+const typed = (id, t, text, cps = 40, sfx = true) => (TYPED[id] = { t, text, cps, sfx });
+const shown = (id, t) => { const e = TYPED[id]; if (t < e.t) return ''; return e.text.slice(0, Math.floor((t - e.t) * e.cps)); };
+const typedEnd = id => TYPED[id].t + TYPED[id].text.length / TYPED[id].cps;
+
+const CODE_BAD = '<h1 class="bg-clip-text text-transparent\n  bg-gradient-to-r from-purple-500 to-blue-500">\n  Unlock your creativity</h1>';
+
+typed('n1', 0.30, 'You ask a coding agent for a landing page.');
+typed('req1', 0.95, 'make me a landing page for my pottery studio', 44);
+typed('n2', b(2, 0) + 0.05, 'It builds the same default page.');
+typed('done1', b(4, 0), 'Done! Your landing page is ready.', 44);
+typed('n3', b(4, 2), 'Then it says done, without looking at it.', 44);
+typed('tag1', b(6, 2), 'A second pair of eyes for coding agents.', 46);
+typed('req2', b(8, 0) + 0.35, 'make me a landing page for my pottery studio', 70);
+typed('n4', b(8, 0) + 0.45, 'Jevis reads your message and adds the lesson that fits.', 46);
+typed('n5', b(10, 0) + 0.05, 'Before an edit runs, Jevis checks it for known mistakes.', 46);
+typed('code', b(11, 0), CODE_BAD, CODE_BAD.length / (b(13, 3) - b(11, 0)));
+typed('why1', b(14, 0) + 0.30, 'Gradient-filled text. Hype copy.', 46);
+typed('why2', b(14, 0) + 1.10, 'Use one solid color. Say what the studio does.', 62);
+typed('n6', b(15, 0) + 0.25, 'So the agent writes the real headline.', 46);
+typed('done2', b(16, 0) + 0.05, 'Done. The page is ready.', 46);
+typed('n7', b(16, 0) + 0.10, 'When it says done, Jevis checks the claim against what ran.', 52);
+typed('why3', b(16, 2) + 0.28, 'A visual change nobody looked at.', 50);
+typed('why4', b(16, 2) + 1.05, 'Open it in a headless browser. Look at it.', 56);
+typed('n8', b(18, 0) + 0.10, 'Jevis renders the page at 1440 and 390 px.', 48);
+typed('n9', b(19, 0) + 0.05, "A second model reviews it like a designer who didn't make it.", 56);
+typed('rv1', b(19, 0) + 0.15, 'Headline clips at 390 px', 40, false);
+typed('rv2', b(19, 2) + 0.15, 'Button text fails contrast', 40, false);
+typed('n10', b(20, 0) + 0.10, 'The agent fixes what the review found.', 48);
+typed('n11', b(21, 0) + 0.10, `${LESSONS.length} lessons, one Markdown file each. Edit them or add yours.`, 52);
+typed('st0', b(23, 0) + 0.15, 'Same tasks, with and without Jevis.', 36);
+typed('st0b', b(23, 2), '36 blind-judged pairs. Codex and Claude Code. Simulated users.', 60, false);
+typed('st1', b(24, 0) + 0.35, 'wins to losses where Jevis stepped in, and 1 tie', 50, false);
+typed('st2', b(25, 0) + 0.35, 'hidden checks newly failed because of Jevis', 50, false);
+typed('st3', b(26, 0) + 0.35, 'median wait per check. If Jevis is down, your agent carries on.', 56, false);
+typed('tag2', b(27, 2), 'A second pair of eyes for coding agents.', 46);
+typed('url', b(28, 0), 'github.com/GLDRoger/jevis', 30);
+typed('meta', b(29, 0), 'Open source, MIT. For Codex, Claude Code, and agents with hooks.', 52, false);
+
+// Narration: one typed line per beat at the bottom of the frame.
+const NARR = [['n1', b(2, 0)], ['n2', b(4, 2)], ['n3', b(5, 3)], ['n4', b(10, 0)], ['n5', b(14, 0)], ['n6', b(16, 0)], ['n7', b(18, 0)],
+  ['n8', b(19, 0)], ['n9', b(20, 0)], ['n10', b(21, 0)], ['n11', b(23, 0)]];
+
+const LABELS = [['1  YOUR MESSAGE', b(8, 0) + 0.1, b(10, 0)], ['2  EACH EDIT', b(10, 0), b(16, 0)], ['3  EACH "DONE"', b(16, 0), b(18, 0)], ['4  THE DESIGN REVIEW', b(18, 0), b(21, 0)]];
+
+// The two captures land on off-beats, between kicks, so the shutters are heard.
+const SHOT1 = b(18, 0.5), SHOT2 = b(18, 2.5);
+
+const HIGHLIGHTS = ['Deployed means exercised in production', 'Fixed means reproduced, then passed', 'A narrow ask gets a narrow change'];
+
+// ---------- sound cues, from the same constants ----------
+// Gains were set by measuring each effect against the music under it (out/stem-*): every effect sits above the bed.
+const CUES = [];
+const cue = (t, s, g = 0, extra = {}) => CUES.push({ t: +t.toFixed(4), s, g, ...extra });
+// Typing sits louder where the drums play, so it is still heard over them.
+const drums = t => (t >= b(6) && t < b(14)) || (t >= b(15) && t < b(23)) || t >= b(27);
+for (const [id, e] of Object.entries(TYPED)) if (e.sfx) cue(e.t, 'typing', drums(e.t) ? 5 : 1, { dur: +(e.text.length / e.cps).toFixed(3), id });
+[b(2, 0), b(2, 2), b(3, 0), b(3, 2), b(4, 0) - 0.02].forEach(t => cue(t, 'click', 2));
+cue(b(6), 'bighit', 0); cue(b(6), 'zoom', -4); cue(b(6) - 0.01, 'whoosh', 2);
+cue(b(7, 3.5), 'whoosh', 3);
+cue(b(8), 'rewind', -2);
+LABELS.forEach(([, t]) => cue(t, 'swoosh', 7));
+cue(b(9), 'pop', 1);
+[b(9, 2), b(10, 0), b(10, 2)].forEach(t => cue(t, 'click', 1));
+cue(b(14), 'hit', 0); cue(b(14), 'error', -3);
+cue(b(15), 'bighit', -3); cue(b(15), 'pop', 0);
+cue(b(16, 2), 'break', 0);
+cue(SHOT1, 'shutter', 6); cue(SHOT2, 'shutter', 6);
+cue(b(19), 'pop', 3); cue(b(19, 2), 'pop', 3);
+cue(b(20), 'confirm', 0); cue(b(20), 'swoosh', 3);
+cue(b(21), 'whoosh', 6);
+[b(21, 2), b(22, 0), b(22, 2)].forEach(t => cue(t, 'hit', -6));
+[b(23), b(24), b(25), b(26)].forEach((t, i) => cue(t, i ? 'swoosh' : 'pop', i ? 3 : 0));
+cue(b(27), 'swell', -4, { align: 'peak' });
+cue(b(27), 'bighit', 0); cue(b(27), 'zoom', -4);
+cue(b(28), 'click', 2);
+cue(b(30, 3), 'click', 3);
+
+// ---------- canvas ----------
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+function text(s, x, y, font, color, align = 'left', base = 'alphabetic') { ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = base; ctx.fillText(s, x, y); }
+
+const vignette = (() => {
+  const v = document.createElement('canvas'); v.width = W; v.height = H; const g = v.getContext('2d');
+  const gr = g.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 1.0);
+  gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.55)');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H); return v;
+})();
+const grain = [0].map(k => {
+  const g = document.createElement('canvas'); g.width = g.height = 256; const x = g.getContext('2d'); const im = x.createImageData(256, 256);
+  for (let i = 0; i < 256 * 256; i++) { const v = hash(i, k, 7) * 255; im.data[i * 4] = im.data[i * 4 + 1] = im.data[i * 4 + 2] = v; im.data[i * 4 + 3] = 9; }
+  x.putImageData(im, 0, 0); return g;
+})[0];
+
+// ---------- the eyes: Jevis as a character ----------
+function eyeState(t) {
+  const perch = { x: 960, y: 92, s: 22 };
+  const big = { x: 960, y: 318, s: 88 };
+  let x = perch.x, y = perch.y, s = perch.s, open = 1, squint = 0, brow = 0, pupil = 1, lx = 0, ly = 0, alpha = 1, wink = 0;
+  if (t < b(5, 2)) alpha = 0;
+  else if (t < b(6)) { x = big.x; y = big.y; s = big.s; open = 0; alpha = seg(t, b(5, 2), b(5, 3.5)); }
+  else if (t < b(8)) {
+    const k = inOutCubic(seg(t, b(7, 3.4), b(8)));
+    x = lerp(big.x, perch.x, k); y = lerp(big.y, perch.y, k); s = lerp(big.s, perch.s, k);
+    open = outBack(seg(t, b(6), b(6) + 0.16));
+    lx = t < b(6, 2) ? 0 : t < b(7) ? -1 : t < b(7, 2) ? 1 : 0;
+    lx *= outCubic(seg(t % (2 * P), 0, 0.12));
+  } else if (t < b(27)) {
+    // looking at whatever matters in this beat
+    if (t < b(9)) { lx = -1; ly = .8; }
+    else if (t < b(10)) { lx = -.6; ly = .9; }
+    else if (t < b(11)) { lx = .7; ly = .9; }
+    else if (t < b(14)) { lx = -.7 + .5 * Math.sin(t * 3); ly = .9; squint = .55 * seg(t, b(11), b(13, 3)); brow = squint; }
+    else if (t < b(15)) { lx = -.5; ly = .8; pupil = .62; brow = 1; open = 1.08; }
+    else if (t < b(16)) { lx = .8; ly = .8; }
+    else if (t < b(18)) { lx = -.5; ly = .9; squint = t > b(16, 1) ? .4 : 0; brow = t > b(16, 2) ? .8 : 0; }
+    else if (t < b(21)) { lx = t < b(19) ? -.3 : t < b(19, 2) ? .7 : t < b(20) ? -.4 : 0; ly = .9; }
+    else { lx = 0; ly = .9; }
+    if (t > b(26, 3)) { const k = inOutCubic(seg(t, b(26, 3), b(27))); x = lerp(perch.x, big.x, k); y = lerp(perch.y, big.y, k); s = lerp(perch.s, big.s, k); }
+    for (const bl of [b(9, 3), b(12, 1.5), b(17, 1), b(20, 3), b(22, 1), b(24, 2), b(25, 3)]) open *= 1 - Math.max(0, 1 - Math.abs(t - bl) / 0.07);
+  } else {
+    x = big.x; y = big.y; s = big.s;
+    lx = t < b(28) ? 0 : t < b(29) ? .5 : 0; ly = t < b(28) ? 0 : .6;
+    wink = seg(t, b(30, 3), b(30, 3) + 0.09);
+    alpha = 1 - seg(t, DUR - 1.0, DUR - 0.2);
+  }
+  return { x, y, s, open, squint, brow, pupil, lx, ly, alpha, wink };
+}
+
+function drawEye(cx, cy, s, open, squint, brow, pupil, lx, ly, side, shut) {
+  const rx = s, ry = s * 1.18;
+  const o = clamp(open * (1 - shut), 0, 1.15);
+  ctx.save();
+  if (o < 0.06) { // closed lid
+    ctx.strokeStyle = C.ink; ctx.lineWidth = Math.max(2, s * 0.12); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cx - rx, cy); ctx.quadraticCurveTo(cx, cy + ry * 0.35, cx + rx, cy); ctx.stroke();
+    ctx.lineWidth = Math.max(1.5, s * 0.07); // lashes, so a shut eye reads as an eye
+    for (const k of [-0.6, 0, 0.6]) { const x = cx + k * rx * 0.85, y = cy + ry * 0.17 * (1 - k * k * 0.9); ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + k * s * 0.18, y + s * 0.26); ctx.stroke(); }
+    ctx.restore(); return;
+  }
+  ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry * o, 0, 0, Math.PI * 2); ctx.clip();
+  const lidTop = cy - ry * o + squint * ry * 0.95 * o;
+  ctx.fillStyle = C.ink; ctx.fillRect(cx - rx, lidTop, rx * 2, ry * 2.4);
+  const px = cx + lx * rx * 0.42, py = cy + ly * ry * 0.32;
+  const pr = s * 0.47 * pupil;
+  ctx.fillStyle = C.teal; ctx.beginPath(); ctx.arc(px, py, pr, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = C.bg; ctx.beginPath(); ctx.arc(px, py, pr * 0.52, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(px - pr * 0.32, py - pr * 0.36, pr * 0.17, 0, Math.PI * 2); ctx.fill();
+  if (squint > 0.02) { ctx.fillStyle = C.bg; ctx.fillRect(cx - rx, cy - ry * 1.3, rx * 2, lidTop - (cy - ry * 1.3)); ctx.strokeStyle = C.ink; ctx.lineWidth = Math.max(2, s * 0.1); ctx.beginPath(); ctx.moveTo(cx - rx, lidTop); ctx.lineTo(cx + rx, lidTop); ctx.stroke(); }
+  ctx.restore();
+  if (brow > 0.02) { // stern brows, inner ends lower
+    const inner = side < 0 ? cx + rx * 0.9 : cx - rx * 0.9, outer = side < 0 ? cx - rx * 0.9 : cx + rx * 0.9;
+    const by = cy - ry * o - s * 0.32;
+    ctx.strokeStyle = C.ink; ctx.lineWidth = Math.max(3, s * 0.17); ctx.lineCap = 'round'; ctx.globalAlpha *= brow;
+    ctx.beginPath(); ctx.moveTo(outer, by - s * 0.22); ctx.lineTo(inner, by + s * 0.12); ctx.stroke(); ctx.globalAlpha /= brow;
+  }
+}
+
+function drawEyes(t) {
+  const e = eyeState(t); if (e.alpha <= 0) return;
+  ctx.save(); ctx.globalAlpha = e.alpha;
+  const shake = t > b(5, 2) && t < b(6) ? 1.5 * Math.sin(t * 70) : 0;
+  drawEye(e.x - e.s * 1.3 + shake, e.y, e.s, e.open, e.squint, e.brow, e.pupil, e.lx, e.ly, -1, 0);
+  drawEye(e.x + e.s * 1.3 + shake, e.y, e.s, e.open, e.squint, e.brow, e.pupil, e.lx, e.ly, 1, e.wink);
+  ctx.restore();
+}
+
+// ---------- the two pages the agent makes ----------
+// The default page: drawn on purpose with the telltales Jevis refuses.
+function drawSlopPage(t, p) {
+  const k = name => p[name] ?? 0;
+  ctx.fillStyle = '#F7F6FB'; ctx.fillRect(0, 0, 1440, 900);
+  if (k('hero') > 0) {
+    ctx.globalAlpha = k('hero');
+    for (const [x, y, r, c] of [[380, 330, 420, 'rgba(139,92,246,0.30)'], [1080, 300, 460, 'rgba(59,130,246,0.26)']]) {
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, c); g.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, 1440, 900);
+    }
+    text('Potterly', 80, 70, `800 30px ${SANS}`, '#4C1D95');
+    ['Features', 'Pricing', 'About'].forEach((s, i) => text(s, 880 + i * 130, 70, `500 21px ${SANS}`, '#6B6B80'));
+    rr(1250, 40, 120, 44, 22); ctx.fillStyle = '#7C3AED'; ctx.fill(); text('Sign up', 1310, 70, `600 19px ${SANS}`, '#fff', 'center');
+    ctx.globalAlpha = 1;
+  }
+  if (k('head') > 0) {
+    ctx.globalAlpha = k('head');
+    rr(612, 150, 216, 40, 20); ctx.fillStyle = 'rgba(124,58,237,0.12)'; ctx.fill(); text('New: Summer classes', 720, 177, `600 17px ${SANS}`, '#6D28D9', 'center');
+    ctx.font = `900 96px ${SANS}`; const g = ctx.createLinearGradient(330, 0, 1110, 0); g.addColorStop(0, '#7C3AED'); g.addColorStop(1, '#3B82F6');
+    ctx.fillStyle = g; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillText('Unlock your creativity', 720, 300);
+    ctx.globalAlpha = 1;
+  }
+  if (k('sub') > 0) {
+    ctx.globalAlpha = k('sub');
+    text('The all-in-one pottery experience, reimagined.', 720, 360, `400 26px ${SANS}`, '#5B5B6E', 'center');
+    ctx.shadowColor = 'rgba(124,58,237,0.6)'; ctx.shadowBlur = 40; rr(620, 400, 200, 60, 30); ctx.fillStyle = '#7C3AED'; ctx.fill(); ctx.shadowBlur = 0;
+    text('Get started', 720, 438, `700 21px ${SANS}`, '#fff', 'center');
+    ctx.globalAlpha = 1;
+  }
+  if (k('cards') > 0) {
+    for (let i = 0; i < 3; i++) {
+      const a = clamp(k('cards') * 3 - i); if (a <= 0) continue; ctx.globalAlpha = a;
+      const x = 150 + i * 390, y = 520 + (1 - outCubic(a)) * 30;
+      rr(x, y, 350, 220, 18); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = '#E7E5F0'; ctx.lineWidth = 2; ctx.stroke();
+      rr(x + 30, y + 30, 56, 56, 14); ctx.fillStyle = ['#EDE9FE', '#DBEAFE', '#FCE7F3'][i]; ctx.fill();
+      ctx.fillStyle = ['#7C3AED', '#3B82F6', '#DB2777'][i]; ctx.beginPath(); ctx.arc(x + 58, y + 58, 13, 0, Math.PI * 2); ctx.fill();
+      text(['Seamless booking', 'Expert-led', 'Community'][i], x + 30, y + 130, `700 25px ${SANS}`, '#1F1F2E');
+      ctx.fillStyle = '#D9D8E3'; rr(x + 30, y + 152, 270, 12, 6); ctx.fill(); rr(x + 30, y + 174, 200, 12, 6); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  if (k('logos') > 0) {
+    ctx.globalAlpha = k('logos');
+    text('TRUSTED BY 10,000+ MAKERS', 720, 800, `700 15px ${SANS}`, '#9A99AC', 'center');
+    for (let i = 0; i < 5; i++) { rr(330 + i * 160, 826, 120, 26, 8); ctx.fillStyle = '#E2E1EA'; ctx.fill(); }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// The page the agent makes with Jevis, after the README's own example: "Clock off. Clay on."
+function drawClayPhoto(w, h, potX) {
+  const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#4B382D'); g.addColorStop(1, '#191210'); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  const l = ctx.createRadialGradient(potX + 40, h * 0.22, 0, potX + 40, h * 0.22, h * 0.8); l.addColorStop(0, 'rgba(255,196,150,0.30)'); l.addColorStop(1, 'rgba(255,196,150,0)'); ctx.fillStyle = l; ctx.fillRect(0, 0, w, h);
+  const s = h / 900, base = h * 0.80;
+  ctx.fillStyle = '#2A1F19'; ctx.beginPath(); ctx.ellipse(potX, base + 30 * s, 380 * s, 86 * s, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#5E4A3D'; ctx.beginPath(); ctx.ellipse(potX, base + 8 * s, 300 * s, 58 * s, 0, 0, Math.PI * 2); ctx.fill();
+  const pg = ctx.createLinearGradient(potX - 170 * s, 0, potX + 170 * s, 0);
+  pg.addColorStop(0, '#6E3920'); pg.addColorStop(0.42, '#C9784A'); pg.addColorStop(0.55, '#D88B5C'); pg.addColorStop(1, '#6A361E');
+  ctx.fillStyle = pg; ctx.beginPath();
+  ctx.moveTo(potX - 110 * s, base); ctx.bezierCurveTo(potX - 210 * s, base - 90 * s, potX - 190 * s, base - 200 * s, potX - 80 * s, base - 255 * s);
+  ctx.lineTo(potX - 95 * s, base - 285 * s); ctx.lineTo(potX + 95 * s, base - 285 * s); ctx.lineTo(potX + 80 * s, base - 255 * s);
+  ctx.bezierCurveTo(potX + 190 * s, base - 200 * s, potX + 210 * s, base - 90 * s, potX + 110 * s, base); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#8A4A2A'; ctx.beginPath(); ctx.ellipse(potX, base - 285 * s, 95 * s, 16 * s, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#3A1E12'; ctx.beginPath(); ctx.ellipse(potX, base - 285 * s, 78 * s, 10 * s, 0, 0, Math.PI * 2); ctx.fill();
+  // two hands shaping the clay
+  for (const sd of [-1, 1]) {
+    const hg = ctx.createLinearGradient(potX + sd * 330 * s, 0, potX + sd * 150 * s, 0); hg.addColorStop(0, '#9C6B4E'); hg.addColorStop(1, '#D9A27C');
+    ctx.fillStyle = hg; ctx.beginPath();
+    const hy = base - (sd < 0 ? 150 : 210) * s;
+    ctx.ellipse(potX + sd * 215 * s, hy, 120 * s, 46 * s, sd * -0.18, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(potX + sd * 345 * s, hy + 40 * s, 90 * s, 60 * s, sd * 0.5, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawClayPage(t, st) {
+  const phone = !!st.phone, w = phone ? 390 : 1440, h = phone ? 844 : 900;
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, w, h); ctx.clip();
+  drawClayPhoto(w, h, phone ? 250 : 1020);
+  const shade = ctx.createLinearGradient(0, 0, phone ? w : 900, 0); shade.addColorStop(0, 'rgba(22,15,12,0.88)'); shade.addColorStop(1, 'rgba(22,15,12,0)');
+  ctx.fillStyle = shade; ctx.fillRect(0, 0, w, h);
+  if (phone) { const v = ctx.createLinearGradient(0, 0, 0, h); v.addColorStop(0, 'rgba(22,15,12,0.85)'); v.addColorStop(0.55, 'rgba(22,15,12,0.1)'); ctx.fillStyle = v; ctx.fillRect(0, 0, w, h); }
+  const cream = '#F3EBDD';
+  if ((st.nav ?? 1) > 0) {
+    ctx.globalAlpha = st.nav ?? 1;
+    text('Clay Studio', phone ? 24 : 90, phone ? 52 : 74, `700 ${phone ? 22 : 28}px ${SERIF}`, cream);
+    if (!phone) ['Classes', 'Visit', 'Book'].forEach((s, i) => text(s, 1050 + i * 120, 74, `500 21px ${SANS}`, 'rgba(243,235,221,0.8)'));
+    ctx.globalAlpha = 1;
+  }
+  const hx = phone ? 24 : 90;
+  if (st.pending) {
+    ctx.setLineDash([10, 8]); ctx.strokeStyle = 'rgba(243,235,221,0.55)'; ctx.lineWidth = 2; ctx.strokeRect(hx, 230, 620, 230); ctx.setLineDash([]);
+    text('h1', hx + 20, 268, `500 22px ${MONO}`, 'rgba(243,235,221,0.6)');
+  }
+  if ((st.head ?? 0) > 0) {
+    ctx.globalAlpha = st.head; const dy = (1 - outCubic(st.head)) * 24;
+    if (!phone) { text('Clock off.', hx, 340 + dy, `700 128px ${SERIF}`, cream); text('Clay on.', hx, 470 + dy, `700 128px ${SERIF}`, '#E39A68'); }
+    else if (!st.fixed) { ctx.font = `700 62px ${SERIF}`; ctx.fillStyle = cream; ctx.textAlign = 'left'; ctx.fillText('Clock off. Clay on.', hx, 300 + dy); }
+    else { text('Clock off.', hx, 260 + dy, `700 64px ${SERIF}`, cream); text('Clay on.', hx, 330 + dy, `700 64px ${SERIF}`, '#E39A68'); }
+    ctx.globalAlpha = 1;
+  }
+  if ((st.sub ?? 0) > 0) {
+    ctx.globalAlpha = st.sub;
+    const sy = phone ? (st.fixed ? 380 : 350) : 540;
+    text('Evening wheel classes for beginners.', hx, sy, `400 ${phone ? 19 : 30}px ${SANS}`, 'rgba(243,235,221,0.85)');
+    const bw = phone ? 170 : 230, bh = phone ? 50 : 64, by = sy + (phone ? 30 : 46);
+    rr(hx, by, bw, bh, 8); ctx.fillStyle = '#C9703F'; ctx.fill();
+    text('Book a class', hx + bw / 2, by + bh * 0.63, `700 ${phone ? 18 : 23}px ${SANS}`, st.btnFixed ? '#1A120E' : '#D9855A', 'center');
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
+// ---------- the agent session (left) ----------
+const TX = { x: 110, y: 160, w: 820, h: 780, top: 236, pad: 34 };
+function row(s, x, y, size, color, weight = 400) { text(s, x, y, `${weight} ${size}px ${MONO}`, color); }
+function caret(x, y, size, t) { if (Math.floor(t * 2.4) % 2 === 0) { ctx.fillStyle = C.teal; ctx.fillRect(x + 2, y - size * 0.85, size * 0.55, size * 1.02); } }
+function mw(s, size) { ctx.font = `400 ${size}px ${MONO}`; return ctx.measureText(s).width; }
+
+function toolRow(verb, file, x, y, a, mark) {
+  ctx.globalAlpha = a; row('●', x, y, 22, mark || C.teal); row(verb, x + 32, y, 24, C.ink, 700); row(file, x + 160, y, 24, C.dim); ctx.globalAlpha = 1;
+}
+
+function drawSession(t) {
+  const X = TX.x + TX.pad;
+  ctx.save();
+  rr(TX.x, TX.y, TX.w, TX.h, 14); ctx.fillStyle = C.panel; ctx.fill(); ctx.strokeStyle = C.line; ctx.lineWidth = 2; ctx.stroke();
+  text('AGENT SESSION', X, TX.y + 44, `700 18px ${MONO}`, C.dim);
+  ctx.fillStyle = C.line; ctx.fillRect(TX.x, TX.y + 66, TX.w, 2);
+  rr(TX.x, TX.y + 68, TX.w, TX.h - 68, [0, 0, 14, 14]); ctx.clip();
+
+  if (t < b(8) + 0.32) {
+    // the session without Jevis
+    const rw = t < b(8) ? 0 : outCubic(seg(t, b(8), b(8) + 0.3)); // rewind: everything slides up and away
+    ctx.translate(0, -rw * 500); ctx.globalAlpha = 1 - rw;
+    let y = TX.top + 30;
+    const r = shown('req1', t); row('›', X, y, 26, C.teal, 700); row(r, X + 30, y, 26, C.ink); if (t < b(2) && r.length < TYPED.req1.text.length + 2) caret(X + 30 + mw(r, 26), y, 26, t);
+    y += 70;
+    const tools = [['Write', 'index.html', b(2, 0)], ['Write', 'styles.css', b(2, 2)], ['Edit', 'index.html', b(3, 0)], ['Write', 'hero.css', b(3, 2)]];
+    for (const [v, f, at] of tools) { if (t >= at) toolRow(v, f, X, y + (1 - outCubic(seg(t, at, at + 0.15))) * 14, seg(t, at, at + 0.12)); y += 48; }
+    y += 30;
+    const d = shown('done1', t);
+    if (d) { row(d, X, y, 28, C.ink, 700); if (t < b(6)) caret(X + mw(d, 28) * 1.05, y, 28, t); }
+    ctx.restore(); return;
+  }
+
+  // the session with Jevis watching
+  const scroll = 250 * inOutCubic(seg(t, b(14, 3.5), b(15) + 0.25)) + 160 * inOutCubic(seg(t, b(16), b(16) + 0.35));
+  ctx.translate(0, -scroll);
+  let y = TX.top + 30;
+  const r = shown('req2', t); row('›', X, y, 26, C.teal, 700); row(r, X + 30, y, 26, C.ink); if (t < b(9)) caret(X + 30 + mw(r, 26), y, 26, t);
+  y += 40;
+  // NOTE from a prompt lesson
+  if (t >= b(9)) {
+    const k = outBack(seg(t, b(9), b(9) + 0.3)); ctx.save(); ctx.globalAlpha = seg(t, b(9), b(9) + 0.12);
+    ctx.translate(X, y + 18); ctx.scale(lerp(0.9, 1, k), lerp(0.9, 1, k));
+    rr(0, 0, 740, 128, 10); ctx.fillStyle = 'rgba(101,217,197,0.08)'; ctx.fill(); ctx.strokeStyle = C.teal; ctx.lineWidth = 2; ctx.stroke();
+    text('JEVIS NOTE', 22, 38, `700 18px ${MONO}`, C.teal);
+    text('The two default pages', 22, 76, `30px ${DISP}`, C.ink);
+    text("Pick one concept from the studio's own world.", 22, 108, `400 21px ${MONO}`, C.dim);
+    ctx.restore();
+  }
+  y += 200;
+  // the edit that gets refused
+  if (t >= b(10, 2)) {
+    const refused = t >= b(14);
+    toolRow('Edit', 'index.html', X, y, seg(t, b(10, 2), b(10, 2) + 0.12), refused ? C.red : C.teal);
+    const by = y + 22, bh = 128;
+    rr(X, by, 740, bh, 8); ctx.fillStyle = '#0A0D0E'; ctx.fill(); ctx.strokeStyle = refused ? C.red : C.line; ctx.lineWidth = refused ? 3 : 2; ctx.stroke();
+    const code = shown('code', t).split('\n');
+    code.forEach((ln, i) => row(ln, X + 18, by + 38 + i * 36, 21, refused ? 'rgba(255,90,76,0.55)' : C.ink));
+    if (!refused && t >= b(11)) { const last = code[code.length - 1]; caret(X + 18 + mw(last, 21), by + 38 + (code.length - 1) * 36, 21, t); }
+    if (refused) {
+      const k = seg(t, b(14), b(14) + 0.14);
+      ctx.save(); ctx.translate(X + 520, by + bh / 2 + 8); ctx.scale(lerp(1.8, 1, outCubic(k)), lerp(1.8, 1, outCubic(k))); ctx.globalAlpha = k;
+      rr(-150, -50, 300, 92, 8); ctx.fillStyle = C.bg; ctx.fill(); ctx.strokeStyle = C.red; ctx.lineWidth = 5; ctx.stroke();
+      text('REFUSED', 0, 22, `72px ${DISP}`, C.red, 'center'); ctx.restore();
+      row(shown('why1', t), X, by + bh + 46, 26, C.red, 700);
+      row(shown('why2', t), X, by + bh + 84, 22, C.ink);
+    }
+    y = by + bh + 130;
+  }
+  // the headline the agent writes instead
+  if (t >= b(15)) {
+    const a = seg(t, b(15), b(15) + 0.12);
+    toolRow('Edit', 'index.html', X, y, a); const by = y + 22;
+    ctx.globalAlpha = a; rr(X, by, 740, 60, 8); ctx.fillStyle = '#0A0D0E'; ctx.fill(); ctx.strokeStyle = C.teal; ctx.lineWidth = 2; ctx.stroke();
+    row('<h1>Clock off. Clay on.</h1>', X + 18, by + 39, 21, C.ink); ctx.globalAlpha = 1;
+    y = by + 110;
+  }
+  // "done", sent back
+  if (t >= b(16)) {
+    const back = t >= b(16, 2);
+    const kx = back ? outCubic(seg(t, b(16, 2), b(16, 2) + 0.25)) : 0;
+    const d = shown('done2', t);
+    ctx.save(); ctx.translate(-kx * 40, 0);
+    if (back) { ctx.globalAlpha = 0.5 + 0.5 * (1 - kx); }
+    row(d, X + 40 * kx, y, 28, back ? C.dim : C.ink, 700); if (!back) caret(X + mw(d, 28) * 1.05, y, 28, t);
+    if (back) { ctx.strokeStyle = C.red; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(X + 40 * kx, y - 10); ctx.lineTo(X + 40 * kx + mw(d, 28) * 1.05 * kx, y - 10); ctx.stroke(); }
+    ctx.restore();
+    if (back) {
+      const k = seg(t, b(16, 2), b(16, 2) + 0.14);
+      ctx.save(); ctx.globalAlpha = k; ctx.translate(X + 600, y - 12); ctx.scale(lerp(1.6, 1, outCubic(k)), lerp(1.6, 1, outCubic(k)));
+      rr(-110, -30, 220, 58, 6); ctx.fillStyle = C.bg; ctx.fill(); ctx.strokeStyle = C.red; ctx.lineWidth = 4; ctx.stroke();
+      text('SENT BACK', 0, 14, `40px ${DISP}`, C.red, 'center'); ctx.restore();
+      row(shown('why3', t), X, y + 52, 26, C.red, 700);
+      row(shown('why4', t), X, y + 90, 22, C.ink);
+    }
+  }
+  ctx.restore();
+}
+
+// ---------- the preview (right), and the review captures ----------
+const PV = { x: 990, y: 160, w: 820, page: { x: 1010, y: 236, w: 780 } };
+function slopState(t) {
+  const at = [b(2, 0), b(2, 2), b(3, 0), b(3, 2), b(4, 0)];
+  const s = { hero: seg(t, at[0], at[0] + .15), head: seg(t, at[1], at[1] + .15), sub: seg(t, at[2], at[2] + .15), cards: seg(t, at[3], at[3] + .4), logos: seg(t, at[4], at[4] + .15) };
+  return s;
+}
+function clayState(t) {
+  return { nav: seg(t, b(10, 0), b(10, 0) + .15), sub: seg(t, b(10, 2), b(10, 2) + .15), pending: t >= b(9, 2) && t < b(15), head: seg(t, b(15), b(15) + .2), btnFixed: t >= b(20), fixed: t >= b(20) };
+}
+
+function drawPreviewPanel(t, alpha) {
+  if (alpha <= 0) return;
+  ctx.save(); ctx.globalAlpha = alpha;
+  const pg = PV.page, s = pg.w / 1440, ph = 900 * s;
+  rr(PV.x, PV.y, PV.w, ph + 96, 14); ctx.fillStyle = C.panel; ctx.fill(); ctx.strokeStyle = C.line; ctx.lineWidth = 2; ctx.stroke();
+  text('PREVIEW  index.html', PV.x + 20, PV.y + 44, `700 18px ${MONO}`, C.dim);
+  ctx.save(); ctx.beginPath(); ctx.rect(pg.x, pg.y, pg.w, ph); ctx.clip(); ctx.translate(pg.x, pg.y); ctx.scale(s, s);
+  if (t < b(8) + 0.3) {
+    const un = seg(t, b(8), b(8) + 0.3);
+    if (t < b(2)) { ctx.fillStyle = '#1A2023'; ctx.fillRect(0, 0, 1440, 900); text('about:blank', 720, 470, `400 40px ${MONO}`, C.faint, 'center'); }
+    else { drawSlopPage(t, slopState(t)); if (un > 0) { ctx.fillStyle = `rgba(26,32,35,${un})`; ctx.fillRect(0, 0, 1440, 900); } }
+  } else if (t < b(9, 2)) { ctx.fillStyle = '#1A2023'; ctx.fillRect(0, 0, 1440, 900); text('about:blank', 720, 470, `400 40px ${MONO}`, C.faint, 'center'); }
+  else { const a = seg(t, b(9, 2), b(9, 2) + 0.25); drawClayPage(t, clayState(t)); if (a < 1) { ctx.fillStyle = `rgba(26,32,35,${1 - a})`; ctx.fillRect(0, 0, 1440, 900); } }
+  ctx.restore();
+  if (t >= b(16, 2) && t < b(18)) { // nobody looked at it
+    const k = seg(t, b(16, 2), b(16, 2) + 0.2);
+    ctx.globalAlpha = alpha * k; ctx.strokeStyle = C.red; ctx.lineWidth = 4; ctx.strokeRect(pg.x - 2, pg.y - 2, pg.w + 4, ph + 4);
+    rr(pg.x + pg.w - 250, pg.y + 16, 234, 44, 6); ctx.fillStyle = C.bg; ctx.fill();
+    text('NEVER RENDERED', pg.x + pg.w - 133, pg.y + 47, `30px ${DISP}`, C.red, 'center');
+  }
+  ctx.restore();
+}
+
+function drawReview(t) {
+  // the preview grows into two real captures: 1440 and 390 wide
+  const k = inOutCubic(seg(t, b(18) - 0.25, b(18) + 0.2));
+  const from = { x: PV.page.x, y: PV.page.y, w: PV.page.w };
+  const to = { x: 150, y: 200, w: 1140 };
+  const x = lerp(from.x, to.x, k), y = lerp(from.y, to.y, k), w = lerp(from.w, to.w, k), s = w / 1440;
+  const out = seg(t, b(21) - 0.1, b(21) + 0.35), oa = 1 - out;
+  ctx.save(); ctx.globalAlpha = oa;
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s); ctx.beginPath(); ctx.rect(0, 0, 1440, 900); ctx.clip(); drawClayPage(t, clayState(t)); ctx.restore();
+  ctx.strokeStyle = C.line; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, 900 * s);
+  if (k >= 1) text('1440 px', x, y - 18, `700 22px ${MONO}`, C.dim);
+  const fl1 = pulse(t, SHOT1, 7); if (fl1 > 0.01) { ctx.fillStyle = `rgba(255,255,255,${0.45 * fl1})`; ctx.fillRect(x, y, w, 900 * s); }
+  // the phone capture
+  if (t >= SHOT2) {
+    const pk = outCubic(seg(t, SHOT2, SHOT2 + 0.25)), ps = 900 * (1140 / 1440) / 844, px = 1350, py = 200 + (1 - pk) * 60;
+    ctx.globalAlpha = oa * seg(t, SHOT2, SHOT2 + 0.1);
+    ctx.save(); ctx.translate(px, py); ctx.scale(ps, ps); drawClayPage(t, { ...clayState(t), phone: true }); ctx.restore();
+    ctx.strokeStyle = C.line; ctx.lineWidth = 2; ctx.strokeRect(px, py, 390 * ps, 844 * ps);
+    text('390 px', px, py - 18, `700 22px ${MONO}`, C.dim);
+    const fl2 = pulse(t, SHOT2, 7); if (fl2 > 0.01) { ctx.fillStyle = `rgba(255,255,255,${0.45 * fl2})`; ctx.fillRect(px, py, 390 * ps, 844 * ps); }
+    ctx.globalAlpha = oa;
+    // review marks
+    const fixed = t >= b(20);
+    const mark = (at, cx, cy, rx, ry, id, lx, ly, align) => {
+      if (t < at) return; const mk = outBack(seg(t, at, at + 0.22)); const col = fixed ? C.teal : C.red;
+      ctx.strokeStyle = col; ctx.lineWidth = 5; ctx.beginPath(); ctx.ellipse(cx, cy, rx * mk, ry * mk, -0.05, 0, Math.PI * 2); ctx.stroke();
+      const label = fixed ? 'Fixed' : shown(id, t); ctx.font = `700 26px ${MONO}`; const tw = ctx.measureText(label).width;
+      const bx = align === 'right' ? lx - tw - 28 : lx;
+      rr(bx, ly - 36, tw + 28, 52, 6); ctx.fillStyle = C.bg; ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.stroke();
+      text(label, bx + 14, ly - 1, `700 26px ${MONO}`, col);
+    };
+    mark(b(19), px + 165 * ps, py + 280 * ps, 175 * ps + 20, 46, 'rv1', px + 390 * ps, py + 470 * ps, 'right');
+    mark(b(19, 2), x + 205 * s, y + 618 * s, 150 * s + 24, 34 * s + 20, 'rv2', x + 380 * s, y + 640 * s, 'left');
+  }
+  ctx.restore();
+}
+
+// ---------- Jevis's own counters: a true readout of what happened on screen ----------
+function drawStatus(t, alpha) {
+  if (alpha <= 0) return;
+  const notes = t >= b(9) ? 1 : 0, refused = t >= b(14) ? 1 : 0, back = t >= b(16, 2) ? 1 : 0, reviews = t >= b(18) ? 1 : 0;
+  ctx.save(); ctx.globalAlpha = alpha;
+  const x = PV.x, y = 800;
+  text('JEVIS', x, y, `40px ${DISP}`, C.teal);
+  const items = [['notes', notes, b(9)], ['refused', refused, b(14)], ['sent back', back, b(16, 2)], ['reviews', reviews, b(18)]];
+  items.forEach(([k, v, at], i) => {
+    const ix = x + 140 + i * 172, p = pulse(t, at, 6);
+    text(String(v), ix, y + 2, `${44 + 16 * p}px ${DISP}`, v ? (k === 'notes' || k === 'reviews' ? C.teal : C.red) : C.faint);
+    text(k, ix, y + 34, `400 18px ${MONO}`, C.dim);
+  });
+  ctx.restore();
+}
+
+// ---------- lessons wall ----------
+function drawLessons(t) {
+  const a = win(t, b(21) - 0.05, b(23) + 0.1, 0.3, 0.35); if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a;
+  const z = lerp(1.25, 1, outCubic(seg(t, b(21) - 0.05, b(21) + 0.5)));
+  ctx.translate(W / 2, H / 2); ctx.scale(z, z); ctx.translate(-W / 2, -H / 2);
+  ctx.font = `400 21px ${MONO}`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  const cols = 4, per = Math.ceil(LESSONS.length / cols);
+  for (let c = 0; c < cols; c++) {
+    const sp = 34 + c * 9, off = (t - b(21)) * sp + c * 120;
+    for (let i = 0; i < per * 2; i++) {
+      const idx = (c * per + (i % per)) % LESSONS.length, yy = 60 + i * 38 - off;
+      if (yy < -20 || yy > H + 20) continue;
+      ctx.fillStyle = hash(idx, 3) < 0.12 ? '#4E5C60' : '#2D3639'; ctx.fillText(LESSONS[idx], 70 + c * 470, yy);
+    }
+  }
+  ctx.restore();
+  // plate behind the foreground
+  ctx.save(); ctx.globalAlpha = a * 0.88; const g = ctx.createLinearGradient(0, 0, W, 0); g.addColorStop(0, 'rgba(13,16,18,0.95)'); g.addColorStop(0.6, 'rgba(13,16,18,0.85)'); g.addColorStop(1, 'rgba(13,16,18,0.4)');
+  ctx.fillStyle = g; ctx.fillRect(0, 150, W, 760); ctx.restore();
+  ctx.save(); ctx.globalAlpha = a;
+  const n = Math.round(LESSONS.length * outExpo(seg(t, b(21), b(21, 2))));
+  text(String(n), 110, 640, `400px ${DISP}`, C.teal);
+  text('LESSONS', 122, 730, `64px ${DISP}`, C.ink);
+  ctx.save(); ctx.globalAlpha = a * 0.94; ctx.fillStyle = C.bg; ctx.fillRect(760, 380, 1160, 380); ctx.restore();
+  HIGHLIGHTS.forEach((h, i) => {
+    if (!LESSONS.includes(h)) return; // only real lesson titles
+    const at = [b(21, 2), b(22, 0), b(22, 2)][i]; if (t < at) return;
+    const k = outBack(seg(t, at, at + 0.2));
+    ctx.save(); ctx.globalAlpha = a * seg(t, at, at + 0.08); ctx.translate(800, 480 + i * 120); ctx.scale(lerp(1.3, 1, k), lerp(1.3, 1, k));
+    text(h, 0, 0, `64px ${DISP}`, C.ink); ctx.restore();
+  });
+  ctx.restore();
+}
+
+// ---------- results, during the breakdown ----------
+function drawStats(t) {
+  const a = win(t, b(23), b(27) - 0.05, 0.25, 0.2); if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a;
+  const z = 1 + 0.03 * seg(t, b(23), b(27)); ctx.translate(W / 2, H / 2); ctx.scale(z, z); ctx.translate(-W / 2, -H / 2);
+  const slide = (at, until, fn) => { if (t < at || t > until) return; const k = outCubic(seg(t, at, at + 0.35)); const o = 1 - seg(t, until - 0.18, until); ctx.save(); ctx.globalAlpha = a * Math.min(k, o); ctx.translate(0, (1 - k) * 40); fn(); ctx.restore(); };
+  slide(b(23), b(24), () => {
+    text(shown('st0', t), W / 2, 500, `96px ${DISP}`, C.ink, 'center');
+    text(shown('st0b', t), W / 2, 580, `400 28px ${MONO}`, C.dim, 'center');
+  });
+  slide(b(24), b(25), () => {
+    const c = outExpo(seg(t, b(24), b(24, 1.5)));
+    text(String(Math.round(20 * c)), W / 2 - 60, 560, `330px ${DISP}`, C.teal, 'right'); text(String(Math.round(6 * c)), W / 2 + 60, 560, `330px ${DISP}`, C.ink, 'left');
+    text('–', W / 2, 520, `200px ${DISP}`, C.dim, 'center');
+    text(shown('st1', t), W / 2, 660, `400 32px ${MONO}`, C.dim, 'center');
+  });
+  slide(b(25), b(26), () => {
+    text('0', W / 2, 560, `330px ${DISP}`, C.teal, 'center');
+    text(shown('st2', t), W / 2, 660, `400 32px ${MONO}`, C.dim, 'center');
+  });
+  slide(b(26), b(27) - 0.05, () => {
+    text(`${Math.round(459 * outExpo(seg(t, b(26), b(26, 1.5))))} MS`, W / 2, 560, `300px ${DISP}`, C.teal, 'center');
+    text(shown('st3', t), W / 2, 660, `400 32px ${MONO}`, C.dim, 'center');
+  });
+  ctx.restore();
+}
+
+// ---------- logo, title, end card ----------
+function drawLogo(t, at, tagId, out) {
+  if (t < at || t > out) return;
+  const k = seg(t, at, at + 0.22), o = 1 - seg(t, out - 0.25, out);
+  ctx.save(); ctx.globalAlpha = Math.min(1, k * 4) * o;
+  ctx.translate(W / 2, 690); const z = lerp(1.5, 1, outBack(k)) * lerp(1, 0.7, seg(t, out - 0.25, out)); ctx.scale(z, z);
+  text('JEVIS', 0, 0, `260px ${DISP}`, C.ink, 'center'); ctx.restore();
+  ctx.save(); ctx.globalAlpha = o;
+  const s = shown(tagId, t); text(s, W / 2, 785, `400 36px ${MONO}`, C.dim, 'center');
+  ctx.restore();
+}
+
+function drawNarration(t) {
+  for (let i = 0; i < NARR.length; i++) {
+    const [id, until] = NARR[i], e = TYPED[id];
+    if (t < e.t || t >= until) continue;
+    const s = shown(id, t), fade = 1 - seg(t, until - 0.15, until);
+    ctx.save(); ctx.globalAlpha = fade;
+    text(s, 110, 1018, `400 34px ${MONO}`, C.ink);
+    caret(110 + mw(s, 34), 1018, 34, t);
+    ctx.restore();
+  }
+}
+
+function drawLabel(t) {
+  for (const [s, a, z] of LABELS) {
+    if (t < a || t >= z) continue;
+    const k = outCubic(seg(t, a, a + 0.25)), o = 1 - seg(t, z - 0.15, z);
+    ctx.save(); ctx.globalAlpha = Math.min(k, o); text(s, 110 - (1 - k) * 60, 120, `54px ${DISP}`, C.teal); ctx.restore();
+  }
+}
+
+// ---------- camera and hits ----------
+const HITS = [[b(6), 1], [b(14), 0.8], [b(15), 0.5], [b(16, 2), 0.5], [b(27), 1]];
+function camera(t) {
+  let z = 1, x = 0, y = 0;
+  if (t < b(6)) z = 1 + 0.07 * Math.pow(seg(t, 0, b(6)), 2.2);
+  // a small bump on every kick while the drums play
+  const beat = Math.floor((t - T0) / P), inDrop = (t >= b(6) && t < b(14)) || (t >= b(15) && t < b(23)) || t >= b(27);
+  if (inDrop && beat >= 0 && !(t >= b(18) && t < b(21))) z += 0.006 * pulse(t, T0 + beat * P, 10);
+  for (const [at, amp] of HITS) {
+    const p = pulse(t, at, 9); z += 0.035 * amp * p;
+    const sh = 16 * amp * pulse(t, at, 11); x += sh * (hash(Math.floor(t * 60), 1) - 0.5) * 2; y += sh * (hash(Math.floor(t * 60), 2) - 0.5) * 2;
+  }
+  return { z, x, y };
+}
+
+function draw(f) {
+  const t = f / FPS;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+  const cam = camera(t);
+  ctx.save(); ctx.translate(W / 2 + cam.x, H / 2 + cam.y); ctx.scale(cam.z, cam.z); ctx.translate(-W / 2, -H / 2);
+
+  // the one world: session and preview. It dims under the title, and slides apart for the review.
+  const worldA = t < b(21) ? (t < b(6) ? 1 - 0.8 * inOutCubic(seg(t, b(5, 1), b(5, 3))) : t < b(8) ? 1 - 0.88 * seg(t, b(6), b(6) + 0.1) * (1 - seg(t, b(7, 3.4), b(8))) : 1) : 0;
+  if (worldA > 0) {
+    const sx = -1100 * inOutCubic(seg(t, b(18) - 0.25, b(18) + 0.2));
+    ctx.save(); ctx.translate(sx, 0); if (sx > -1090) drawSession(t); ctx.restore();
+    ctx.save();
+    if (t < b(18) - 0.25) drawPreviewPanel(t, 1); else drawReview(t);
+    drawStatus(t, (t >= b(8) ? seg(t, b(8), b(8) + 0.3) : 0) * (1 - seg(t, b(17, 3), b(18))));
+    ctx.restore();
+    if (worldA < 1) { ctx.fillStyle = `rgba(13,16,18,${1 - worldA})`; ctx.fillRect(-200, -200, W + 400, H + 400); }
+  }
+  drawLessons(t);
+  drawStats(t);
+  ctx.restore();
+
+  drawLogo(t, b(6), 'tag1', b(8));
+  if (t >= b(27)) {
+    drawLogo(t, b(27), 'tag2', DUR + 1);
+    const u = shown('url', t); text(u, W / 2, 880, `400 48px ${MONO}`, C.teal, 'center');
+    text(shown('meta', t), W / 2, 945, `400 26px ${MONO}`, C.dim, 'center');
+  }
+  drawEyes(t);
+  drawLabel(t);
+  drawNarration(t);
+
+  // flashes on the hits, light and short
+  for (const [at, col, amt] of [[b(6), '255,255,255', 0.4], [b(14), '255,90,76', 0.28], [b(27), '255,255,255', 0.4]]) {
+    const p = pulse(t, at, 7); if (p > 0.01) { ctx.fillStyle = `rgba(${col},${amt * p})`; ctx.fillRect(0, 0, W, H); }
+  }
+  ctx.drawImage(vignette, 0, 0);
+  ctx.fillStyle = ctx.createPattern(grain, 'repeat'); ctx.fillRect(0, 0, W, H); // static, so the encoder spends no bits on noise
+  const endFade = seg(t, DUR - 0.9, DUR - 0.15); if (endFade > 0) { ctx.fillStyle = `rgba(0,0,0,${endFade})`; ctx.fillRect(0, 0, W, H); }
+}
+
+function sheet(frames) { return frames.map(f => { draw(f); return cv.toDataURL('image/png'); }); }
+
+window.FILM = { W, H, FPS, N, DUR, BPM, T0, MUSIC, canvas: cv, draw, sheet, cues: CUES, typed: TYPED, ready: false };
+
+const params = new URLSearchParams(location.search);
+document.fonts.load(`40px ${DISP}`).then(() => document.fonts.ready).then(() => {
+  window.FILM.ready = true;
+  if (params.has('render')) return;
+  if (params.has('f')) { draw(+params.get('f')); return; }
+  draw(0);
+  let start = null;
+  const tick = now => { if (start === null) start = now; const f = Math.floor((now - start) / 1000 * FPS); if (f < N) { draw(f); requestAnimationFrame(tick); } };
+  cv.addEventListener('click', () => { start = null; requestAnimationFrame(tick); });
+});
+</script>
+</body>
+</html>
