@@ -112,8 +112,8 @@ test("v2 shipped wiki loads only retained tool lessons, not the archive", () => 
   assert.ok(roots.includes(WIKI_ROOT));
   assert.ok(roots.every((root) => !root.includes("wiki-v1")));
   const { entries } = loadWiki(roots);
-  assert.equal(entries.length, 36);
-  assert.ok(entries.every((e) => e.event === "tool"));
+  assert.equal(entries.length, 37);
+  assert.deepEqual(entries.filter((e) => e.event !== "tool").map((e) => [e.id, e.decide]), [["verification/claim-contradicted", "claim_contradicted"]], "the only Stop lesson is code-decided");
   const slop = entries.filter((e) => e.id.startsWith("slop/"));
   assert.equal(slop.length, 30);
   assert.ok(slop.every((e) => e.action === "deny" && !e.tools.includes("Bash")));

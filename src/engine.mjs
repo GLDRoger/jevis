@@ -18,12 +18,12 @@ const round = (n) => Math.round(n * 1000) / 1000;
 /** An entry's `unless` question: asked apart from `ask`, because Jev reads one literal condition better than a compound one. */
 export const unlessKey = (id) => `${id}#unless`;
 
-export async function evaluate({ event, state, tool = null, model = null, harness = null, sessionId = null, timeoutMs = 3000, record = true, wiki = loadWiki(), axes = true }) {
+export async function evaluate({ event, state, tool = null, model = null, harness = null, sessionId = null, timeoutMs = 3000, record = true, wiki = loadWiki(), axes = true, codeOnly = false }) {
   // Every caller (the hook, replay, `jevis ask`, the batteries) sees the same code facts about a tool call;
   // a caller's own marks (the hook's ran_before) win, and a mark it leaves out is still computed, never undefined.
   if (event === "tool") state = { ...state, marks: { ...inputMarks(state.input, { tool }), ...state.marks } };
   // An entry whose facts already fail cannot fire, so it is not asked: a plain read asks nothing.
-  const pool = candidates(wiki.entries, { event, tool, model }).filter((e) => factsHold(e.when, { event, state }));
+  let pool = candidates(wiki.entries, { event, tool, model }).filter((e) => factsHold(e.when, { event, state }));
   // A tool call no entry could apply to costs no call at all.
   if (event === "tool" && !pool.length) return { skipped: "no entries", profile: {}, scores: {}, fired: [], ms: 0 };
   const code = {};
@@ -32,6 +32,8 @@ export async function evaluate({ event, state, tool = null, model = null, harnes
     const v = codeDecision(e.decide, { ...state, tool: tool ?? state.tool });
     if (v !== null) code[e.id] = v;
   }
+  // codeOnly: an entry code cannot settle is dropped, never sent to the model.
+  if (codeOnly) pool = pool.filter((e) => e.id in code);
   const questions = {};
   // Preserve the diagnostic profile on model-reviewed events, but don't call
   // Jev solely to log axes when code has settled every lesson and its gates.

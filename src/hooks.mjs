@@ -226,10 +226,8 @@ export async function onStop(input) {
   // caught 4 real problems in a month against 54 harmful blocks (audit,
   // Oct 18 2026). The decision model is asked only for the review's axes,
   // and only when a review could run at all.
-  const wiki = wikiFor(cwd);
-  const codeOnly = { ...wiki, entries: wiki.entries.filter((e) => e.event !== "stop" || e.decide) };
   const reviewPossible = criticBackend() !== "off" && session.stop.reviews < roundsFor(session) && (state.evidence.ui_files_changed.length > 0 || state.evidence.files_changed_count > 0);
-  const result = await evaluate({ event: "stop", state, model: session.model, harness, sessionId, timeoutMs: timeout("stop"), wiki: codeOnly, axes: reviewPossible });
+  const result = await evaluate({ event: "stop", state, model: session.model, harness, sessionId, timeoutMs: timeout("stop"), wiki: wikiFor(cwd), codeOnly: true, axes: reviewPossible });
   const blocks = wikiSpent ? [] : result.fired.filter((e) => e.action === "block" && !session.stop.blocked.includes(e.id)).slice(0, MAX_STOP_BLOCKS - session.stop.blocked.length);
   log({ event: "stop", sessionId, harness, turn: session.turn, final: clip(final, 200), evidence: { edited: state.evidence.edited, files: state.evidence.files_changed_count, ui_files: state.evidence.ui_files_changed.length, after: state.evidence.actions_after_last_edit.length }, ...summary(result), acted: blocks.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
   if (!blocks.length) return reviewTurn({ input, session, sessionId, cwd, harness, state, profile: result.profile, items, since, final });

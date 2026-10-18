@@ -8,7 +8,9 @@ import { gunzipSync } from "node:zlib";
 process.env.JEVIS_HOME = mkdtempSync(join(tmpdir(), "jevis-rules-"));
 delete process.env.JEVIS_JEV;
 delete process.env.JEVIS_ENABLE;
-const { codeDecision, RULES } = await import("../src/rules.mjs");
+const { codeDecision, RULES: ALL_RULES } = await import("../src/rules.mjs");
+// Tool-input rules; claim_contradicted reads Stop state and has its own test.
+const RULES = ALL_RULES.filter((r) => r !== "claim_contradicted");
 const { evaluate, unlessKey } = await import("../src/engine.mjs");
 const { HEDGES, setJevTransport } = await import("../src/jev.mjs");
 const { tune } = await import("../src/tune.mjs");
@@ -390,4 +392,33 @@ test("records: code scores never enter Jev answers or exported training labels",
   const row = JSON.parse(gunzipSync(readFileSync(exported.files.train)).toString().trim());
   assert.deepEqual(Object.keys(JSON.parse(row.gold)), [unlessKey(e.id)]);
   assert.deepEqual(Object.keys(JSON.parse(row.questions)), [unlessKey(e.id)]);
+});
+
+test("claim_contradicted: a pass claim against a failed latest check, decided by code alone", async () => {
+  const stop = (final_message, checks) => ({ final_message, evidence: { edited: true, checks_after_last_edit: checks } });
+  const failed = [{ command: "npm test", success: false, exit_code: 1 }];
+  const fixed = [{ command: "npm test", success: false, exit_code: 1 }, { command: "npm test", success: true, exit_code: 0 }];
+  const mixed = [{ command: "npm test", success: true, exit_code: 0 }, { command: "npm run lint", success: false, exit_code: 2 }];
+  const unknown = [{ command: "npm test", success: null, exit_code: null }];
+  assert.equal(codeDecision("claim_contradicted", stop("Done. All tests pass.", failed)), true);
+  assert.equal(codeDecision("claim_contradicted", stop("Fixed it.\nThe build is green and lint is clean.", mixed)), true);
+  assert.equal(codeDecision("claim_contradicted", stop("Done. All tests pass.", fixed)), false, "a later passing run of the same check wins");
+  assert.equal(codeDecision("claim_contradicted", stop("Done. All tests pass.", unknown)), false, "no recorded result proves nothing");
+  assert.equal(codeDecision("claim_contradicted", stop("Done. All tests pass.", [])), false);
+  for (const msg of ["2 tests fail; the rest pass.", "Tests did not pass yet.", "Unit tests pass but lint fails.", "The build isn't green.", "> CI passed, they said", "Done. Rewrote the button."]) {
+    assert.equal(codeDecision("claim_contradicted", stop(msg, failed)), false, msg);
+  }
+  const entry = (await import("../src/wiki.mjs")).loadWiki().entries.find((e) => e.id === "verification/claim-contradicted");
+  assert.ok(entry, "shipped as a stop lesson");
+  let sent = 0;
+  setJevTransport(async () => { sent += 1; return { answers: {} }; });
+  try {
+    const r = await evaluate({ event: "stop", state: { request: "fix it", ...stop("All tests pass.", failed) }, wiki: { entries: [entry] }, codeOnly: true, axes: false });
+    assert.deepEqual(r.fired.map((e) => e.id), [entry.id]);
+    const quiet = await evaluate({ event: "stop", state: { request: "fix it", ...stop("All tests pass.", fixed) }, wiki: { entries: [entry] }, codeOnly: true, axes: false });
+    assert.equal(quiet.fired.length, 0);
+    assert.equal(sent, 0, "never asks the decision model");
+  } finally {
+    setJevTransport(null);
+  }
 });
