@@ -39,7 +39,7 @@ Jevis works at four moments in a session.
 | The agent is about to end its turn | `Stop` | Send it back: "you said it's deployed, but nothing after the deploy checked the live function". |
 | The agent reports visual work done | `Stop` | Render the page (1440 and 390 px) or sample the film, and have Claude or Codex review it as a director who didn't make it. It can send the work back at most twice. |
 
-Nearly everything Jevis knows lives in the `wiki/`: 98 lessons, one per file, each with the yes/no question that decides when it applies. For example:
+Nearly everything Jevis knows lives in the `wiki/`: 97 lessons, one per file, each with the yes/no question that decides when it applies. For example:
 
 - Refuse edits that add the telltales of generated design: gradient text, emoji icons, glass cards, glow blobs, fake testimonials, and 25 more.
 - Stop "done, tests pass" on a deploy nobody checked live.
@@ -264,7 +264,7 @@ Jevis pins TypeSafe to `jev-1.14.0`; `JEVIS_JEV_MODEL` overrides it. Jev is what
 
    Or set `TYPESAFE_API_KEY` in the environment your agent runs in. The key file is outside the repo and never committed.
 
-Jev's latency has a long tail: occasionally a call takes several seconds. Jevis therefore sends the same request again at 350 ms and 750 ms and uses the first answer back. At these prices, the duplicates cost next to nothing.
+Jev's latency has a long tail: occasionally a call takes several seconds. Jevis therefore sends one duplicate request at 1000 ms and uses the first answer back. With a median call of about 480 ms, this targets only the tail (about 5–7% of calls).
 
 ### GPT-6 Luna (OpenAI Decisions API)
 
@@ -291,7 +291,7 @@ How Jevis talks to it:
 - Each lesson's question becomes a Decisions `predicate`, and its `yes`/`no` wording is folded into the instructions, because the API has no criteria field.
 - The masked state is sent as JSON text.
 - Sets over 200 questions are split into parallel calls.
-- Luna's latency has a tail too, so it gets the same 350 ms and 750 ms duplicate requests as Jev.
+- Luna's latency has a tail too, so it gets the same single duplicate request at 1000 ms as Jev.
 - A question Luna refuses has no score, and that lesson stands aside, as with any failure.
 
 Every call is recorded with `decider` and `deciderModel`. `jevis stats --near` reads only the active decider's records. `jevis export` writes only Jev's, because it builds training labels for Laya, a Jev-compatible model.
@@ -426,10 +426,12 @@ See the [Gemini CLI hooks documentation](https://geminicli.com/docs/hooks/) and 
 
 ## How it works
 
-Each event produces two sets of yes/no questions, sent to the decision model in one call:
+Each event first sends two sets of yes/no questions to the decision model:
 
 - **Axes:** a fixed profile scored on every event of a kind. For a message, that means: does it want a change? Is it open-ended, visual, code, a new build, risky? Is it a correction, a delegation, or mostly writing?
 - **Entries:** every wiki lesson that could apply to the event contributes its own question.
+
+Model-decided lessons ask their `unless` questions in a second call only after clearing their threshold and conditions. Code-decided matches ask `unless` in the first call. Both phases share one timeout budget; a failed exception call stands down only the lessons waiting on it.
 
 A lesson fires when three things hold:
 - its answer clears its threshold;

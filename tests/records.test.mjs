@@ -82,10 +82,19 @@ await tool("s2", "fix the bug", "ls -la");
 test("stats --near: each entry's fires, near misses, and stand-downs under today's rules", () => {
   const { records, entries } = tune(loadWiki().entries);
   const by = Object.fromEntries(entries.map((e) => [e.id, e]));
-  assert.equal(records, 7, "4 prompts and 3 tool calls: the plain read asked nothing, and no entry is about stops");
+  assert.equal(records, 10, "4 prompts and 3 two-phase tool evaluations: plain reads and stops do not count");
   assert.deepEqual({ asked: by["t/page"].asked, fires: by["t/page"].fires, near: by["t/page"].near, max: by["t/page"].max }, { asked: 4, fires: 1, near: 1, max: 0.9 });
-  assert.deepEqual({ asked: by["t/push"].asked, fires: by["t/push"].fires, stoodDown: by["t/push"].stoodDown }, { asked: 3, fires: 1, stoodDown: 2 }, "the user's own request stood the deny down twice");
-  assert.match(formatTune({ records, entries }), /t\/push\s+3\s+1\s+0\s+2\s+0\.95/);
+  assert.deepEqual({ asked: by["t/push"].asked, fires: by["t/push"].fires, stoodDown: by["t/push"].stoodDown, stale: by["t/push"].stale }, { asked: 0, fires: 0, stoodDown: 0, stale: 3 }, "split exception records are safely excluded, not joined for calibration");
+  // Historical co-located answers must still calibrate fires and stand-downs.
+  const legacy = mkdtempSync(join(tmpdir(), "jevis-legacy-tune-"));
+  const e = loadWiki().entries.find((e) => e.id === "t/push");
+  writeFileSync(join(legacy, "v1.json"), JSON.stringify({ [e.id]: { type: "noul", instructions: e.ask }, [`${e.id}#unless`]: { type: "noul", instructions: e.unless } }));
+  const legacyFile = join(legacy, "calls.jsonl");
+  writeFileSync(legacyFile, [0.1, 0.9, 0.9].map((u) => JSON.stringify({ event: "tool", version: "v1", state: { tool: "Bash", input: "git push -f origin main" }, answers: { [e.id]: 0.95, [`${e.id}#unless`]: u } })).join("\n") + "\n");
+  const historical = tune([e], { file: legacyFile, questionsDir: legacy });
+  const row = historical.entries[0];
+  assert.deepEqual({ asked: row.asked, fires: row.fires, stoodDown: row.stoodDown }, { asked: 3, fires: 1, stoodDown: 2 }, "the user's own request stood the deny down twice");
+  assert.match(formatTune(historical), /t\/push\s+3\s+1\s+0\s+2\s+0\.95/);
 
   put("t/page", PAGE("Does `request` ask for a web page?"));
   const reworded = tune(loadWiki().entries).entries.find((e) => e.id === "t/page");
@@ -246,17 +255,19 @@ test("export: rows in Laya's format, split by whole sessions, repeats dropped, f
 
   const out = join(mkdtempSync(join(tmpdir(), "jevis-export-")), "ds");
   const r = exportDataset({ out, testShare: 0.5 });
-  assert.equal(r.duplicates, 1, "the repeated push call is one row");
-  assert.equal(r.train + r.test, 7, "4 prompts, 1 stop, and 2 distinct tool calls");
+  assert.equal(r.duplicates, 2, "both phases of the repeated push evaluation are deduplicated");
+  assert.equal(r.train + r.test, 9, "4 prompts, 1 stop, and 2 distinct two-phase tool evaluations");
   assert.ok(r.train > 0 && r.test > 0);
   const rows = (split) => gunzipSync(readFileSync(r.files[split])).toString().trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
   const bySession = {};
+  const toolQuestions = [];
   for (const split of ["train", "test"]) {
     if (process.platform !== "win32") assert.equal(statSync(r.files[split]).mode & 0o777, 0o600);
     for (const row of rows(split)) {
       assert.deepEqual(Object.keys(row).sort(), ["gold", "id", "questions", "state", "workflow"]);
       const q = JSON.parse(row.questions);
       const g = JSON.parse(row.gold);
+      if (row.workflow === "jevis/tool") toolQuestions.push(Object.keys(q).sort());
       assert.deepEqual(Object.keys(q).sort(), Object.keys(g).sort());
       assert.ok(Object.values(q).every((x) => x.type === "noul" && x.instructions));
       const state = JSON.parse(row.state);
@@ -264,6 +275,8 @@ test("export: rows in Laya's format, split by whole sessions, repeats dropped, f
       (bySession[s] ??= new Set()).add(split);
     }
   }
+  assert.equal(toolQuestions.filter((keys) => keys.includes("t/push") && !keys.includes("t/push#unless")).length, 2);
+  assert.equal(toolQuestions.filter((keys) => keys.length === 1 && keys[0] === "t/push#unless").length, 2);
   for (const [s, splits] of Object.entries(bySession)) assert.equal(splits.size, 1, `${s} is wholly in one split`);
   assert.equal(exportDataset({ out, events: ["tool"], testShare: 0 }).test, 0);
 

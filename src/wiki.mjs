@@ -390,9 +390,11 @@ export function conditionsHold(when, { profile, state }) {
   for (const [key, want] of Object.entries(when ?? {})) {
     const cmp = typeof want === "string" ? want.match(/^(>=|<=|>|<)\s*([\d.]+)$/) : null;
     const actual = key in profile ? profile[key] : lookup(state, key);
-    // Tri-state Bash proofs: an unknown operation keeps both the pre-call
-    // pool and the final gate open. Other missing facts retain strict checks.
-    if (actual === null && (key === "marks.em_dash" || BASH_FACTS.some((fact) => key === `marks.${fact}`))) continue;
+    // Tri-state Bash proofs keep unknown facts open, except writes_file:
+    // null covered ~89% of Bash calls and ran every slop lesson on reads like
+    // `git log | head`. Writing lessons require a proven write, not null.
+    // Other Bash facts and em_dash retain null tolerance; missing facts stay strict.
+    if (actual === null && (key === "marks.em_dash" || BASH_FACTS.some((fact) => fact !== "writes_file" && key === `marks.${fact}`))) continue;
     if (cmp) {
       if (typeof actual !== "number") return false;
       const n = Number(cmp[2]);

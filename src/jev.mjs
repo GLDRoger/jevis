@@ -12,8 +12,8 @@ import { errorClass, errorMessage, recordHealth } from "./health.mjs";
  *
  * Questions in one call are answered in parallel against a state that is billed
  * once, so the count barely moves latency: measured Sep 27 2026, 1 question
- * 330 ms, 250 questions 360 ms, 500 questions 2-4 s. Jevis sends every entry's
- * question at once and splits past CHUNK into parallel calls.
+ * 330 ms, 250 questions 360 ms, 500 questions 2-4 s. Jevis sends each
+ * phase's questions together and splits past CHUNK into parallel calls.
  *
  * Both deciders' calls are recorded (~/.jevis/jev/calls.jsonl, question sets
  * in ~/.jevis/jev/questions/). Laya training exports keep only Jev labels.
@@ -96,17 +96,12 @@ export async function lunaTransport(body, timeoutMs, signal) {
 }
 
 /**
- * Both hosted deciders have long latency tails. Luna's Oct 15 2026 median was
- * 383 ms and max 1574 ms for 66 questions. Jev, Sep 27: median 390 ms,
- * but 1.2, 1.8, 3.3, and 4.2 s among them. In a slow spell, about half of the
- * identical requests took 4-15 s while the rest answered in under a second. A
- * slow call is a slow server, not a slow question, so identical requests race:
- * one now and one at each HEDGES delay, and the first answer wins while the rest
- * are aborted. With two requests, 6% of 360 simulated-session calls still
- * timed out (1.5 s budget); a third brings that to about p^3. Tokens cost $0.042
- * per million, so the duplicates are free in practice.
+ * The median call is ~480 ms: hedging at 350 ms duplicated 99% of calls.
+ * One duplicate at 1000 ms targets only the latency tail (~5-7% of calls).
+ * The first answer wins and the other request is aborted; both share the
+ * original deadline rather than giving the duplicate a fresh timeout.
  */
-export const HEDGES = [350, 750];
+export const HEDGES = [1000];
 export function hedged(send, body, timeoutMs, hedges = HEDGES) {
   return new Promise((resolve, reject) => {
     const controllers = [];

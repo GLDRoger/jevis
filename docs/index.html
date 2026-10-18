@@ -296,7 +296,7 @@ footer b { color: var(--ink); }
   <div class="mast-foot">
     <h1>How a prompt, a command, or the end of a turn travels through Jevis, from the hook to the decision model to the agent.</h1>
     <div>
-      <p>Jevis listens at three hooks. Each time one fires, it gathers plain facts, asks the decision model (TypeSafe&rsquo;s Jev, or OpenAI&rsquo;s GPT-6 Luna) every question the wiki has for that moment in one call, and acts only on what clears the entry's bar. When anything goes wrong, it steps aside and the agent carries on.</p>
+      <p>Jevis listens at three hooks. Each time one fires, it gathers plain facts, asks the decision model (TypeSafe&rsquo;s Jev, or OpenAI&rsquo;s GPT-6 Luna) the relevant questions, with exceptions deferred until a model-decided match qualifies, and acts only on what clears the entry's bar. When anything goes wrong, it steps aside and the agent carries on.</p>
       <div class="specline" id="specline"></div>
     </div>
   </div>
@@ -363,14 +363,14 @@ footer b { color: var(--ink); }
 <script type="application/json" id="data">{
  "captured": "2026-09-28T06:37:54.190Z",
  "counts": {
-  "entries": 98,
+  "entries": 97,
   "byEvent": {
    "prompt": 38,
-   "tool": 45,
+   "tool": 44,
    "stop": 15
   },
   "byAction": {
-   "context": 49,
+   "context": 48,
    "deny": 34,
    "block": 15
   }
@@ -1822,20 +1822,8 @@ footer b { color: var(--ink); }
     "destructive": 0.96,
     "outward": 0.02
    },
-   "asked": 35,
+   "asked": 34,
    "entries": [
-    {
-     "id": "engineering/commit-unasked",
-     "title": "Commit when asked",
-     "action": "context",
-     "min": 0.8,
-     "p": 0.02,
-     "unless": 0.03,
-     "unless_max": 0.5,
-     "when": {},
-     "fired": false,
-     "body": "Agents commit as a habit at the end of each change, often with `git add -A`, which also sweeps in other sessions' uncommitted work.\n\nInstead: commit only when the user asked in this request or authorized commits earlier in this work (for example \"commit locally whenever it makes sense\"). Otherwise leave the changes uncommitted and say so in the report. When you do commit, stage the paths you changed, not `-A`."
-    },
     {
      "id": "safety/borrowed-credentials",
      "title": "Name a credential's source before using it",
@@ -2274,7 +2262,7 @@ footer b { color: var(--ink); }
     "destructive": 0.89,
     "outward": 0.97
    },
-   "asked": 35,
+   "asked": 34,
    "entries": [
     {
      "id": "safety/borrowed-credentials",
@@ -2287,18 +2275,6 @@ footer b { color: var(--ink); }
      "when": {},
      "fired": false,
      "body": "Astra picked up an API key inherited from its shell and spent money on it during testing. It then misreported where the key came from.\n\nInstead: before using a credential the user didn't hand you, name its source and the account it bills, and ask. Don't copy keys between projects or into hosted environment settings unless asked. When you report where a secret came from, check first."
-    },
-    {
-     "id": "engineering/commit-unasked",
-     "title": "Commit when asked",
-     "action": "context",
-     "min": 0.8,
-     "p": 0.02,
-     "unless": 0.88,
-     "unless_max": 0.5,
-     "when": {},
-     "fired": false,
-     "body": "Agents commit as a habit at the end of each change, often with `git add -A`, which also sweeps in other sessions' uncommitted work.\n\nInstead: commit only when the user asked in this request or authorized commits earlier in this work (for example \"commit locally whenever it makes sense\"). Otherwise leave the changes uncommitted and say so in the report. When you do commit, stage the paths you changed, not `-A`."
     },
     {
      "id": "slop/emoji-icons",
@@ -2726,7 +2702,7 @@ footer b { color: var(--ink); }
     "destructive": 0.02,
     "outward": 0.03
    },
-   "asked": 35,
+   "asked": 34,
    "entries": [
     {
      "id": "workspace/visible-window-or-sound",
@@ -3045,18 +3021,6 @@ footer b { color: var(--ink); }
      "body": "An underline that grows or wipes in on hover is the reflexive 'look, it is interactive' flourish on nearly every generated nav and link.\n\nInstead: change the state cleanly and quietly: a tonal color shift, a weight change, or a static underline. Do not animate underlines."
     },
     {
-     "id": "engineering/commit-unasked",
-     "title": "Commit when asked",
-     "action": "context",
-     "min": 0.8,
-     "p": 0.01,
-     "unless": 0.01,
-     "unless_max": 0.5,
-     "when": {},
-     "fired": false,
-     "body": "Agents commit as a habit at the end of each change, often with `git add -A`, which also sweeps in other sessions' uncommitted work.\n\nInstead: commit only when the user asked in this request or authorized commits earlier in this work (for example \"commit locally whenever it makes sense\"). Otherwise leave the changes uncommitted and say so in the report. When you do commit, stage the paths you changed, not `-A`."
-    },
-    {
      "id": "slop/accent-left-border",
      "title": "Colored accent-edge bars",
      "action": "deny",
@@ -3178,7 +3142,7 @@ footer b { color: var(--ink); }
     "destructive": 0.03,
     "outward": 0.02
    },
-   "asked": 35,
+   "asked": 34,
    "entries": [
     {
      "id": "workspace/visible-window-or-sound",
@@ -3387,18 +3351,6 @@ footer b { color: var(--ink); }
      "when": {},
      "fired": false,
      "body": "An underline that grows or wipes in on hover is the reflexive 'look, it is interactive' flourish on nearly every generated nav and link.\n\nInstead: change the state cleanly and quietly: a tonal color shift, a weight change, or a static underline. Do not animate underlines."
-    },
-    {
-     "id": "engineering/commit-unasked",
-     "title": "Commit when asked",
-     "action": "context",
-     "min": 0.8,
-     "p": 0.01,
-     "unless": 0.02,
-     "unless_max": 0.5,
-     "when": {},
-     "fired": false,
-     "body": "Agents commit as a habit at the end of each change, often with `git add -A`, which also sweeps in other sessions' uncommitted work.\n\nInstead: commit only when the user asked in this request or authorized commits earlier in this work (for example \"commit locally whenever it makes sense\"). Otherwise leave the changes uncommitted and say so in the report. When you do commit, stage the paths you changed, not `-A`."
     },
     {
      "id": "slop/accent-left-border",
@@ -4132,12 +4084,12 @@ footer b { color: var(--ink); }
       parts: [["ask", "the entry's yes/no question about the state"], ["unless", "a second question that stands it down, usually “did the user ask for exactly this?”"], ["when", "conditions on the axes or on facts"], ["action", "<code>context</code>, <code>deny</code>, or <code>block</code>"]],
       note: ["Where the lessons came from", "Mined from 661 Codex and 126 Claude Code sessions plus an earlier hook system's history: user corrections, rejected designs, false claims. Every entry names its evidence."] },
     { n: 4, short: "Questions", title: "One question set is built", where: "src/axes.mjs · src/engine.mjs",
-      a: ["The <b>axes</b> go in first: a fixed profile the decision model scores on every event of a kind. This is the spider chart: for a prompt, whether it wants a change, is open-ended, visual, code, new, risky, a correction, a delegation, needs current facts, or is mostly writing.", "Then each candidate entry adds its <b>ask</b> and, if it has one, its <b>unless</b>. The set's hash becomes its version, so recorded answers are only compared within one set."],
+      a: ["The <b>axes</b> go in first: a fixed profile the decision model scores on every event of a kind. This is the spider chart: for a prompt, whether it wants a change, is open-ended, visual, code, new, risky, a correction, a delegation, needs current facts, or is mostly writing.", "Each unresolved entry adds its <b>ask</b>. Code-decided matches include their <b>unless</b> immediately; model-decided matches ask it in a second phase only after clearing min and when. Each call has its own question-set version."],
       parts: [["prompt", "10 axes"], ["tool", "2 axes: destructive, outward"], ["stop", "3 axes: work requested, claims done, claims verified"]],
       note: ["Why split ask and unless", "Jev reads literally. “Is this destructive when the user did not ask?” scored 0.86 on a case it should catch; split in two, the same case scored 0.97 and 0.28."] },
     { n: 5, short: "Decide", title: "Masked, sent once, hedged", where: "src/jev.mjs",
-      a: ["Secrets are masked first: API keys, tokens, bearer headers, passwords in URLs. Then every question goes to the decision model in a single call, because questions in a call are answered in parallel: on Jev, 1 question takes about 330 ms and 250 take about 360 ms.", "GPT-6 Luna gets the same call through OpenAI&rsquo;s Decisions API: each question becomes a predicate, about 380 ms for 66 of them. Both models have a long latency tail, so if no answer arrives in 350 ms, an identical request goes out, and another at 750 ms; whichever answers first wins. The whole call has one deadline: 3 seconds for prompts and turn endings, 1.5 for tool calls."],
-      parts: [["chunk", "more than 200 questions split into parallel calls"], ["hedge", "more requests at 350 and 750 ms"], ["deadline", "3 s, or 1.5 s for tool calls"]],
+      a: ["Secrets are masked first: API keys, tokens, bearer headers, passwords in URLs. Questions go to the decision model in parallel per call, with model-decided exceptions deferred to a second call: on Jev, 1 question takes about 330 ms and 250 take about 360 ms.", "GPT-6 Luna gets the same call through OpenAI&rsquo;s Decisions API: each question becomes a predicate, about 380 ms for 66 of them. Both models have a long latency tail, so if no answer arrives in 1000 ms, one identical request goes out; whichever answers first wins. Both phases share one deadline: 3 seconds for prompts and turn endings, 1.5 for tool calls."],
+      parts: [["chunk", "more than 200 questions split into parallel calls"], ["hedge", "one duplicate at 1000 ms"], ["deadline", "3 s, or 1.5 s for tool calls"]],
       note: ["Measured", "Before the hedge, 20 calls had a median of 390 ms but a 4.2 s worst case. With it, 40 calls in a row stayed under 1 s."] },
     { n: 6, short: "Record", title: "Every call is recorded", where: "~/.jevis/jev/calls.jsonl · ~/.jevis/jev/questions/",
       a: ["Each call is appended to a private log: the masked state, every answer with its probability, the timing, and any error. The question set itself is stored once per version.", "This is training data. Laya, an open-source model that serves the same API, can already stand in for Jev (set JEVIS_JEV_URL), and a checkpoint fine-tuned on these calls can learn to give Jev's answers offline. Each record names its decider, so Luna&rsquo;s answers are never mixed into Jev&rsquo;s training labels or threshold tuning."],
@@ -4162,7 +4114,7 @@ footer b { color: var(--ink); }
   const NS = "http://www.w3.org/2000/svg";
   const s = (tag, attrs = {}, text) => { const el = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v); if (text !== undefined) el.textContent = text; return el; };
   const X = 150, W = 300, H = 62, GAP = 34, Y0 = 36;
-  const sub = ["Codex · Claude Code, JSON on stdin", "request · workspace · evidence · memory", `${C.entries} entries → candidates`, "axes + ask + unless → version", "mask · one call · hedge 350/750 ms", "calls.jsonl · questions/<version>", "min · unless · when", "note · deny · block", "sessions/ · log.jsonl"];
+  const sub = ["Codex · Claude Code, JSON on stdin", "request · workspace · evidence · memory", `${C.entries} entries → candidates`, "axes + ask → qualifying unless", "mask · phases · hedge 1000 ms", "calls.jsonl · questions/<version>", "min · unless · when", "note · deny · block", "sessions/ · log.jsonl"];
   svg.append(s("rect", { class: "ghost", x: 18, y: 14, width: 524, height: 872, rx: 12 }));
   STAGES.forEach((st, i) => {
     const y = Y0 + i * (H + GAP);
@@ -4235,7 +4187,7 @@ footer b { color: var(--ink); }
   document.querySelectorAll(".stage").forEach((sec) => io.observe(sec));
 
   /* ——— Header facts and technical data ——— */
-  $("#specline").append(h("span", {}, `${C.entries} lessons`), h("span", {}, "3 hooks"), h("span", {}, "1 call per event"), h("span", {}, "fails open"));
+  $("#specline").append(h("span", {}, `${C.entries} lessons`), h("span", {}, "3 hooks"), h("span", {}, "up to 2 calls"), h("span", {}, "fails open"));
   $("#captured").textContent = new Date(DATA.captured).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   const tech = [
     ["Lessons in the wiki", `<b>${C.entries}</b> · ${C.byAction.context} notes, ${C.byAction.deny} denies, ${C.byAction.block} blocks`],
@@ -4387,16 +4339,16 @@ footer b { color: var(--ink); }
     await add(3, 3, "Wiki narrowed", `${sc.asked} of ${C.entries} entries can apply to a ${sc.event} event${sc.tool ? ` on ${sc.tool}` : ""} for ${sc.model}.`);
     const axes = Object.keys(sc.profile).length;
     const unlessCount = sc.entries.filter((e) => e.unless != null).length;
-    await add(4, 4, "One question set", `${axes} axes + ${sc.asked} entry questions + ${unlessCount} unless questions = <b>${axes + sc.asked + unlessCount} questions</b>, one call.`);
+    await add(4, 4, "Captured question set", `${axes} axes + ${sc.asked} entry questions + ${unlessCount} unless questions = <b>${axes + sc.asked + unlessCount} questions</b> in this historical capture. Current model-decided exceptions use a second call only for qualifying entries.`);
     const clock = h("span", { class: "clock" }, "0 ms");
     const jevStep = await add(5, 5, "Masked and sent to Jev", null, h("p", {}, "Waiting for Jev… ", clock), 0);
     const t0 = performance.now();
     const tick = (label, warn) => { clock.textContent = label; clock.classList.toggle("warn", Boolean(warn)); };
     if (down) {
       const target = 3000;
-      while (performance.now() - t0 < target / 4) { tick(`${Math.round((performance.now() - t0) * 4)} ms`, (performance.now() - t0) * 4 > 350); await wait(40); }
+      while (performance.now() - t0 < target / 4) { tick(`${Math.round((performance.now() - t0) * 4)} ms`, (performance.now() - t0) * 4 > 1000); await wait(40); }
       tick("3,000 ms: deadline, no answer", true);
-      jevStep.querySelector("p").append(h("br"), "The hedges went out at 350 and 750 ms and failed too.");
+      jevStep.querySelector("p").append(h("br"), "The hedge went out at 1000 ms and failed too.");
       await wait(300);
       await add(6, 6, "Recorded", "The failure is logged with its error, so outages show in <code>jevis stats</code>.");
       await add(7, 7, "Gates skipped", "There are no answers to judge.");
@@ -4406,10 +4358,10 @@ footer b { color: var(--ink); }
       return finish();
     }
     const real = sc.ms;
-    const total = lagging ? 350 + real : real;
+    const total = lagging ? 1000 + real : real;
     while (performance.now() - t0 < total) {
       const t = performance.now() - t0;
-      tick(`${Math.round(t)} ms${lagging && t > 350 ? " · hedge sent at 350 ms" : ""}`);
+      tick(`${Math.round(t)} ms${lagging && t > 1000 ? " · hedge sent at 1000 ms" : ""}`);
       await wait(30);
     }
     tick(lagging ? `${Math.round(total)} ms · the hedge answered first` : `${real} ms`);

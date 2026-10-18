@@ -10,10 +10,10 @@ delete process.env.JEVIS_JEV;
 delete process.env.JEVIS_ENABLE;
 const { codeDecision, RULES } = await import("../src/rules.mjs");
 const { evaluate, unlessKey } = await import("../src/engine.mjs");
-const { setJevTransport } = await import("../src/jev.mjs");
+const { HEDGES, setJevTransport } = await import("../src/jev.mjs");
 const { tune } = await import("../src/tune.mjs");
 const { exportDataset } = await import("../src/export.mjs");
-const { toolInput } = await import("../src/context.mjs");
+const { inputMarks, toolInput } = await import("../src/context.mjs");
 const { loadWiki, parseEntry, validateEntry, WIKI_ROOT } = await import("../src/wiki.mjs");
 
 const bash = (input) => ({ tool: "Bash", input, request: "fix the bug" });
@@ -215,6 +215,7 @@ test("engine code: exact positive asks only permission, which can stand it down"
   for (const permission of [0.1, 0.9]) {
     calls = []; transport(permission);
     const r = await run(write("<p>Clay — classes</p>"), [entry("slop/em-dash-copy")], { axes: false });
+    assert.equal(calls.length, 1);
     assert.equal(r.scores["slop/em-dash-copy"], 1);
     assert.deepEqual(Object.keys(calls[0].questions), [unlessKey("slop/em-dash-copy")]);
     assert.equal(r.fired.length, permission < 0.5 ? 1 : 0);
@@ -225,6 +226,7 @@ test("engine code: safety respects opt-in and explicit destructive permission", 
   for (const permission of [0.1, 0.9]) {
     calls = []; transport(permission);
     const r = await run(bash("git clean -fd"), [entry("safety/force-push")], { axes: false });
+    assert.equal(calls.length, 1);
     assert.equal(r.code["safety/force-push"], true);
     assert.deepEqual(Object.keys(calls[0].questions), [unlessKey("safety/force-push")]);
     assert.equal(r.fired.length, permission < 0.5 ? 1 : 0);
@@ -232,19 +234,127 @@ test("engine code: safety respects opt-in and explicit destructive permission", 
   delete process.env.JEVIS_ENABLE;
   assert.equal((await run(bash("git clean -fd"), [entry("safety/force-push")])).skipped, "no entries");
 });
-test("engine code: ambiguous input still asks main and exception; failures/missing exceptions fail open", async () => {
+test("engine code: ambiguous input asks only main below min; failures/missing exceptions fail open", async () => {
   calls = []; transport();
   const e = entry("slop/gradient-text");
   const state = write('className="bg-clip-text text-transparent bg-gradient-to-r"', "Hero.tsx");
   const r = await run(state, [e], { axes: false });
   assert.equal(r.code[e.id], undefined);
-  assert.deepEqual(Object.keys(calls[0].questions), [e.id, unlessKey(e.id)]);
+  assert.deepEqual(Object.keys(calls[0].questions), [e.id]);
+  assert.equal(calls.length, 1);
   setJevTransport(async () => { throw new Error("server unavailable"); });
   const unavailable = await run(write("<p>Clay — classes</p>"), [entry("slop/em-dash-copy")]);
   assert.equal(unavailable.fired.length, 0);
   assert.match(unavailable.error, /server unavailable/);
   setJevTransport(async () => ({ answers: {} }));
   assert.equal((await run(write("<p>Clay — classes</p>"), [entry("slop/em-dash-copy")])).fired.length, 0);
+});
+
+test("hedging: only one tail request at 1000 ms", () => {
+  assert.deepEqual(HEDGES, [1000]);
+});
+
+test("Bash slop gates: unknown reads ask no slop questions, proven writes still do", async () => {
+  for (const [input, writes] of [["git log --oneline | head -5", null], ["cd x && ls | head", false]]) {
+    assert.equal(inputMarks(input, { tool: "Bash" }).writes_file, writes, input);
+    calls = []; transport();
+    const r = await run(bash(input), wiki.entries);
+    assert.ok(!calls.some((body) => Object.keys(body.questions).some((key) => key.startsWith("slop/"))), input);
+    assert.ok(!r.fired.some((e) => e.id.startsWith("slop/")), input);
+  }
+  calls = []; transport();
+  await run(bash("cat > index.html <<'EOF'\n<h1 class=\"bg-clip-text text-transparent bg-gradient-to-r\">Hi</h1>\nEOF"), wiki.entries);
+  assert.ok(calls.some((body) => Object.keys(body.questions).some((key) => key.startsWith("slop/"))));
+});
+
+test("Bash writes_file: unparsed commands with a proven write still count as writes", () => {
+  const marks = (input) => inputMarks(input, { tool: "Bash" }).writes_file;
+  for (const input of [
+    "cat > a.html <<EOF\n<h1>$TITLE</h1>\nEOF",
+    "cat <<EOF > a.html\nx\nEOF",
+    "cd /x && python3 - <<'EOF'\np='a.tsx'; s=open(p).read()\nopen(p, 'w').write(s.replace('a', 'b'))\nEOF",
+    "python3 - <<'PY'\nfrom pathlib import Path\nPath('a.css').write_text('x')\nPY",
+    "node - <<'EOF'\nrequire('fs').writeFileSync('a.html', '<b>x</b>')\nEOF",
+  ]) assert.equal(marks(input), true, input);
+  for (const input of [
+    "cd x && git log --oneline | head -5 2>/dev/null",
+    "python3 - <<'EOF'\nprint(open('a.txt').read())\nEOF",
+    "cat <<EOF | wc -l\n<div><p>x</p></div>\nEOF",
+    "npm test 2>&1 | tail -5",
+    "npx eslint src $(cat list) > /tmp/eslint.log 2>&1",
+    "python3 - <<'PY'\nimport sys; sys.stdout.write(open('data.json').read())\nPY",
+    "python3 - <<'PY'\nopen('/tmp/out.json', 'w').write('{}')\nPY",
+  ]) assert.notEqual(marks(input), true, input);
+});
+
+test("engine model: only qualifying main answers get a second, exception-only call", async () => {
+  const e = { ...entry("slop/gradient-text"), decide: undefined };
+  const state = write("<h1>Hi</h1>");
+  for (const score of [0.1, e.min, 0.95]) {
+    calls = [];
+    setJevTransport(async (body) => {
+      calls.push(body);
+      return { answers: Object.fromEntries(Object.keys(body.questions).map((key) => [key, { noul: key === e.id ? score : 0.1 }])) };
+    });
+    const r = await run(state, [e]);
+    assert.ok(e.id in calls[0].questions);
+    assert.ok(!(unlessKey(e.id) in calls[0].questions));
+    assert.equal(calls.length, score >= e.min ? 2 : 1);
+    assert.equal(r.fired.length, score >= e.min ? 1 : 0);
+    assert.equal(r.jevQuestions, calls.reduce((n, body) => n + Object.keys(body.questions).length, 0));
+    if (score >= e.min) {
+      assert.deepEqual(Object.keys(calls[1].questions), [unlessKey(e.id)]);
+      assert.deepEqual(calls[1].state, calls[0].state);
+    }
+  }
+});
+
+test("engine model: a failed when gate avoids the exception call", async () => {
+  const e = { ...entry("slop/gradient-text"), decide: undefined, when: { destructive: ">=0.8" } };
+  calls = [];
+  setJevTransport(async (body) => {
+    calls.push(body);
+    return { answers: Object.fromEntries(Object.keys(body.questions).map((key) => [key, { noul: key === e.id ? 0.95 : 0.1 }])) };
+  });
+  const r = await run(write("<h1>Hi</h1>"), [e]);
+  assert.equal(calls.length, 1);
+  assert.equal(r.fired.length, 0);
+});
+
+test("engine model: failed, timed-out or missing exceptions fail open without losing other fires", async () => {
+  const e = { ...entry("slop/gradient-text"), decide: undefined };
+  const other = { ...e, id: "test/no-exception", unless: undefined, action: "context" };
+  for (const failure of [new Error("server unavailable"), Object.assign(new Error("slow"), { name: "TimeoutError" }), null]) {
+    calls = [];
+    setJevTransport(async (body) => {
+      calls.push(body);
+      if (calls.length === 2) {
+        if (failure) throw failure;
+        return { answers: {} };
+      }
+      return { answers: Object.fromEntries(Object.keys(body.questions).map((key) => [key, { noul: 0.95 }])) };
+    });
+    const r = await run(write("<h1>Hi</h1>"), [e, other], { axes: false });
+    assert.equal(calls.length, 2);
+    assert.deepEqual(r.fired.map((e) => e.id), [other.id]);
+    assert.equal(r.error, undefined);
+    assert.equal(r.jevQuestions, 3);
+  }
+});
+
+test("engine model: both phases share the timeout budget and total timing", async () => {
+  const e = { ...entry("slop/gradient-text"), decide: undefined };
+  const budgets = [];
+  setJevTransport(async (body, timeoutMs) => {
+    budgets.push(timeoutMs);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return { answers: Object.fromEntries(Object.keys(body.questions).map((key) => [key, { noul: key === e.id ? 0.95 : 0.1 }])) };
+  });
+  const r = await run(write("<h1>Hi</h1>"), [e], { axes: false, timeoutMs: 500 });
+  assert.equal(budgets.length, 2);
+  assert.ok(budgets[1] >= 1 && budgets[1] <= budgets[0] - 15, JSON.stringify(budgets));
+  assert.ok(r.ms >= 30, `total timing: ${r.ms}`);
+  assert.equal(r.fired.length, 1);
 });
 test("wiki decide: opt-in whitelist is validated and ask/unless stay required", () => {
   assert.deepEqual(wiki.broken, []);

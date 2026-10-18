@@ -1,14 +1,14 @@
 {
  "captured": "2026-09-28T06:37:54.190Z",
  "counts": {
-  "entries": 98,
+  "entries": 97,
   "byEvent": {
    "prompt": 38,
-   "tool": 45,
+   "tool": 44,
    "stop": 15
   },
   "byAction": {
-   "context": 49,
+   "context": 48,
    "deny": 34,
    "block": 15
   }
@@ -1460,20 +1460,8 @@
     "destructive": 0.96,
     "outward": 0.02
    },
-   "asked": 35,
+   "asked": 34,
    "entries": [
-    {
-     "id": "engineering/commit-unasked",
-     "title": "Commit when asked",
-     "action": "context",
-     "min": 0.8,
-     "p": 0.02,
-     "unless": 0.03,
-     "unless_max": 0.5,
-     "when": {},
-     "fired": false,
-     "body": "Agents commit as a habit at the end of each change, often with `git add -A`, which also sweeps in other sessions' uncommitted work.\n\nInstead: commit only when the user asked in this request or authorized commits earlier in this work (for example \"commit locally whenever it makes sense\"). Otherwise leave the changes uncommitted and say so in the report. When you do commit, stage the paths you changed, not `-A`."
-    },
     {
      "id": "safety/borrowed-credentials",
      "title": "Name a credential's source before using it",
@@ -1912,7 +1900,7 @@
     "destructive": 0.89,
     "outward": 0.97
    },
-   "asked": 35,
+   "asked": 34,
    "entries": [
     {
      "id": "safety/borrowed-credentials",
@@ -1925,18 +1913,6 @@
      "when": {},
      "fired": false,
      "body": "Astra picked up an API key inherited from its shell and spent money on it during testing. It then misreported where the key came from.\n\nInstead: before using a credential the user didn't hand you, name its source and the account it bills, and ask. Don't copy keys between projects or into hosted environment settings unless asked. When you report where a secret came from, check first."
-    },
-    {
-     "id": "engineering/commit-unasked",
-     "title": "Commit when asked",
-     "action": "context",
-     "min": 0.8,
-     "p": 0.02,
-     "unless": 0.88,
-     "unless_max": 0.5,
-     "when": {},
-     "fired": false,
-     "body": "Agents commit as a habit at the end of each change, often with `git add -A`, which also sweeps in other sessions' uncommitted work.\n\nInstead: commit only when the user asked in this request or authorized commits earlier in this work (for example \"commit locally whenever it makes sense\"). Otherwise leave the changes uncommitted and say so in the report. When you do commit, stage the paths you changed, not `-A`."
     },
     {
      "id": "slop/emoji-icons",
@@ -2364,7 +2340,7 @@
     "destructive": 0.02,
     "outward": 0.03
    },
-   "asked": 35,
+   "asked": 34,
    "entries": [
     {
      "id": "workspace/visible-window-or-sound",
@@ -2683,18 +2659,6 @@
      "body": "An underline that grows or wipes in on hover is the reflexive 'look, it is interactive' flourish on nearly every generated nav and link.\n\nInstead: change the state cleanly and quietly: a tonal color shift, a weight change, or a static underline. Do not animate underlines."
     },
     {
-     "id": "engineering/commit-unasked",
-     "title": "Commit when asked",
-     "action": "context",
-     "min": 0.8,
-     "p": 0.01,
-     "unless": 0.01,
-     "unless_max": 0.5,
-     "when": {},
-     "fired": false,
-     "body": "Agents commit as a habit at the end of each change, often with `git add -A`, which also sweeps in other sessions' uncommitted work.\n\nInstead: commit only when the user asked in this request or authorized commits earlier in this work (for example \"commit locally whenever it makes sense\"). Otherwise leave the changes uncommitted and say so in the report. When you do commit, stage the paths you changed, not `-A`."
-    },
-    {
      "id": "slop/accent-left-border",
      "title": "Colored accent-edge bars",
      "action": "deny",
@@ -2816,7 +2780,7 @@
     "destructive": 0.03,
     "outward": 0.02
    },
-   "asked": 35,
+   "asked": 34,
    "entries": [
     {
      "id": "workspace/visible-window-or-sound",
@@ -3025,18 +2989,6 @@
      "when": {},
      "fired": false,
      "body": "An underline that grows or wipes in on hover is the reflexive 'look, it is interactive' flourish on nearly every generated nav and link.\n\nInstead: change the state cleanly and quietly: a tonal color shift, a weight change, or a static underline. Do not animate underlines."
-    },
-    {
-     "id": "engineering/commit-unasked",
-     "title": "Commit when asked",
-     "action": "context",
-     "min": 0.8,
-     "p": 0.01,
-     "unless": 0.02,
-     "unless_max": 0.5,
-     "when": {},
-     "fired": false,
-     "body": "Agents commit as a habit at the end of each change, often with `git add -A`, which also sweeps in other sessions' uncommitted work.\n\nInstead: commit only when the user asked in this request or authorized commits earlier in this work (for example \"commit locally whenever it makes sense\"). Otherwise leave the changes uncommitted and say so in the report. When you do commit, stage the paths you changed, not `-A`."
     },
     {
      "id": "slop/accent-left-border",

@@ -117,12 +117,29 @@ function gitParts(args) {
   return sub && knownOptions(args.slice(i + 1), GIT_OPTIONS[sub], sub === "log") ? sub : null;
 }
 
+// Writing lessons require writes_file === true, so a command the parser
+// can't fully prove (an unquoted heredoc, an inline script) still needs a
+// positive write signal. Only the command line is searched for a redirect:
+// a heredoc body is content, and HTML in it is full of `>`. Only interface
+// and copy files count: log and scratch redirects are most Bash writes and
+// no writing lesson can apply to them.
+const UI_FILE = String.raw`[\w./~$-]*\.(?:html?|css|scss|sass|less|[cm]?[jt]sx?|vue|svelte|astro|mdx?|svg)`;
+const REDIRECT = new RegExp(String.raw`(?:^|[^0-9&>])>>?\s*['"]?${UI_FILE}(?=$|[\s'"&|;)])`);
+const INLINE_SCRIPT = /\b(?:python3?|node|perl|ruby)\b[^\n]*<</;
+const SCRIPT_WRITE = /\.write_text\(|\.write_bytes\(|\bopen\([^)\n]*['"][wa]b?\+?['"]|\.write\(|writeFileSync|appendFileSync|fs\.(?:promises\.)?write|File\.write/;
+const SCRIPT_UI_PATH = new RegExp(String.raw`['"]${UI_FILE}['"]`);
+export const provenWrite = (text) => {
+  const [line, ...rest] = String(text).split("\n");
+  const body = rest.join("\n");
+  return REDIRECT.test(line) || INLINE_SCRIPT.test(line) && SCRIPT_WRITE.test(body) && SCRIPT_UI_PATH.test(body);
+};
+
 export function bashFacts(command) {
   const text = String(command ?? "");
   if (text.endsWith("…")) return unknown();
   const effects = { writes: false };
   const parts = segments(text, { effects });
-  if (!parts?.length) return unknown();
+  if (!parts?.length) return { ...unknown(), writes_file: provenWrite(text) ? true : null };
   const result = Object.fromEntries(BASH_FACTS.map((key) => [key, false]));
   const merge = (key, value) => { if (result[key] !== true) result[key] = value === true ? true : result[key] === null || value === null ? null : false; };
   const read = plainRead(text);
@@ -154,6 +171,6 @@ export function bashFacts(command) {
     merge("opens_app", opener ? true : local || reader || simpleWriter ? false : null);
     merge("uses_credentials", local && !/secret|token|passw|cred|api.?key|\.env|keychain|\.ssh|\.aws/i.test(text) ? false : null);
   }
-  if (effects.writes) result.writes_file = true;
+  if (effects.writes || result.writes_file === null && provenWrite(text)) result.writes_file = true;
   return result;
 }

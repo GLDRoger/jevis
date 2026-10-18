@@ -37,13 +37,13 @@ test("Bash facts: writes, quoting, redirects, heredocs and near misses", () => {
   assert.equal(marks("mkdir a && mkdir b;").git_write, false, "a valid chain may end with a semicolon");
 });
 
-test("Bash facts: incomplete syntax, expansion, wrappers, scripts and clipped inputs keep gates open", () => {
+test("Bash facts: unknown effects keep gates open except strict writes_file", () => {
   for (const text of ["echo 'unfinished", "echo $(unseen)", "echo x > $OUT", "echo x > /dev/null$(unseen)", "git commit…", "ls\\", "cat <<EOF\nx\nEOF\n", "ls <(unseen)", "(git commit)", "mkdir x |", "mkdir x &&", "|| mkdir x", "mkdir x && && rm x"]) {
     const result = marks(text);
     for (const key of BASH_FACTS) assert.equal(result[key], null, `${key}: ${text}`);
     for (const key of BASH_FACTS) {
-      assert.equal(factsHold({ [`marks.${key}`]: true }, { event: "tool", state: { marks: result } }), true);
-      assert.equal(conditionsHold({ [`marks.${key}`]: true }, { profile: {}, state: { marks: result } }), true);
+      assert.equal(factsHold({ [`marks.${key}`]: true }, { event: "tool", state: { marks: result } }), key !== "writes_file");
+      assert.equal(conditionsHold({ [`marks.${key}`]: true }, { profile: {}, state: { marks: result } }), key !== "writes_file");
     }
   }
   for (const text of ["sudo git commit -m x", "git alias-that-commits", "node a-script.mjs", "python3 script.py", "npm run custom", "eval 'git commit -m x'"]) assert.equal(marks(text).git_write, null, text);
@@ -75,7 +75,7 @@ test("Bash gates: empty pool makes no Jev call; sensitive/unknown code still get
 test("gate replay: clipped inputs are unknown, optional fires audited and time reconciled", () => {
   const file = join(process.env.JEVIS_HOME, "replay.jsonl");
   const row = (input, more = {}) => ({ event: "tool", tool: "Bash", input, ms: 500, ...more });
-  writeFileSync(file, [row("mkdir -p output"), row("git commit -m x", { fired: [{ id: "engineering/commit-unasked" }], acted: ["engineering/commit-unasked"] }), row("git reset --hard HEAD", { fired: [{ id: "safety/force-push" }] }), row("cat > x <<'EOF'…", { fired: [{ id: "slop/em-dash-copy" }] }), row("ls", { skipped: "no entries" }), { event: "prompt" }].map(JSON.stringify).join("\n") + "\n");
+  writeFileSync(file, [row("mkdir -p output"), row("cat .env", { fired: [{ id: "safety/borrowed-credentials" }], acted: ["safety/borrowed-credentials"] }), row("git reset --hard HEAD", { fired: [{ id: "safety/force-push" }] }), row("cat > x <<'EOF'…", { fired: [{ id: "slop/em-dash-copy" }] }), row("ls", { skipped: "no entries" }), { event: "prompt" }].map(JSON.stringify).join("\n") + "\n");
   const r = gateReplay({ file, wiki, recover: null });
   assert.equal(r.judged, 4);
   assert.equal(r.clipped, 1);
@@ -89,7 +89,7 @@ test("gate replay: clipped inputs are unknown, optional fires audited and time r
   assert.equal(r.lostFires, 0);
   assert.match(formatGateReplay(r), /Would skip: 1\/4 \(25% overall/);
   assert.match(formatGateReplay(r), /Lost fires: 0/);
-  const tightened = { entries: wiki.entries.map((e) => e.id === "engineering/commit-unasked" ? { ...e, when: { "marks.git_write": false } } : e) };
+  const tightened = { entries: wiki.entries.map((e) => e.id === "safety/borrowed-credentials" ? { ...e, when: { "marks.writes_file": true } } : e) };
   assert.equal(gateReplay({ file, wiki: tightened, recover: null }).lostFires, 1, "the report catches a real lost fire without double-counting acted");
 });
 
@@ -127,7 +127,7 @@ test("gate replay: recover full Claude and Codex inputs by session, timestamp an
   writeFileSync(join(codex, "rollout-synthetic-call.jsonl"), JSON.stringify({ type: "response_item", timestamp: at, payload: { type: "function_call", name: "functions.exec_command", arguments: JSON.stringify({ cmd: input }) } }) + "\n");
   const file = join(root, "log.jsonl");
   const row = (sessionId, extra = {}) => ({ event: "tool", tool: "Bash", sessionId, at, input: input.slice(0, 200) + "…", ms: 100, ...extra });
-  writeFileSync(file, [row("synthetic-claude"), row("synthetic-codex"), row("synthetic-call"), row("synthetic-missing", { fired: ["engineering/commit-unasked"] }), row("synthetic-claude", { at: "2000-01-02T00:00:00Z" })].map(JSON.stringify).join("\n") + "\n");
+  writeFileSync(file, [row("synthetic-claude"), row("synthetic-codex"), row("synthetic-call"), row("synthetic-missing", { fired: ["safety/borrowed-credentials"] }), row("synthetic-claude", { at: "2000-01-02T00:00:00Z" })].map(JSON.stringify).join("\n") + "\n");
   const report = gateReplay({ file, wiki, recovery: { roots: [claude, codex] } });
   assert.equal(report.recovered, 3);
   assert.equal(report.assessable, 3);
@@ -147,8 +147,8 @@ test("gate replay: recover full Claude and Codex inputs by session, timestamp an
 
 test("gate replay: recovered trailing operations expose losses rather than hiding behind unknown", () => {
   const file = join(process.env.JEVIS_HOME, "recovered-loss.jsonl");
-  writeFileSync(file, JSON.stringify({ event: "tool", tool: "Bash", input: "echo…", fired: ["engineering/commit-unasked"] }) + "\n");
-  const wiki = { entries: [{ id: "engineering/commit-unasked", event: "tool", tools: ["Bash"], when: { "marks.git_write": false } }] };
+  writeFileSync(file, JSON.stringify({ event: "tool", tool: "Bash", input: "echo…", fired: ["test/git-write"] }) + "\n");
+  const wiki = { entries: [{ id: "test/git-write", event: "tool", tools: ["Bash"], when: { "marks.git_write": false } }] };
   const report = gateReplay({ file, wiki, recover: (rows) => new Map([[rows[0], "echo harmless && git commit -m hidden"]]) });
   assert.equal(report.assessable, 1);
   assert.equal(report.assessableFires, 1);

@@ -6,8 +6,9 @@ import { candidates, conditionsHold, factsHold, loadWiki } from "./wiki.mjs";
 
 /**
  * One event through code and Jev: the axes (the profile) and unresolved entries'
- * question go out in a single call; an entry fires when its answer clears its
- * `min` and its `when` holds. Code decides what happens next; Jev only answers.
+ * question go out in one call. Model-decided entries ask their exceptions in
+ * a second call only after clearing `min` and `when`, on the same deadline.
+ * Code decides what happens next; Jev only answers.
  */
 
 /** The question Jev is asked for an entry, and (unlessQuestion) for its `unless`: `jevis stats --near` compares recorded wordings against these. */
@@ -40,9 +41,10 @@ export async function evaluate({ event, state, tool = null, model = null, harnes
   }
   for (const e of pool) {
     if (!(e.id in code)) questions[e.id] = question(e);
-    if (e.unless && code[e.id] !== false) questions[unlessKey(e.id)] = unlessQuestion(e);
+    if (e.unless && code[e.id] === true) questions[unlessKey(e.id)] = unlessQuestion(e);
   }
-  const jevQuestions = Object.keys(questions).length;
+  const started = Date.now();
+  let jevQuestions = Object.keys(questions).length;
   const { answers, ms, error, errorClass } = jevQuestions ? await askJev({ state, questions, event, sessionId, harness, model, timeoutMs, record }) : { answers: {}, ms: 0 };
   // An unavailable exception must never turn a code match into a refusal.
   if (!answers) return { error, errorClass, profile: {}, scores: {}, unless: {}, fired: [], ms, code, jevQuestions };
@@ -57,10 +59,25 @@ export async function evaluate({ event, state, tool = null, model = null, harnes
   for (const e of pool) {
     const v = e.id in code ? Number(code[e.id]) : value(answers[e.id]);
     if (v !== null) scores[e.id] = round(v);
-    const u = e.unless ? value(answers[unlessKey(e.id)]) : null;
+    const u = e.unless && code[e.id] === true ? value(answers[unlessKey(e.id)]) : null;
     if (u !== null) unless[e.id] = round(u);
+  }
+  const exceptions = Object.fromEntries(pool
+    .filter((e) => !(e.id in code) && e.unless && (scores[e.id] ?? 0) >= e.min && conditionsHold(e.when, { profile, state }))
+    .map((e) => [unlessKey(e.id), unlessQuestion(e)]));
+  const unlessCalls = Object.keys(exceptions).length ? 1 : 0;
+  if (unlessCalls) {
+    jevQuestions += Object.keys(exceptions).length;
+    const result = await askJev({ state, questions: exceptions, event, sessionId, harness, model, timeoutMs: Math.max(1, timeoutMs - (Date.now() - started)), record });
+    // Missing/failed exception answers stand down only these entries, not the
+    // whole event. The default below treats an unavailable exception as applied.
+    for (const e of pool) {
+      if (!(unlessKey(e.id) in exceptions)) continue;
+      const u = value(result.answers?.[unlessKey(e.id)]);
+      if (u !== null) unless[e.id] = round(u);
+    }
   }
   const holds = (e) => (scores[e.id] ?? 0) >= e.min && (!e.unless || (unless[e.id] ?? 1) < e.unless_max) && conditionsHold(e.when, { profile, state });
   const fired = pool.filter(holds).sort((a, b) => scores[b.id] - scores[a.id]);
-  return { profile, scores, unless, fired, ms, pool: pool.length, code, jevQuestions };
+  return { profile, scores, unless, fired, ms: jevQuestions ? Date.now() - started : 0, pool: pool.length, code, jevQuestions, unlessCalls };
 }
