@@ -37,19 +37,23 @@ test("post: Claude structured success/failure and Codex command/patch payloads",
 });
 
 test("post: Muse completed results replace attempts, failed edits don't count", async () => {
-  let captured;
-  setJevTransport(async (body) => { captured = body.state; return { answers: Object.fromEntries(Object.keys(body.questions).map((id) => [id, { noul: 0.05 }])) }; });
+  setJevTransport(async (body) => ({ answers: Object.fromEntries(Object.keys(body.questions).map((id) => [id, { noul: 0.05 }])) }));
   const input = { ...muse, session_id: "muse-results" };
   await onPrompt({ ...input, prompt: "fix the code" });
   await onTool({ ...input, tool_use_id: "edit", tool_name: "write_file", tool_input: { path: "a.mjs", content: "export const x = 1" } });
   onPost({ ...input, hook_event_name: "PostToolUse", tool_use_id: "edit", tool_name: "write_file", tool_input: { path: "a.mjs" }, tool_response: { success: true } });
   await onTool({ ...input, tool_use_id: "test", tool_name: "bash", tool_input: { command: "npm test" } });
   onPost({ ...input, hook_event_name: "PostToolUse", tool_use_id: "test", tool_name: "bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 1 } });
-  await onStop({ ...input, last_assistant_message: "Done" });
-  assert.equal(captured.evidence.commands_run, 1, "attempt and result aren't double-counted");
-  assert.deepEqual(captured.evidence.actions_after_last_edit, [], "edit completion time is unknown");
-  assert.ok(captured.evidence.recent_actions.some((action) => /failed, exit 1: npm test/.test(action)), "failed result is still visible");
-  assert.deepEqual(captured.evidence.checks_after_last_edit, [{ command: "npm test", success: null, exit_code: 1 }], "receipt-only timing cannot prove a check followed the edit");
+  let stopCalls = 0;
+  setJevTransport(() => { stopCalls += 1; assert.fail("critic-off Stop must not call the model"); });
+  assert.equal(await onStop({ ...input, last_assistant_message: "Done" }), null);
+  assert.equal(stopCalls, 0);
+  const session = loadSession(input.session_id);
+  const evidence = turnEvidence(mergeToolResults(session.hookItems, session.hookResults));
+  assert.equal(evidence.commands_run, 1, "attempt and result aren't double-counted");
+  assert.deepEqual(evidence.actions_after_last_edit, [], "edit completion time is unknown");
+  assert.ok(evidence.recent_actions.some((action) => /failed, exit 1: npm test/.test(action)), "failed result is still visible");
+  assert.deepEqual(evidence.checks_after_last_edit, [{ command: "npm test", success: null, exit_code: 1 }], "receipt-only timing cannot prove a check followed the edit");
   onPost({ ...input, hook_event_name: "PostToolUse", tool_use_id: "edit", tool_name: "write_file", tool_input: { path: "a.mjs" }, tool_response: { success: false } });
   const s = loadSession(input.session_id);
   assert.equal(turnEvidence(mergeToolResults(s.hookItems, s.hookResults)).edited, false);

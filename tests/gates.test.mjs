@@ -64,6 +64,8 @@ test("Bash gates: empty pool makes no Jev call; sensitive/unknown code still get
   await judge("python3 script.py");
   assert.equal(calls, 1);
   await judge("cat .env");
+  assert.equal(calls, 1, "the retired credential advisory no longer judges file reads");
+  await judge("open -a Safari");
   assert.equal(calls, 2);
   process.env.JEVIS_ENABLE = "safety";
   try {
@@ -75,7 +77,7 @@ test("Bash gates: empty pool makes no Jev call; sensitive/unknown code still get
 test("gate replay: clipped inputs are unknown, optional fires audited and time reconciled", () => {
   const file = join(process.env.JEVIS_HOME, "replay.jsonl");
   const row = (input, more = {}) => ({ event: "tool", tool: "Bash", input, ms: 500, ...more });
-  writeFileSync(file, [row("mkdir -p output"), row("cat .env", { fired: [{ id: "safety/borrowed-credentials" }], acted: ["safety/borrowed-credentials"] }), row("git reset --hard HEAD", { fired: [{ id: "safety/force-push" }] }), row("cat > x <<'EOF'…", { fired: [{ id: "slop/em-dash-copy" }] }), row("ls", { skipped: "no entries" }), { event: "prompt" }].map(JSON.stringify).join("\n") + "\n");
+  writeFileSync(file, [row("mkdir -p output"), row("open -a Safari", { fired: [{ id: "workspace/visible-window-or-sound" }], acted: ["workspace/visible-window-or-sound"] }), row("git reset --hard HEAD", { fired: [{ id: "safety/force-push" }] }), row("cat > x <<'EOF'…", { fired: [{ id: "slop/em-dash-copy" }] }), row("ls", { skipped: "no entries" }), { event: "prompt" }].map(JSON.stringify).join("\n") + "\n");
   const r = gateReplay({ file, wiki, recover: null });
   assert.equal(r.judged, 4);
   assert.equal(r.clipped, 1);
@@ -89,7 +91,7 @@ test("gate replay: clipped inputs are unknown, optional fires audited and time r
   assert.equal(r.lostFires, 0);
   assert.match(formatGateReplay(r), /Would skip: 1\/4 \(25% overall/);
   assert.match(formatGateReplay(r), /Lost fires: 0/);
-  const tightened = { entries: wiki.entries.map((e) => e.id === "safety/borrowed-credentials" ? { ...e, when: { "marks.writes_file": true } } : e) };
+  const tightened = { entries: wiki.entries.map((e) => e.id === "workspace/visible-window-or-sound" ? { ...e, when: { "marks.writes_file": true } } : e) };
   assert.equal(gateReplay({ file, wiki: tightened, recover: null }).lostFires, 1, "the report catches a real lost fire without double-counting acted");
 });
 

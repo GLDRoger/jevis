@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write a theme switch built as a sliding pill or knob with sun and moon icons?
 yes: A toggle track that slides a knob between a sun and a moon, or a button swapping sun and moon icons for light and dark mode

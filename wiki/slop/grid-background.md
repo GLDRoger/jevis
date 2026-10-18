@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write a background of faint grid or graph-paper lines (repeating linear gradients or an SVG pattern of lines, often faded with a radial mask) behind a hero, section, or the whole page?
 yes: background-image with two repeating-linear-gradient line sets, bg-[linear-gradient(to_right,#8882_1px,transparent_1px)], a grid SVG pattern, or a dotted grid laid under content

@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write user-interface code that adds a purple, violet, indigo, or fuchsia gradient (alone or blending into blue or pink) to a hero, page background, button, or card?
 yes: linear-gradient or radial-gradient, or Tailwind from-/via-/to- classes, with purple, violet, indigo, or fuchsia stops (for example #667eea to #764ba2, from-purple-500 to-pink-500, from-indigo-600 to-violet-600)

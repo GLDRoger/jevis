@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write user-interface code that draws text around a circle (SVG textPath on a circle path), usually as a rotating badge or stamp?
 yes: An SVG <textPath> on a circular path, often spun with a rotate animation

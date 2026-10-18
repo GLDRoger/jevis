@@ -143,7 +143,7 @@ async function checkInstalledHooks(t, { nodeWithSpaces = false, selectedEvents =
   const configFile = join(home, ".jevis", "config.json");
   const settings = readJson(configFile);
   assert.equal(settings.JEVIS_JEV_URL, url);
-  writeFileSync(configFile, `${JSON.stringify({ ...settings, JEVIS_WIKI: wiki }, null, 2)}\n`);
+  writeFileSync(configFile, `${JSON.stringify({ ...settings, JEVIS_WIKI: wiki, JEVIS_CRITIC: "off" }, null, 2)}\n`);
   const lint = await run(node, [cli, "lint"], options);
   try {
     assertExit(lint);
@@ -200,22 +200,22 @@ async function checkInstalledHooks(t, { nodeWithSpaces = false, selectedEvents =
           try {
             assertExit(result);
             assert.ok(result.ms < hook.timeout * 1000, `hook exceeded its ${hook.timeout}s timeout`);
-            if (kind === "session" || kind === "post") {
+            if (kind !== "tool") {
               assert.equal(result.stdout, "");
-              assert.ok(existsSync(join(home, ".jevis", "sessions", `${sessionId}.json`)), "local hook must retain its session");
+              if (kind !== "stop") assert.ok(existsSync(join(home, ".jevis", "sessions", `${sessionId}.json`)), "local hook must retain its session");
             } else {
               const output = JSON.parse(result.stdout);
-              if (kind === "prompt") assert.ok(output.hookSpecificOutput?.additionalContext?.includes(titles.prompt));
-              if (kind === "tool") {
-                assert.equal(output.hookSpecificOutput?.permissionDecision, "deny");
-                assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes(titles.tool));
-              }
-              if (kind === "stop") {
-                assert.equal(output.decision, "block");
-                assert.ok(output.reason.includes(titles.stop));
-              }
+              assert.equal(output.hookSpecificOutput?.permissionDecision, "deny");
+              assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes(titles.tool));
               assert.ok(requests.slice(before).some((body) => kind in body.questions), "installed hook must reach the configured stub");
-              assert.ok(logRows(logFile).some((row) => row.sessionId === sessionId && row.event === kind && row.harness === (harness === "codex" ? "Codex" : "Claude Code")), "hook must recognize the harness input");
+            }
+            if (["prompt", "tool", "stop"].includes(kind)) assert.ok(logRows(logFile).some((row) => row.sessionId === sessionId && row.event === kind && row.harness === (harness === "codex" ? "Codex" : "Claude Code")), "hook must recognize the harness input");
+            if (kind !== "tool") assert.equal(requests.length, before, "bookkeeping, post and critic-off Stop never call the model");
+            if (kind === "prompt") {
+              const session = readJson(join(home, ".jevis", "sessions", `${sessionId}.json`));
+              assert.equal(session.turn, 1);
+              assert.equal(session.request, payload.prompt.prompt);
+              assert.deepEqual(session.earlierRequests, []);
             }
             assert.ok(existsSync(logFile), "hooks must write the fake home's log");
             assert.deepEqual(logRows(logFile).filter((row) => row.event === "hook-error"), []);

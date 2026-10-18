@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write a fake app or code window drawn in HTML or CSS: a rounded panel with red, yellow, and green traffic-light dots, a filename tab, or a mock interface inside?
 yes: Three small colored circles in a title bar, a fake editor window with a quickstart.ts tab and a made-up SDK call, or a CSS mockup of a desktop app filled with placeholder kanban cards or avatars

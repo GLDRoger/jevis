@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write a page or section background that is a soft multi-stop pastel gradient wash: butter-yellow to peach to pink, mint to lavender, sherbet to cream, or similar candy tones?
 yes: linear-gradient or radial-gradient backgrounds across a hero, section, or page with pastel stops such as #ffe6a8 to #ffc0da, or Tailwind from-amber-100 via-pink-100 to-purple-100

@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write user-interface code that adds an endlessly scrolling horizontal strip (a marquee or ticker) of brand values, adjectives, or slogans?
 yes: @keyframes that translate a duplicated row across the screen forever, <marquee>, or classes like marquee, ticker, ribbon

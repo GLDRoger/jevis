@@ -201,7 +201,7 @@ test("mine: recording turned off keeps later log-only corrections and marks thei
     const logRows = readFileSync(join(home, "log.jsonl"), "utf8").trim().split("\n").map((row) => JSON.parse(row));
     assert.equal(logRows.at(-1).origin, "agent", "log-only turns retain the origin needed by --agents");
     assert.equal(mine({ home }).total, 2);
-    assert.equal(mine({ home, agents: true }).total, 3);
+    assert.equal(mine({ home, agents: true }).total, 2, "v2 bookkeeping has no model correction score, even with --agents");
   } finally {
     process.env.JEVIS_HOME = savedHome;
     if (savedRecord === undefined) delete process.env.JEVIS_RECORD;

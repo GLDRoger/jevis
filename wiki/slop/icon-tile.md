@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write user-interface markup or styles that place an icon or logo inside a filled or bordered tile, circle, or rounded square used as a feature bullet, card header, or hero visual?
 yes: A single icon centered in a soft-colored rounded box (for example a div with bg-indigo-100 rounded-xl p-3 holding an icon), or a brand or social logo sitting on a colored chip

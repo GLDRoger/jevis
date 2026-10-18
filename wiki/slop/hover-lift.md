@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write hover styles that make cards, tiles, or buttons jump: translateY upward, scale above 1, or a shadow that blooms on hover?
 yes: hover:-translate-y-1, hover:scale-105, transform: translateY(-4px) or scale(1.05) with a larger box-shadow on :hover for cards, grid items, or buttons

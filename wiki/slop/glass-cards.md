@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write user-interface code that makes cards, panels, or navigation from frosted glass: backdrop-filter blur on a translucent white or tinted background, often with a thin light border?
 yes: backdrop-filter: blur(...) or Tailwind backdrop-blur with bg-white/10, rgba(255,255,255,0.1), or similar translucent fills on cards, panels, or nav bars

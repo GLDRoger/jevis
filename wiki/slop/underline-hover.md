@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write hover styles where a link's or button's underline grows, wipes, or slides in (a pseudo-element whose width or scaleX animates from 0 on hover)?
 yes: ::after underlines that animate width 0 to 100% or scaleX(0) to scaleX(1) on :hover, or Tailwind after:w-0 hover:after:w-full

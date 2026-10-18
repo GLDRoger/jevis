@@ -1,6 +1,8 @@
 # Writing wiki entries
 
-The wiki is what Jevis knows: one Markdown file per lesson, under `wiki/<area>/<name>.md`. The path, without `wiki/` and `.md`, is the entry's id (`design/open-landing-default`).
+The wiki is what Jevis knows: one Markdown file per lesson, under `wiki/<area>/<name>.md`. The path, without `wiki/` and `.md`, is the entry's id (`slop/gradient-text`).
+
+V2 ships 36 tool lessons. Prompt hooks do bookkeeping only: prompt entries are not evaluated or injected. Stop accepts only entries with a `decide` code rule, plus an optional independent design review; no Stop entries currently ship. Model-judged Stop blocks are retired. The 61 retired v1 lessons in `archive/wiki-v1/` are not loaded. Standing advice belongs in the user's AGENTS.md/CLAUDE.md.
 
 ## Your own entries
 
@@ -19,7 +21,7 @@ Jevis loads the shipped `wiki/` in this repo, then yours in `~/.jevis/wiki/` (un
 
 A repository's `.jevis/wiki/` works the same way, for everyone who works in it, with two differences. It loads only after `jevis trust <repo>`, and only as its files were when trusted: any change needs trusting again. And it can't turn off or replace a `safety/` entry: lint reports such a file as broken, and the safety entry stays in force. Run `lint` from inside the repository to check its lessons, trusted or not.
 
-On every hook event, Jevis sends the decision model (Jev or GPT-6 Luna, whichever `JEVIS_DECIDER` selects) the event's state plus the axes and unresolved `ask` questions. Model-decided entries ask `unless` in a second call only after clearing `min` and `when`; code-decided positive matches include `unless` in the first call. Both phases share one deadline. A failed second call stands down only entries awaiting exceptions. An entry can opt into a code rule with `decide` (below). Questions within each call are answered in parallel. An entry fires when three things hold:
+On tool events, Jevis sends the decision model (Jev or GPT-6 Luna, whichever `JEVIS_DECIDER` selects) unresolved `ask` questions and any needed axes. Prompt hooks never call it. Stop requests review axes only when an enabled critic has rounds left and edits exist; only `decide` entries can otherwise participate. Model-decided entries ask `unless` in a second call only after clearing `min` and `when`; code-decided positive matches include `unless` in the first call. Both phases share one deadline. A failed second call stands down only entries awaiting exceptions. An entry can opt into a code rule with `decide` (below). Questions within each call are answered in parallel. An entry fires when three things hold:
 - its `ask` answer clears `min`;
 - its `unless` answer stays under `unless_max`;
 - its `when` conditions hold.
@@ -28,31 +30,30 @@ Facts in `when` are known before the decision model is asked, so an entry whose 
 
 What it does next depends on its `action`.
 
-With `decide`, exact matches need no model answer to `ask`, and exact non-matches need neither question. Positive matches still ask the model the separate `unless`: permission and supplied copy need judgment. A missing or failed exception answer never refuses a call. When all entries and their gates are settled by code, no decision-model call is made. The event log records `code` (exact lesson decisions) and `jevQuestions`; code scores are not model probabilities or training labels. Keep `ask`, `yes`/`no`, and `unless` as the fallback contract; custom lessons opt in explicitly.
+With `decide`, exact matches need no model answer to `ask`, and exact non-matches need neither question. Positive matches still ask the model the separate `unless`, when present: permission and supplied copy need judgment. A missing or failed exception answer never refuses a call. When all tool entries and their gates are settled by code, no decision-model call is made. The event log records `code` (exact lesson decisions) and `jevQuestions`; code scores are not model probabilities or training labels. Keep `ask`, `yes`/`no`, and `unless` as the fallback contract; custom lessons opt in explicitly.
 
 ## Format
 
 ```markdown
 ---
-event: prompt
-ask: Does `request` ask for a new website, landing page, or app screen and leave most of its look (layout, palette, type) to the agent?
-yes: A new page or screen, with the look left open
-no: The look is specified, the project's existing design applies, or nothing visual is being made
-min: 0.75
-when: { wants_change: ">=0.6", correction: "<0.5" }
-family: gpt
-action: context
-title: The default AI landing page
-source: an earlier hook system's default-look gate, 40+ blocked Sol builds, Aug-Sep 2026
+event: tool
+tools: [Write, Edit, MultiEdit, apply_patch]
+ask: Does `input` add gradient-filled interface text?
+yes: A heading, word, or number uses a gradient clipped to text
+no: Solid text, non-text gradients, or examples in developer documentation
+min: 0.85
+decide: gradient_text
+unless: Does `request` explicitly ask for gradient-filled text?
+action: deny
+title: Gradient-filled text
+source: recurring generated-design pattern in the maintainer's sessions
 ---
-Sol's first draft of an open page is one layout: centered hero, gradient blob, three feature cards, logo strip, pricing table, in Inter on near-white.
-
-Instead: pick one concept from the product's own world and let it decide the layout, type, and palette before writing markup.
+Gradient-filled text is a stock generated-design tell. Use a solid text color instead.
 ```
 
 | Field | Required | Meaning |
 |---|---|---|
-| `event` | yes | `prompt` (the user sent a message), `tool` (the agent is about to run a tool), or `stop` (the agent is about to end its turn) |
+| `event` | yes | `tool` (before a tool), or `stop` (before ending, requires `decide`). `prompt` is still parseable for historical/offline records, but ignored by hooks |
 | `ask` | yes | One literal yes/no question about the state. Name the state fields it reads in backticks. |
 | `yes`, `no` | no | What a yes and a no mean. Put the boundary cases here. |
 | `min` | no | The probability the `ask` answer must reach. Default 0.75. Use 0.85 or more for `deny` and `block`. |
@@ -63,18 +64,14 @@ Instead: pick one concept from the product's own world and let it decide the lay
 | `tools` | tool only | Tool names the entry applies to: `Bash`, `apply_patch` (Codex), `Edit`, `Write`, `MultiEdit`, `mcp__*`. Glob `*` allowed. |
 | `family` | no | `claude` or `gpt`, for a lesson that fixes one family's habit. A model from any other family (Gemini, Grok, an open model), or an unknown one, gets both families' lessons. Leave it out for a lesson every model needs. |
 | `optional` | no | `true` keeps the entry off until `JEVIS_ENABLE` names its id, its area, or `all`. For rules the harness already covers. |
-| `action` | yes | `context` adds the body to what the agent reads (prompt and tool); `deny` refuses the tool call with the body as the reason (tool); `block` sends the agent back to work with the body as the reason (stop). |
+| `action` | yes | `context` adds the body to what the agent reads (tool only in v2); `deny` refuses the tool call with the body as the reason (tool); `block` sends the agent back to work with the body as the reason (stop). |
 | `title` | yes | A few words naming the lesson. |
 | `source` | yes | Where the lesson came from: session ids, dates, counts, a file. An entry without evidence is an opinion. |
 
 ## The state the decision model reads
 
 **prompt**
-- `request`: the user's message, with secrets masked.
-- `previous_request`: the user's message before it, if any.
-- `attachments`: attached file names.
-- `workspace`: `git` (a repository or not), `files` (up to 40 top-level names), `empty`.
-- `agent`: `harness` (Codex or Claude Code), `model`, `origin` (`person`, or `agent` when another agent started this session).
+No state is sent to the decision model. The hook stores the masked request, previous and earlier requests, model, turn and turn start locally for downstream hooks. It may return the once-per-session outage warning, never lesson notes.
 
 **tool**
 - `request`: the user's current message.
@@ -88,7 +85,7 @@ Instead: pick one concept from the product's own world and let it decide the lay
   - `marks.plain_read`: a shell command that provably only reads, such as `ls`, `rg -n x src | head`, `sed -n 1,80p f`, `git log`, or `gh pr view`. Jevis's own read-only commands (`jevis ask`, `lint`, `stats`, `replay` without `--record`, `doctor`, `mine`) count too: the sample they judge is test data. It is false for any redirect into a file, substitution, variable expansion, heredoc, unknown program, or anything that names a credential (`src/shell.mjs`), and for every tool but `Bash`.
 
   An entry about what a command writes, runs, opens, deletes, or which credential it touches adds `when: { marks.plain_read: false }`. A plain read then asks it nothing, and when every entry is gated that way, the call is skipped. Leave the gate off only for a lesson about reads themselves, such as rereading a file. `jevis lint` notes each Bash entry without it.
-- `workspace`: as above.
+- `workspace`: `git` (whether this is a repository), `files` (up to 40 top-level names), and `empty`.
 
 **stop**
 - `request`: the user's current message.
@@ -101,23 +98,14 @@ Instead: pick one concept from the product's own world and let it decide the lay
   - `commands_run`, `used_subagents`;
   - `files_written_by_commands`: files under the project modified during the turn that no edit tool recorded (a heredoc, a script, a JavaScript exec). They are also counted in `files_changed` and `ui_files_changed`, and they set `edited`.
 
-  Whether an action was a test, a build, or a browser check is the decision model's call: ask it about `evidence.actions_after_last_edit`.
+  These facts support code checks and the optional review, not model-judged Stop lessons.
 
 ## Axes
 
-Axes are the shared profile, the spider chart, that the decision model scores on every event of a kind. Entries use them in `when` to share a gate instead of repeating it. `src/axes.mjs` defines them.
+Axes are shared model judgments defined in `src/axes.mjs`. Tool checks request them when needed. Stop requests its axes only for a possible design/film review; with the critic off and no applicable code entries it asks nothing.
 
-**prompt**
-- `wants_change`: the user wants something made or changed, not an answer.
-- `open_ended`: most decisions about the result are left to the agent.
-- `visual`: the result is something people look at.
-- `code`: software changes.
-- `new_build`: something new from scratch.
-- `risky`: production, data, money, credentials, or hard to undo.
-- `correction`: the user is correcting the agent's earlier work.
-- `delegation`: the user wants other agents used.
-- `current_facts`: the answer depends on facts that may have changed recently.
-- `writing`: prose is the product.
+**prompt (historical/offline only)**
+The engine still supports prompt axes for old records and offline evaluations, but v2 hooks do not score them, including the `correction` axis used by historical mining.
 
 **tool**
 - `destructive`: could delete or overwrite what cannot easily be recovered.
@@ -134,7 +122,7 @@ Axes are the shared profile, the spider chart, that the decision model scores on
 
 ## The slop area
 
-`wiki/slop/` holds `deny` entries on edits (`Write`, `Edit`, `MultiEdit`, `apply_patch`, and `Bash` heredocs) for the telltales of generated design: gradient text, purple gradients, emoji and Unicode glyphs as icons, frosted glass, glow blobs, feature-card rows, announcement pills, marquees, rotating text stamps, invented social proof, hype copy, the italic accent word, numbered mono labels, hover lift on every card, unasked template sections, colored left-edge bars, decorative SVG, and section-scrolling sidebars.
+`wiki/slop/` holds `deny` entries on edits (`Write`, `Edit`, `MultiEdit`, `apply_patch`, and `NotebookEdit` where listed; never `Bash`) for the telltales of generated design: gradient text, purple gradients, emoji and Unicode glyphs as icons, frosted glass, glow blobs, feature-card rows, announcement pills, marquees, rotating text stamps, invented social proof, hype copy, numbered mono labels, hover lift on every card, unasked template sections, colored left-edge bars, decorative SVG, and section-scrolling sidebars.
 
 Each one follows the same shape:
 - `ask` names the pattern as code would write it (`background-clip: text`, `border-l-4`, `<textPath>`), because the decision model reads the edit literally.
@@ -150,7 +138,7 @@ The critic reads every slop entry's title and first line as its list of telltale
 - **Make the `ask` literal.** The decision model answers the words you wrote, not the ones you meant. If you would explain what you meant, that explanation belongs in `yes` and `no`. Keep counting and arithmetic out of the question: that belongs in code, as a fact.
 - **Body.** One or two sentences naming the default failure, then what to do instead. Write it as guidance to a capable colleague, in two to six lines. Point to a skill path when the fix needs a procedure.
 - **Deny and block.** Use them only when the harm is concrete and the question is precise. A wrong block costs more than a missed note: an earlier hook system once held a session for hours over one.
-- **The user's words win.** A body never overrides what the user asked for. Every `deny` and `block` entry needs an `unless` that asks whether the user asked for exactly this. Write it literally, with its boundary cases: "run the QA pass" first read as asking to see a window (0.77) until the question said that testing and checking do not count (0.07).
+- **The user's words win.** A body never overrides what the user asked for. Every permission-sensitive `deny` or `block` entry needs an `unless` that asks whether the user asked for exactly this. Write it literally, with its boundary cases: "run the QA pass" first read as asking to see a window (0.77) until the question said that testing and checking do not count (0.07).
 - **Give the reason.** Agents rightly distrust unexplained instructions injected mid-session. In a live test, both Claude Sonnet and GPT-6 Sol flagged a bare "end your reply with this word" as possible injection. A body that names the failure and the user's interest reads as what it is: advice from this user's history.
 - **Test before you ship it.** Run `jevis ask` for single cases, and `jevis replay <session>` against real sessions where the failure happened and where it did not.
 - **Test on both deciders.** `min` and `unless_max` were tuned on Jev's probabilities, and GPT-6 Luna's sit differently: it answers `unless` ("did the user ask for exactly this?") higher. Run your cases with `JEVIS_DECIDER=luna` as well as the default, and set thresholds that hold on the decider you use. `jevis stats --near` reads only the active decider's records.

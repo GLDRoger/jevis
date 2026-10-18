@@ -254,8 +254,8 @@ test("hedging: only one tail request at 1000 ms", () => {
   assert.deepEqual(HEDGES, [1000]);
 });
 
-test("Bash slop gates: unknown reads ask no slop questions, proven writes still do", async () => {
-  for (const [input, writes] of [["git log --oneline | head -5", null], ["cd x && ls | head", false]]) {
+test("slop gates: neither Bash reads nor proven writes ask slop questions; file edits do", async () => {
+  for (const [input, writes] of [["git log --oneline | head -5", null], ["cd x && ls | head", false], ["cat > index.html <<'EOF'\n<h1 class=\"bg-clip-text text-transparent bg-gradient-to-r\">Hi</h1>\nEOF", true]]) {
     assert.equal(inputMarks(input, { tool: "Bash" }).writes_file, writes, input);
     calls = []; transport();
     const r = await run(bash(input), wiki.entries);
@@ -263,7 +263,7 @@ test("Bash slop gates: unknown reads ask no slop questions, proven writes still 
     assert.ok(!r.fired.some((e) => e.id.startsWith("slop/")), input);
   }
   calls = []; transport();
-  await run(bash("cat > index.html <<'EOF'\n<h1 class=\"bg-clip-text text-transparent bg-gradient-to-r\">Hi</h1>\nEOF"), wiki.entries);
+  await run(write('<h1 class="bg-clip-text text-transparent bg-gradient-to-r">Hi</h1>'), wiki.entries);
   assert.ok(calls.some((body) => Object.keys(body.questions).some((key) => key.startsWith("slop/"))));
 });
 

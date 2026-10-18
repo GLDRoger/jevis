@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write user-interface code that adds decorative blurred color blobs or orbs behind content, or neon glow shadows on cards and buttons?
 yes: Absolutely positioned circles with large blur (filter: blur(80px), blur-3xl) and bright colors behind a hero, or colored box-shadow glows like 0 0 40px rgba(139,92,246,.5)

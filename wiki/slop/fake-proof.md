@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write user-interface content that invents social proof: testimonials with made-up names, customer counts, ratings, uptime or growth figures, or a 'trusted by' row of company logos or names?
 yes: Quotes attributed to invented people, figures like '10,000+ teams', '4.9/5', '99.9% uptime', '3x faster', gradient-circle initials standing in for customer photos, or logo strips of companies the user never mentioned

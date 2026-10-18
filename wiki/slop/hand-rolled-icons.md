@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write interface icons as Unicode symbols in buttons, links, or labels (such as ↗ → ← ✓ ✕ ★ ☰ ⚙ ➜ ▤ ◇ ↻), or as inline <svg> paths that redraw a stock icon-pack shape (a close X, chevron, arrow, check, hamburger, gear)?
 yes: A button or link ending in a raw glyph like 'Sign in ↗' or 'Next →', a ✓ or ✕ as a status icon, or <svg><path d="M5 12h14..."/></svg> pasted for an icon

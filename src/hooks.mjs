@@ -103,28 +103,14 @@ export async function onPrompt(input) {
     model: model ?? session.model ?? (harness === "Claude Code" ? CLAUDE_UNKNOWN : null),
   });
   if (!saveSession(sessionId, session)) return null;
-  const state = {
-    request: session.request,
-    previous_request: session.previousRequest ? clip(session.previousRequest, 600) : null,
-    attachments: attachmentNames(prompt),
-    workspace: workspaceOf(cwd),
-    agent: { harness, model: session.model, origin: originOf(prompt) },
-    // Whether this user keeps a design law file (see designLaw in review.mjs).
-    user: { design_law: designLaw() !== null },
-  };
-  const result = await evaluate({ event: "prompt", state, model: session.model, harness, sessionId, timeoutMs: timeout("prompt"), wiki: wikiFor(cwd) });
-  const notes = pickNotes(result.fired, session);
-  log({ event: "prompt", sessionId, harness, model: session.model, origin: state.agent.origin, turn: session.turn, cwd, request: clip(session.request, 200), ...summary(result), acted: notes.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
-  if ((!notes.length && !outage) || shadow()) return null;
-  const now = loadSession(sessionId);
-  for (const e of notes) now.shown[e.id] = session.turn;
-  if (!saveSession(sessionId, now)) return null;
-  return {
-    hookSpecificOutput: {
-      hookEventName: "UserPromptSubmit",
-      additionalContext: [outage, notes.length ? formatNotes(notes, "Jevis: lessons from past sessions where requests like this went wrong. Use what fits; where the user's instructions differ, theirs win.") : null].filter(Boolean).join("\n\n"),
-    },
-  };
+  // v2: no lesson notes and no decision-model call on prompts. A month of
+  // real use (Sep 28 - Oct 18 2026) showed 0 of 60 sampled notes changed an
+  // outcome the agent's own instruction files would not have produced; the
+  // place for a standing lesson is AGENTS.md / CLAUDE.md, not a runtime note.
+  // The hook stays for the session bookkeeping the tool and stop hooks read.
+  log({ event: "prompt", sessionId, harness, model: session.model, origin: originOf(prompt), turn: session.turn, cwd, request: clip(session.request, 200), acted: [], mode: shadow() ? "shadow" : "live" });
+  if (!outage || shadow()) return null;
+  return { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: outage } };
 }
 
 function denyReason(denies) {
@@ -236,7 +222,14 @@ export async function onStop(input) {
   const { harness } = harnessOf(input, { withModel: false });
   const since = session.turnStartedAt ?? lastUserMessageAt(items);
   const state = { request: session.request ?? "", final_message: clip(final, 3000), evidence: withTouched(turnEvidence(items ?? [], { since, cwd }), cwd, session.turnStartedAt, items) };
-  const result = await evaluate({ event: "stop", state, model: session.model, harness, sessionId, timeoutMs: timeout("stop"), wiki: wikiFor(cwd) });
+  // v2: only code-decided stop entries may block. Model-judged stop blocks
+  // caught 4 real problems in a month against 54 harmful blocks (audit,
+  // Oct 18 2026). The decision model is asked only for the review's axes,
+  // and only when a review could run at all.
+  const wiki = wikiFor(cwd);
+  const codeOnly = { ...wiki, entries: wiki.entries.filter((e) => e.event !== "stop" || e.decide) };
+  const reviewPossible = criticBackend() !== "off" && session.stop.reviews < roundsFor(session) && (state.evidence.ui_files_changed.length > 0 || state.evidence.files_changed_count > 0);
+  const result = await evaluate({ event: "stop", state, model: session.model, harness, sessionId, timeoutMs: timeout("stop"), wiki: codeOnly, axes: reviewPossible });
   const blocks = wikiSpent ? [] : result.fired.filter((e) => e.action === "block" && !session.stop.blocked.includes(e.id)).slice(0, MAX_STOP_BLOCKS - session.stop.blocked.length);
   log({ event: "stop", sessionId, harness, turn: session.turn, final: clip(final, 200), evidence: { edited: state.evidence.edited, files: state.evidence.files_changed_count, ui_files: state.evidence.ui_files_changed.length, after: state.evidence.actions_after_last_edit.length }, ...summary(result), acted: blocks.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
   if (!blocks.length) return reviewTurn({ input, session, sessionId, cwd, harness, state, profile: result.profile, items, since, final });

@@ -1,7 +1,7 @@
 ---
 event: tool
 decide: gradient_text
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write user-interface code that fills text with a gradient (background-clip: text or -webkit-background-clip: text with a gradient, Tailwind bg-clip-text with text-transparent)?
 yes: A heading, word, or number is painted with a gradient through background-clip text

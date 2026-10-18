@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write a countdown timer: boxes or numbers for days, hours, minutes, and seconds counting down?
 yes: A row of tiles with DAYS / HRS / MIN / SEC counting down to a sale, launch, or drop

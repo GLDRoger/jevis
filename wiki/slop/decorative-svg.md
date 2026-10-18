@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write an inline SVG drawn by hand as decoration: arrows, squiggles, swooshes, lines, or shapes placed behind or beside content that do not show data, a logo, an icon from a set, or an illustration of the subject?
 yes: An <svg> with hand-written <path>, <line>, or <polyline> used as a big background arrow, underline swoosh, sparkle, or ornament, often faint or absolutely positioned

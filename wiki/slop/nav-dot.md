@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` mark the active navigation item with a small dot placed under or beside the link?
 yes: A dot or small circle positioned below the current nav link (for example an ::after with border-radius 50% under an aria-current link)

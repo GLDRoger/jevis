@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write user-interface markup that places a small rounded pill or badge above a hero headline to announce something (for example 'New', 'Introducing', 'Now in beta', 'Backed by', or a version)?
 yes: A rounded-full bordered chip or badge with a short announcement sitting right above the main headline

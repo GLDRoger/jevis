@@ -1,8 +1,8 @@
 # Jevis
 
-Jevis is a set of hooks that gives a coding agent a second pair of eyes. It reads each message you send, each command or edit the agent is about to make, and each "done" it is about to report. It asks a fast decision model yes/no questions about what is happening. When one of its lessons applies, it steps in: it adds a note to the agent's context, refuses a command, or sends the turn back with a reason. After a turn of visual work, it renders the result and has a separate model review it the way a demanding designer would.
+Jevis is a set of coding-agent hooks for code-checked facts, hard guards, and an optional independent design review. In v2, the prompt hook only keeps session bookkeeping: it injects no lessons and makes no decision-model calls. Tool hooks check commands and edits; Stop runs code-decided checks and, when enabled, the design review.
 
-It was built for **Codex**, where it helped most. It also improved **Claude Code** in the same tests. It should help any agent harness that supports hooks, because what it adds (lessons at the right moment, a refusal before a mistake, a review before "done") doesn't depend on the model underneath.
+It supports **Codex**, **Claude Code**, and other harnesses through adapters. Standing advice belongs in the user's AGENTS.md or CLAUDE.md, not a prompt-time note.
 
 The decision model is TypeSafe's hosted [Jev](https://typesafe.ai), GPT-6 Luna through OpenAI's Decisions API, or any Jev-compatible server such as a self-hosted [Laya](https://github.com/NandhaKishorM/laya) (with caveats, [below](#laya-self-hosted)).
 
@@ -29,28 +29,25 @@ Some lesson questions now have exact code rules: destructive git commands, em da
 
 ## What it does
 
-Jevis works at four moments in a session.
+Jevis keeps session state, checks tool calls, records results, and optionally reviews finished work.
 
 | Moment | Hook | What Jevis can do |
 |---|---|---|
-| You send a message | `UserPromptSubmit` | Add a short lesson to the agent's context: "a narrow ask gets a narrow change", "brief before the first edit", "the two default landing pages". |
-| The agent is about to run a command or edit a file | `PreToolUse` | Refuse it with a reason ("this adds gradient-filled headline text"), or add a note. |
+| You send a message | `UserPromptSubmit` | Bookkeeping only: remember the request, earlier requests, model and turn; no lesson injection or decision-model call. An outage warning may still appear. |
+| The agent is about to run a command or edit a file | `PreToolUse` | Apply code rules and hard guards; deny slop on file-edit tools only, never Bash. Retained tool advisories can add a note. |
 | A tool finishes | `PostToolUse` | Record bounded, redacted completion facts and exit codes locally, without a model call or block. Claude failures use `PostToolUseFailure`. |
-| The agent is about to end its turn | `Stop` | Send it back: "you said it's deployed, but nothing after the deploy checked the live function". |
+| The agent is about to end its turn | `Stop` | Run only entries with a code `decide` rule (none shipped); model-judged Stop lessons are retired. With the critic off, the shipped wiki makes no decision-model calls at Stop. |
 | The agent reports visual work done | `Stop` | Render the page (1440 and 390 px) or sample the film, and have Claude or Codex review it as a director who didn't make it. It can send the work back at most twice. |
 
-Nearly everything Jevis knows lives in the `wiki/`: 97 lessons, one per file, each with the yes/no question that decides when it applies. For example:
+The shipped `wiki/` has **36 tool lessons**: 30 slop denials on file edits, 4 safety guards, the visible-window/sound guard, and the weakened-tests advisory. Exact code rules settle supported cases; ambiguous inputs and permission exceptions may still need the decision model.
 
-- Refuse edits that add the telltales of generated design: gradient text, emoji icons, glass cards, glow blobs, fake testimonials, and 25 more.
-- Stop "done, tests pass" on a deploy nobody checked live.
-- Point out that a vague request left the actual decision open.
-- Keep a narrow request narrow.
-- Hold a film to a story a stranger can follow.
-- Refuse `git reset --hard` or a visible browser window nobody asked for.
+The 61 retired v1 lessons (38 prompt, 15 Stop, 8 tool notes) live in `archive/wiki-v1/` and are not loaded. Put standing lessons worth keeping in your AGENTS.md or CLAUDE.md.
 
 Jevis always fails open. With no key, a timeout, an error, or the decision model down, the agent carries on as if Jevis weren't there.
 
 ## Results
+
+These are v1 simulated-eval results. The one-month real-use audit did not reproduce a net benefit for prompt notes or model-judged Stop blocks; both were retired in v2.
 
 All numbers come from simulated sessions on Sep 27–28 2026 (`eval/sim.mjs`). Each task ran twice, once bare and once with Jevis, in both Codex (GPT-6 Sol) and Claude Code (Claude Opus 5.5). A simulated user wrote follow-ups, a blind judge compared each pair, and hidden checks the agent never saw tested the result. There were 9 tasks: 3 web pages and 6 engineering tasks (fix a rounding bug, add a flag, convert callbacks to async/await, extend a CLI, clean up a repo, answer "why are the tests slow?").
 
@@ -92,10 +89,10 @@ More detail, and how to rerun everything, is in [Evaluating it yourself](#evalua
 Read these before you install.
 
 - **It takes longer, mostly on design.** A median 1.56× the bare agent's time: 2.2 to 2.6× on design and 1.3× on engineering. That time is the agent checking and revising, not Jevis processing (see [Where the extra time goes](#results)). If you want speed over polish, install with `--critic off`: that removes the design review and most of the extra time (see [The design review](#the-design-review)).
-- **It can't give a model taste it doesn't have.** Lessons change what an agent does: it plans, checks, narrates, stays in scope. They don't change its instincts. On creative direction, Codex with every lesson we could write was still clearly behind Claude.
+- **It can't give a model taste it doesn't have.** Guards can refuse specific patterns and the critic can request revisions, but neither gives the builder new instincts. The v1 creative-direction tests still left Codex behind Claude.
 - **The shipped wiki is one person's standards.** The lessons were mined from about 660 Codex and 130 Claude Code sessions of one heavy user: their corrections, rejected designs, and false "done"s. Many will fit you, but some are taste. Turn off what isn't yours and add your own in `~/.jevis/wiki/` (see [Making it yours](#making-it-yours)).
 - **The evaluation is small, and there are no public benchmark numbers.** 36 pairs in the confirmation round, one seed of most tasks, one film brief, and a model as the judge. The judge showed a 5–1 lean on pairs where Jevis did nothing, so single-pair results are noise. The aggregate, and the zero hidden-check regressions, are the signal. We haven't run Jevis against popular coding benchmarks such as SWE-bench or Terminal-Bench: that takes time and model usage we haven't had yet. The best test is your own work, so try it in shadow mode first (see [Install](#install)).
-- **Only two model families have their own lessons.** Some lessons fix a habit of Claude models or of GPT models, and target that family. Any other model, such as Gemini, Grok, or an open model, gets both families' lessons: that fits the shared failures, but nobody has measured it.
+- **Family scopes support only Claude and GPT.** The remaining narrowest-delete advisory targets GPT; other shipped lessons are unscoped. Models outside those families receive both scopes when custom lessons use them, but nobody has measured the benefit.
 - **Laya doesn't work out of the box yet.** It serves the same API, but the shipped checkpoints don't separate Jevis's questions. Details in [Laya, self-hosted](#laya-self-hosted).
 - **Two harnesses, used daily on macOS.** Codex and Claude Code. Others need an adapter (see [Other agent harnesses](#other-agent-harnesses)). On Linux and Windows, CI runs the full test suite, installs Jevis into a fresh home, and runs every installed hook through the shells the harnesses use there: `sh` and `bash` on Linux; Git Bash, Windows PowerShell, PowerShell 7, and cmd on Windows. Nobody has run a live Claude Code or Codex session on either yet. Two things work less well on Windows: the design review can't find a running dev server, so it reviews changed HTML files only, and the check that lets read-only commands skip the decision model reads bash, so Codex's PowerShell commands always wait for an answer.
 - **The design review is optional.** It needs Google Chrome and the `claude` or `codex` CLI, and it runs on your own plan with that CLI. Without them, the review is skipped and everything else still works (see [The design review](#the-design-review)).
@@ -339,14 +336,14 @@ The environment wins over the file, so `JEVIS_DISABLE=1` in one terminal still t
 | `JEVIS_JEV_KEY` / `TYPESAFE_API_KEY` | `~/.jevis/secrets/typesafe_api_key` | The bearer key. Optional for a self-hosted server. |
 | `JEVIS_JEV_MODEL` | `jev-1.14.0` on TypeSafe; unset elsewhere | The `model` field sent with each Jev call |
 | `JEVIS_JEV_CHUNK` | 200 on TypeSafe or Luna; 64 on self-hosted Jev | Questions per request; larger sets are split into parallel calls |
-| `JEVIS_TIMEOUT_MS` | 3000 prompt, 1500 tool, 3000 stop | How long a hook waits for the decision model before standing aside |
+| `JEVIS_TIMEOUT_MS` | 1500 tool, 3000 stop (no prompt model call) | How long a hook waits for the decision model before standing aside |
 | `JEVIS_MODE=shadow` | off | Log what would have happened and change nothing |
 | `JEVIS_DISABLE=1` | off | Turn Jevis off (for one session, if set there) |
 | `JEVIS_SCOPE` | everywhere | Folders separated by `:` on macOS/Linux or `;` on Windows; Jevis only acts inside them |
 | `JEVIS_ENABLE` | none | Turn on optional entries: `safety`, `all`, or entry ids. Off by default: force pushes, machine-wide Docker deletes, browser security flags, wide deletes. The harnesses already guard these. |
 | `JEVIS_CRITIC` | `claude` | Who reviews visual work: `claude`, `codex`, or `off`. The installer's `--critic` sets it. |
 | `JEVIS_CRITIC_MODEL` | the CLI's default | The model the critic uses |
-| `JEVIS_DESIGN_LAW` | `~/.jevis/design-law.md`, else `~/.claude/slop.md` or `~/.codex/slop.md`, if present | A Markdown file of your own design rules. When it exists, the agent is told to read it on visual work, and the critic judges against it. |
+| `JEVIS_DESIGN_LAW` | `~/.jevis/design-law.md`, else `~/.claude/slop.md` or `~/.codex/slop.md`, if present | A Markdown file of your own design rules. When it exists, the critic judges against it; add any instruction to read it to your AGENTS.md/CLAUDE.md. |
 | `JEVIS_WIKI` | `./wiki`, then `~/.jevis/wiki`, then a trusted project's `.jevis/wiki` | Lesson folders separated by `:` on macOS/Linux or `;` on Windows, later ones winning. Windows paths must name a drive (`C:/wiki`) or UNC share (`\\server\share`). Replaces all the defaults. |
 | `JEVIS_HOME` | `~/.jevis` | Where sessions, logs, backups, and the key live |
 | `JEVIS_RECORD=off` | on | Keep no record of decision-model calls (`~/.jevis/jev/calls.jsonl`, the training data for a local model) |
@@ -426,24 +423,13 @@ See the [Gemini CLI hooks documentation](https://geminicli.com/docs/hooks/) and 
 
 ## How it works
 
-Each event first sends two sets of yes/no questions to the decision model:
+The prompt hook stores the turn and request history locally. It never evaluates wiki lessons. Post-tool hooks likewise record local completion facts without a model call.
 
-- **Axes:** a fixed profile scored on every event of a kind. For a message, that means: does it want a change? Is it open-ended, visual, code, a new build, risky? Is it a correction, a delegation, or mostly writing?
-- **Entries:** every wiki lesson that could apply to the event contributes its own question.
+Tool checks filter lessons by tool and code facts, then use exact `decide` rules where possible. Only unresolved pattern questions, permission exceptions and needed axes go to the decision model. Model-decided tool entries ask `unless` in a second call after clearing their threshold and conditions; both calls share one timeout budget.
 
-Model-decided lessons ask their `unless` questions in a second call only after clearing their threshold and conditions. Code-decided matches ask `unless` in the first call. Both phases share one timeout budget; a failed exception call stands down only the lessons waiting on it.
+Tool `deny` entries refuse a call with a reason; matching patterns are grouped so the agent can fix them together. Slop denials apply only to file-edit tools, not shell commands. Retained tool `context` notes appear at most once per session, again after compaction.
 
-A lesson fires when three things hold:
-- its answer clears its threshold;
-- its `unless` question, usually "did the user ask for exactly this?", stays low;
-- its conditions on the axes and on plain facts from the session hold. Facts include whether anything was edited and which commands ran after the last edit.
-
-Then:
-- `context` lessons are added once per session, and again after the context is compacted.
-- `deny` lessons refuse a tool call with the lesson as the reason. Every pattern an edit adds goes back in one reason, so the agent fixes them all in one retry.
-- `block` lessons send the turn back, at most twice per turn.
-
-Two rules keep the cost down. Jevis never blocks the same way twice in a turn, and a review round tells the agent what to check so it doesn't redo a full sweep.
+Stop filters out every entry without `decide`. Code-decided blocks retain the two-distinct-lessons-per-turn cap and never block the same entry twice in a turn; no Stop entries ship in v2. Stop axes are requested only when the optional critic is enabled, has rounds left, and there are edits to review. With the shipped wiki and critic off, Stop makes no decision-model calls.
 
 Code settles what it can before the decision model is asked. An entry whose facts already fail is left out of the call. A shell command that provably only reads (`ls`, `rg`, `sed -n 1,80p`, `git log`, `gh pr view`, with no redirect, substitution, or credential in sight) skips the call entirely, because every lesson about commands gates on `marks.plain_read: false`. In the maintainer's log, 42% of commands were plain reads. Each had waited about half a second for an answer, and none of those answers ever fired.
 
@@ -456,7 +442,7 @@ The design and film review runs when a turn of visual work passes the stop check
 ```md
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 ask: Does `input` write user-interface code that fills text with a gradient (background-clip: text or -webkit-background-clip: text with a gradient, Tailwind bg-clip-text with text-transparent)?
 yes: A heading, word, or number is painted with a gradient through background-clip text
 no: Solid-colored text, or a gradient used on a non-text background. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; ...
@@ -491,9 +477,9 @@ node bin/jevis.mjs trust ~/code/app            # lists what the lessons add, rep
 node bin/jevis.mjs trust --remove ~/code/app   # stop loading them
 ```
 
-A cloned repository could otherwise slip text into your agent's context or switch off a refusal, so trust is pinned to the files' contents: after a pull or an edit changes any of them (even only their line endings), they stop loading until you trust them again. Until you trust a folder, Jevis doesn't read it at all, and it never follows a symlink out of one. A project's lessons can turn off or replace any shipped lesson except the safety ones (force pushes, machine-wide deletes, borrowed credentials); that stays your call, in `~/.jevis/wiki/`. Run `lint` inside the repository to check its lessons before you trust them. `doctor` tells you when the folder you're in has lessons you haven't trusted.
+A cloned repository could otherwise slip text into your agent's context or switch off a refusal, so trust is pinned to the files' contents: after a pull or an edit changes any of them (even only their line endings), they stop loading until you trust them again. Until you trust a folder, Jevis doesn't read it at all, and it never follows a symlink out of one. A project's lessons can turn off or replace any shipped lesson except the safety ones (force pushes, machine-wide deletes); that stays your call, in `~/.jevis/wiki/`. Run `lint` inside the repository to check its lessons before you trust them. `doctor` tells you when the folder you're in has lessons you haven't trusted.
 
-For a style guide of your own, too long and too nuanced for yes/no questions, write it as Markdown in `~/.jevis/design-law.md`. Agents are then told to read it before visual work, and the design review judges against it.
+For a style guide of your own, too long and too nuanced for yes/no questions, write it as Markdown in `~/.jevis/design-law.md`. The design review judges against it. Put an instruction to read it before visual work in your AGENTS.md/CLAUDE.md.
 
 **Or let your agent do it.** `skills/jevis/SKILL.md` teaches any coding agent how to change Jevis. It covers which kind of entry, file, or setting produces which behavior, how to write a question the decision model answers well, and how to prove the change with dry runs before calling it done. Point your agent at it with the change you want:
 
@@ -511,7 +497,7 @@ ln -s ~/code/jevis/skills/jevis ~/.codex/skills/jevis
 
 The best lessons come from your own sessions:
 
-- `node bin/jevis.mjs mine` lists the turns where you corrected the agent, each with what you asked, what it answered, what you said next, and what Jevis did that turn. A habit that repeats across sessions is a lesson, and the skill above turns one into an entry.
+- `node bin/jevis.mjs mine` finds corrections in historical records that include correction-axis scores. V2 prompt bookkeeping does not produce those scores; put recurring standing advice in AGENTS.md/CLAUDE.md.
 - `node bin/jevis.mjs stats --near` scores each lesson against every recorded answer to its current question. It shows how often the lesson would fire under today's rules, how often it came within 0.1 of its threshold, and how often `unless` or a condition stood it down. Set `min` from that rather than a guess.
 - `node bin/jevis.mjs replay <session file>` dry-runs a recorded Codex or Claude Code session through the current wiki, which shows what would have fired.
 

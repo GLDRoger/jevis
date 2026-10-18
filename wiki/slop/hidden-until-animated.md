@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` make visible content start hidden (opacity 0, visibility hidden, or translated off screen) and rely on JavaScript, an IntersectionObserver, a scroll timeline, or an animation library to reveal it?
 yes: Sections, headings, text, or controls with opacity: 0 or class="opacity-0" until a class is added on scroll, animation-timeline: view() reveals, or Framer or motion initial={{ opacity: 0 }} on content

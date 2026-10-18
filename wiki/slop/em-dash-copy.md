@@ -1,7 +1,7 @@
 ---
 event: tool
 decide: em_dash_copy
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 ask: Does `input` write visible interface copy (headings, paragraphs, buttons, labels, alt text, or page content) that contains an em dash (—)?
 yes: An em dash character inside user-facing text in markup, JSX, a copy or i18n file, or content data
 no: Em dashes only in code comments, commit messages, or documentation for developers, text the user supplied, or a lone dash standing for an empty value in a table or data display. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.

@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write button styles that give a fully rounded pill button a gradient fill, a colored glow, or a soft blurred shadow beneath it?
 yes: rounded-full buttons with bg-gradient-to-r fills, box-shadow glows in the button's color (shadow-lg shadow-purple-500/50, 0 10px 30px rgba(accent)), or a blurred bloom under the button

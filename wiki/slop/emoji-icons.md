@@ -1,7 +1,7 @@
 ---
 event: tool
 decide: emoji_icons
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write user-interface markup or copy that uses emoji as icons, bullets, section markers, or decoration in headings, buttons, lists, or feature blocks?
 yes: Emoji such as 🚀 ✨ ⚡ 💡 🎯 ✅ 🔥 📈 🛡️ placed as icons or ornaments in a page, app, or component

@@ -13,7 +13,7 @@ process.env.JEVIS_HOME = join(base, ".jevis");
 for (const k of ["JEVIS_WIKI", "JEVIS_MODE", "JEVIS_SCOPE", "JEVIS_DISABLE", "JEVIS_ENABLE"]) delete process.env[k];
 const { setJevTransport } = await import("../src/jev.mjs");
 const { loadWiki, projectLessons, projectStatus, projectWiki, setTrust, wikiDigest, wikiFor, wikiRoots, WIKI_ROOT } = await import("../src/wiki.mjs");
-const { onPrompt } = await import("../src/hooks.mjs");
+const { onPrompt, onTool } = await import("../src/hooks.mjs");
 
 const repo = join(base, "repo");
 const lessons = join(repo, ".jevis", "wiki");
@@ -21,7 +21,7 @@ const put = (id, text) => {
   mkdirSync(join(lessons, id, ".."), { recursive: true });
   writeFileSync(join(lessons, `${id}.md`), text);
 };
-const TEAM = "---\nevent: prompt\nask: Does `request` ask to change the billing code?\naction: context\ntitle: Billing changes need a second reviewer\nsource: team rule\n---\nAsk for a second reviewer on billing changes.\n";
+const TEAM = "---\nevent: tool\ntools: [Edit]\nask: Does `input` change the billing code?\naction: context\ntitle: Billing changes need a second reviewer\nsource: team rule\n---\nAsk for a second reviewer on billing changes.\n";
 put("team/billing", TEAM);
 put("slop/marquee", "---\noff: true\n---\n");
 put("safety/force-push", "---\noff: true\n---\n");
@@ -105,13 +105,17 @@ test("project lessons: a hostile repository can neither stall a hook nor get aro
   assert.ok(wikiFor(join(repo, "src")).entries.length > 0);
 });
 
-test("project lessons: a hook in a trusted repo gives the project's note", async () => {
+test("project lessons: a hook in a trusted repo gives the project's tool note", async () => {
   setTrust(lessons);
   setJevTransport(async (body) => ({ answers: Object.fromEntries(Object.keys(body.questions).map((k) => [k, { type: "noul", noul: k === "team/billing" ? 0.95 : 0.02 }])) }));
   const out = await onPrompt({ session_id: "p1", cwd: join(repo, "src"), prompt: "change the invoice rounding in billing.ts" });
-  assert.match(out?.hookSpecificOutput?.additionalContext ?? "", /Billing changes need a second reviewer/);
+  assert.equal(out, null, "prompts do bookkeeping only, even with trusted project lessons");
+  const edit = { tool_name: "Edit", tool_input: { file_path: "billing.ts", old_string: "x", new_string: "y" } };
+  const note = await onTool({ session_id: "p1", cwd: join(repo, "src"), ...edit });
+  assert.match(note?.hookSpecificOutput?.additionalContext ?? "", /Billing changes need a second reviewer/);
   const elsewhere = await onPrompt({ session_id: "p2", cwd: base, prompt: "change the invoice rounding in billing.ts" });
-  assert.equal(elsewhere, null, "outside the repo the project's lessons do not apply");
+  assert.equal(elsewhere, null);
+  assert.equal(await onTool({ session_id: "p2", cwd: base, ...edit }), null, "outside the repo the project's lessons do not apply");
 });
 
 test("project lessons: wide trees charge folders and non-Markdown entries, and hashing and loading share one bounded walk", { timeout: 10_000 }, (t) => {

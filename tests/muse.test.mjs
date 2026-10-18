@@ -41,7 +41,7 @@ delete process.env.JEVIS_MODE;
 delete process.env.JEVIS_SCOPE;
 delete process.env.JEVIS_DISABLE;
 const { onTool, onStop, HOOK_ITEM_CLIP } = await import("../src/hooks.mjs");
-const { loadSession, saveSession } = await import("../src/state.mjs");
+const { loadSession, saveSession, readLog } = await import("../src/state.mjs");
 const { setJevTransport } = await import("../src/jev.mjs");
 
 const scripted = (score = 0.05, capture = () => {}) => setJevTransport(async (body) => {
@@ -72,11 +72,14 @@ test("muse hook: denied writes never become Stop edit evidence; allowed and shad
   const result = await onTool({ ...base, session_id, tool_name: "write_file", tool_input: { path: "src/Denied.html", content: "<p>One — two</p>" } });
   assert.equal(result.hookSpecificOutput.permissionDecision, "deny");
   assert.deepEqual(loadSession(session_id).hookItems ?? [], []);
-  let stopState;
-  scripted(0.05, (body) => { stopState = body.state; });
+  let stopCalls = 0;
+  scripted(0.05, () => { stopCalls += 1; });
   await onStop({ ...base, cwd: process.env.JEVIS_HOME, session_id, last_assistant_message: "Done." });
-  assert.equal(stopState.evidence.edited, false);
-  assert.deepEqual(stopState.evidence.files_changed, []);
+  assert.equal(stopCalls, 0);
+  const stop = readLog().filter((r) => r.event === "stop" && r.sessionId === session_id).at(-1);
+  assert.equal(stop.evidence.edited, false);
+  assert.equal(stop.evidence.files, 0);
+  assert.deepEqual(turnEvidence(loadSession(session_id).hookItems ?? []).files_changed, []);
 
   await onTool({ ...base, session_id, tool_name: "write_file", tool_input: { path: "src/Allowed.html", content: "<p>Ready</p>" } });
   assert.deepEqual(turnEvidence(loadSession(session_id).hookItems).files_changed, ["src/Allowed.html"]);

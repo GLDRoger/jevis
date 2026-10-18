@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write visible interface copy (headings, taglines, buttons) built on generic hype words: unlock, elevate, supercharge, seamless, effortless, empower, revolutionize, transform your, next-generation, game-changing, or 'the future of'?
 yes: Headlines or buttons such as 'Unlock the power of your data', 'Elevate your workflow', 'Seamless integration', 'Supercharge your team'

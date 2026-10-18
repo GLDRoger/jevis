@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write page sections the request did not mention that come from the stock landing-page template: pricing tiers with a 'Most popular' badge, an FAQ accordion, a newsletter signup, or a closing 'Ready to get started?' banner?
 yes: Added pricing cards, FAQ accordions, newsletter boxes, or final call-to-action banners that the user did not ask for

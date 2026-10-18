@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` load or set, as a page's display, heading, brand, or main typeface, one of the default Google fonts: Inter, Space Grotesk, Sora, Syne, Archivo, Onest, Hanken Grotesk, Figtree, Gabarito, Manrope, DM Sans, Work Sans, Fraunces, Cormorant, Playfair Display, Bodoni Moda, Young Serif, Instrument Serif, Newsreader, Bricolage Grotesque, Big Shoulders, JetBrains Mono, IBM Plex Mono, Fragment Mono, or Space Mono?
 yes: A Google Fonts link, @import, next/font/google import, or font-family declaration that makes one of these the face for headings, the wordmark, or the whole page

@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { hookCommand, jevisHooks, windowsShortPath, word } from "../bin/install.mjs";
 import { absolutePaths } from "../src/config.mjs";
 import { hookCheck, wikiChecks } from "../src/doctor.mjs";
@@ -29,13 +29,15 @@ test("Stop save failure fails open before returning a block", () => {
   const sessions = join(env.JEVIS_HOME, "sessions");
   // A directory at the target prevents replacement on every platform, without relying on POSIX modes.
   mkdirSync(join(sessions, "cannot-save.json"), { recursive: true });
-  const wiki = join(home, "wiki");
-  mkdirSync(wiki);
-  writeFileSync(join(wiki, "stop.md"), "---\nevent: stop\nask: Does `final_message` say done?\naction: block\ntitle: Check before done\nsource: test\n---\nVerify the result.\n");
-  const preload = join(home, "transport.mjs");
-  writeFileSync(preload, `import { setJevTransport } from ${JSON.stringify(new URL("../src/jev.mjs", import.meta.url).href)};\nsetJevTransport(async body => ({ answers: Object.fromEntries(Object.keys(body.questions).map(key => [key, { type: "noul", noul: 0.99 }])) }));\n`);
-  const input = JSON.stringify({ session_id: "cannot-save", cwd: home, last_assistant_message: "Done." });
-  const result = spawnSync(process.execPath, ["--import", pathToFileURL(preload).href, join(root, "bin", "jevis.mjs"), "hook", "stop"], { env: { ...env, JEVIS_WIKI: wiki }, input, encoding: "utf8", timeout: 10000 });
+  // Inject a fired list: no production code rule describes Stop state.
+  const runner = join(home, "stop.mjs");
+  writeFileSync(runner, `import { setStopFired, stopHooks } from ${JSON.stringify(new URL("./helpers/stop-fixture.mjs", import.meta.url).href)};
+setStopFired([{ id: "stop", action: "block", title: "Check before done", body: "Verify the result." }]);
+const { onStop } = await stopHooks;
+const output = await onStop({ session_id: "cannot-save", cwd: ${JSON.stringify(home)}, last_assistant_message: "Done." });
+if (output) process.stdout.write(JSON.stringify(output));
+`);
+  const result = spawnSync(process.execPath, [runner], { env, encoding: "utf8", timeout: 10000 });
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0);
   assert.equal(result.stdout, "", "the unpersisted block must never reach the harness");

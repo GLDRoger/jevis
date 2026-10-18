@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write user-interface markup that lays out a row or grid of three or more look-alike cards, each with an icon, a short title, and a one-line blurb, to list features, benefits, or values?
 yes: A features, benefits, or 'why us' section built as identical icon + title + sentence cards in a 3, 4, or 6 column grid

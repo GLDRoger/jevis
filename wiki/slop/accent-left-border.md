@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write user-interface styles that give cards, callouts, list items, or quotes a single thick colored accent bar along one edge (left, right, top, or bottom), as a colored border on that side or an inset shadow?
 yes: border-left or border-top 3px or more in an accent color, Tailwind border-l-4 or border-t-4 with a color, or box-shadow: inset 4px 0 0 <color> on cards, notes, alerts, stat boxes, or selected items

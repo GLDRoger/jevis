@@ -1,6 +1,6 @@
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
+tools: [Write, Edit, MultiEdit, apply_patch]
 when: { marks.plain_read: false, marks.writes_file: true }
 ask: Does `input` write user-interface markup or styles that label sections with zero-padded numbers (01, 02, 03) or with small uppercase letter-spaced monospace labels above headings?
 yes: Labels like '01 / Features', '— 02', section counters, or mono text-xs uppercase tracking-widest eyebrows on several headings
