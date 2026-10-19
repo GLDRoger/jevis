@@ -9,15 +9,12 @@ import { gunzipSync } from "node:zlib";
 process.env.JEVIS_HOME = mkdtempSync(join(tmpdir(), "jevis-records-"));
 const wikiDir = mkdtempSync(join(tmpdir(), "jevis-records-wiki-"));
 process.env.JEVIS_WIKI = wikiDir;
-for (const k of ["JEVIS_RECORD", "JEVIS_ENABLE", "JEVIS_MODE"]) delete process.env[k];
+for (const k of ["JEVIS_RECORD", "JEVIS_MODE"]) delete process.env[k];
 const { setJevTransport } = await import("../src/jev.mjs");
 const { evaluate } = await import("../src/engine.mjs");
 const { loadWiki } = await import("../src/wiki.mjs");
 const { log } = await import("../src/state.mjs");
 const { tune, formatTune, sinceTime } = await import("../src/tune.mjs");
-const { mine, formatMine } = await import("../src/mine.mjs");
-const { clip } = await import("../src/context.mjs");
-const { onPrompt } = await import("../src/hooks.mjs");
 const { exportDataset, formatExport, goldOf, pickTest } = await import("../src/export.mjs");
 
 const put = (id, text) => {
@@ -26,7 +23,7 @@ const put = (id, text) => {
 };
 const PAGE = (ask) => `---\nevent: prompt\nask: ${ask}\naction: context\ntitle: Pages\nsource: test\nmin: 0.75\n---\nBody.\n`;
 put("t/page", PAGE("Does `request` ask for a page?"));
-put("t/push", "---\nevent: tool\ntools: [Bash]\nask: Does `input` force push?\nunless: Did `request` ask to force push?\naction: deny\ntitle: Force push\nsource: test\nmin: 0.8\nwhen: { marks.plain_read: false }\n---\nBody.\n");
+put("t/push", "---\nevent: tool\ntools: [Bash]\nask: Does `input` force push?\nunless: Did `request` ask to force push?\naction: context\ntitle: Force push\nsource: test\nmin: 0.8\nwhen: { marks.plain_read: false }\n---\nBody.\n");
 
 setJevTransport(async ({ state, questions }) => {
   const text = `${state.request ?? ""} ${state.input ?? ""}`;
@@ -82,10 +79,19 @@ await tool("s2", "fix the bug", "ls -la");
 test("stats --near: each entry's fires, near misses, and stand-downs under today's rules", () => {
   const { records, entries } = tune(loadWiki().entries);
   const by = Object.fromEntries(entries.map((e) => [e.id, e]));
-  assert.equal(records, 7, "4 prompts and 3 tool calls: the plain read asked nothing, and no entry is about stops");
+  assert.equal(records, 10, "4 prompts and 3 two-phase tool evaluations: plain reads and stops do not count");
   assert.deepEqual({ asked: by["t/page"].asked, fires: by["t/page"].fires, near: by["t/page"].near, max: by["t/page"].max }, { asked: 4, fires: 1, near: 1, max: 0.9 });
-  assert.deepEqual({ asked: by["t/push"].asked, fires: by["t/push"].fires, stoodDown: by["t/push"].stoodDown }, { asked: 3, fires: 1, stoodDown: 2 }, "the user's own request stood the deny down twice");
-  assert.match(formatTune({ records, entries }), /t\/push\s+3\s+1\s+0\s+2\s+0\.95/);
+  assert.deepEqual({ asked: by["t/push"].asked, fires: by["t/push"].fires, stoodDown: by["t/push"].stoodDown, stale: by["t/push"].stale }, { asked: 0, fires: 0, stoodDown: 0, stale: 3 }, "split exception records are safely excluded, not joined for calibration");
+  // Historical co-located answers must still calibrate fires and stand-downs.
+  const legacy = mkdtempSync(join(tmpdir(), "jevis-legacy-tune-"));
+  const e = loadWiki().entries.find((e) => e.id === "t/push");
+  writeFileSync(join(legacy, "v1.json"), JSON.stringify({ [e.id]: { type: "noul", instructions: e.ask }, [`${e.id}#unless`]: { type: "noul", instructions: e.unless } }));
+  const legacyFile = join(legacy, "calls.jsonl");
+  writeFileSync(legacyFile, [0.1, 0.9, 0.9].map((u) => JSON.stringify({ event: "tool", version: "v1", state: { tool: "Bash", input: "git push -f origin main" }, answers: { [e.id]: 0.95, [`${e.id}#unless`]: u } })).join("\n") + "\n");
+  const historical = tune([e], { file: legacyFile, questionsDir: legacy });
+  const row = historical.entries[0];
+  assert.deepEqual({ asked: row.asked, fires: row.fires, stoodDown: row.stoodDown }, { asked: 3, fires: 1, stoodDown: 2 }, "the user's own request stood the note down twice");
+  assert.match(formatTune(historical), /t\/push\s+3\s+1\s+0\s+2\s+0\.95/);
 
   put("t/page", PAGE("Does `request` ask for a web page?"));
   const reworded = tune(loadWiki().entries).entries.find((e) => e.id === "t/page");
@@ -97,145 +103,23 @@ test("stats --near: each entry's fires, near misses, and stand-downs under today
 });
 
 test("stats --near: judged as the engine would today, not as the record says", () => {
-  // One hand-written record: an old classifier's marks, a reworded unless, and an optional entry.
+  // One hand-written record: an old classifier's marks, a reworded unless.
   const home = mkdtempSync(join(tmpdir(), "jevis-records-raw-"));
   const qdir = join(home, "questions");
   mkdirSync(qdir);
-  const entry = (id, extra = {}) => ({ id, event: "tool", action: "deny", min: 0.8, unless_max: 0.5, ask: `Does \`input\` do ${id}?`, when: { "marks.plain_read": false }, tools: ["Bash"], ...extra });
+  const entry = (id, extra = {}) => ({ id, event: "tool", action: "context", min: 0.8, unless_max: 0.5, ask: `Does \`input\` do ${id}?`, when: { "marks.plain_read": false }, tools: ["Bash"], ...extra });
   const gated = entry("t/gated");
   const reworded = entry("t/reworded", { unless: "Did `request` ask for it, in so many words?" });
-  const optional = entry("t/optional", { optional: true });
   const plain = entry("t/plain", { when: undefined });
   const q = (e) => ({ type: "noul", instructions: e.ask });
-  writeFileSync(join(qdir, "v1.json"), JSON.stringify({ "t/gated": q(gated), "t/reworded": q(reworded), "t/reworded#unless": { type: "noul", instructions: "Did `request` ask for it?" }, "t/optional": q(optional), "t/plain": q(plain) }));
-  const record = (input) => JSON.stringify({ at: "2026-09-29T10:00:00Z", event: "tool", version: "v1", sessionId: "r", state: { request: "x", tool: "Bash", input, marks: { plain_read: false, ran_before: false } }, answers: { "t/gated": 0.9, "t/reworded": 0.9, "t/reworded#unless": 0.1, "t/optional": 0.9, "t/plain": 0.9 } });
+  writeFileSync(join(qdir, "v1.json"), JSON.stringify({ "t/gated": q(gated), "t/reworded": q(reworded), "t/reworded#unless": { type: "noul", instructions: "Did `request` ask for it?" }, "t/plain": q(plain) }));
+  const record = (input) => JSON.stringify({ at: "2026-09-29T10:00:00Z", event: "tool", version: "v1", sessionId: "r", state: { request: "x", tool: "Bash", input, marks: { plain_read: false, ran_before: false } }, answers: { "t/gated": 0.9, "t/reworded": 0.9, "t/reworded#unless": 0.1, "t/plain": 0.9 } });
   writeFileSync(join(home, "calls.jsonl"), `${record("ls -la")}\n${record("git push -f")}\n`);
-  const r = tune([gated, reworded, optional, plain], { file: join(home, "calls.jsonl"), questionsDir: qdir });
+  const r = tune([gated, reworded, plain], { file: join(home, "calls.jsonl"), questionsDir: qdir });
   const by = Object.fromEntries(r.entries.map((e) => [e.id, e]));
   assert.equal(by["t/gated"].asked, 1, "today's classifier calls ls a plain read, whatever the record's marks say");
   assert.equal(by["t/plain"].asked, 2);
   assert.deepEqual({ asked: by["t/reworded"].asked, stale: by["t/reworded"].stale }, { asked: 0, stale: 1 }, "a reworded unless makes the answer stale, not a stand-down");
-  assert.equal(by["t/optional"], undefined, "an optional entry that is off cannot fire");
-  assert.deepEqual(r.off, ["t/optional"]);
-});
-
-test("mine: a person's correction, with the request and answer it corrects and what Jevis did that turn", () => {
-  const r = mine();
-  assert.equal(r.source, "calls");
-  assert.equal(r.corrections.length, 1, "an agent's correction is left out, and a session's first prompt has nothing to correct");
-  const c = r.corrections[0];
-  assert.equal(c.before, "make a page for the bakery");
-  assert.equal(c.final, "Here is the page, with a gradient hero.");
-  assert.equal(c.request, "that's wrong, the header is missing");
-  assert.deepEqual(c.jevis, ["noted t/page"]);
-  const md = formatMine(r);
-  assert.match(md, /\*\*Then:\*\* that's wrong, the header is missing/);
-  assert.match(md, /skills\/jevis\/SKILL\.md/);
-  assert.equal(mine({ agents: true }).corrections.length, 1, "s3's only prompt still has no earlier turn to correct");
-  assert.equal(mine({ min: 0.95 }).corrections.length, 0);
-
-  // With JEVIS_RECORD=off there is no call record: the decision log's excerpts stand in.
-  const home = mkdtempSync(join(tmpdir(), "jevis-records-log-"));
-  const row = (at, r) => JSON.stringify({ at: `2026-09-29T10:0${at}:00.000Z`, sessionId: "L", ...r });
-  writeFileSync(join(home, "log.jsonl"), [row(1, { event: "prompt", request: "make a chart", profile: { correction: 0.1 } }), row(2, { event: "stop", final: "Done: chart.png" }), row(3, { event: "prompt", request: "no, the axis is wrong", profile: { correction: 0.8 } })].join("\n") + "\n");
-  const fallback = mine({ home });
-  assert.equal(fallback.source, "log");
-  assert.deepEqual(fallback.corrections.map((x) => [x.before, x.final, x.request]), [["make a chart", "Done: chart.png", "no, the axis is wrong"]]);
-  assert.match(formatMine(fallback), /cut to 200 characters/);
-  // A correction just after --since still gets the request and answer just before it.
-  assert.equal(mine({ home, since: Date.parse("2026-09-29T10:02:30.000Z") }).corrections[0].before, "make a chart");
-  assert.equal(mine({ since: Date.now() + 1000 }).corrections.length, 0);
-});
-
-test("mine: recording turned off keeps later log-only corrections and marks their excerpts", async () => {
-  const savedHome = process.env.JEVIS_HOME;
-  const savedRecord = process.env.JEVIS_RECORD;
-  const home = mkdtempSync(join(tmpdir(), "jevis-mine-off-"));
-  process.env.JEVIS_HOME = home;
-  delete process.env.JEVIS_RECORD;
-  const sessionId = "transition";
-  const request = `make a page ${"with bread ".repeat(30)}`;
-  const correction = `wrong header ${"needs a title ".repeat(30)}`;
-  const later = `wrong footer ${"needs an address ".repeat(30)}`;
-  const final = `Here is the page ${"with a heading ".repeat(30)}`;
-  const unrecordedFinal = `Here is the header ${"with the title ".repeat(30)}`;
-  const loggedPrompt = async (text) => {
-    const r = await evaluate({ event: "prompt", sessionId, harness: "Codex", wiki: loadWiki(), state: { request: text, agent: { origin: "person" } } });
-    log({ event: "prompt", sessionId, harness: "Codex", request: clip(text, 200), profile: r.profile, origin: "person" });
-    await tick();
-  };
-  const loggedStop = async (text) => {
-    await evaluate({ event: "stop", sessionId, harness: "Codex", wiki: loadWiki(), state: { final_message: text } });
-    log({ event: "stop", sessionId, harness: "Codex", final: clip(text, 200) });
-    await tick();
-  };
-  try {
-    await loggedPrompt(request);
-    await loggedStop(final);
-    await loggedPrompt(correction);
-    process.env.JEVIS_RECORD = "off";
-    await loggedStop(unrecordedFinal);
-    await loggedPrompt(later);
-    const r = mine({ home });
-    assert.equal(r.source, "mixed");
-    assert.equal(r.total, 2, "the recorded correction is not duplicated by its log row");
-    assert.deepEqual(r.corrections.map((c) => [c.before, c.final, c.request, c.source]), [
-      [request, final, correction, "calls"],
-      [correction, clip(unrecordedFinal, 200), clip(later, 200), "log"],
-    ]);
-    assert.deepEqual(r.corrections[1].excerpts, ["then", "agent answered"]);
-    assert.match(formatMine(r), /Decision-log excerpts, cut to 200 characters: then, agent answered/);
-    assert.equal(mine({ home, limit: 1 }).corrections[0].request, clip(later, 200));
-    assert.equal(mine({ home, since: Date.parse(r.corrections[1].at) }).total, 1);
-    assert.equal(mine({ home, min: 0.95 }).total, 0);
-    await onPrompt({ session_id: sessionId, cwd: wikiDir, model: "gpt-6", prompt: "[agent] wrong again" });
-    const logRows = readFileSync(join(home, "log.jsonl"), "utf8").trim().split("\n").map((row) => JSON.parse(row));
-    assert.equal(logRows.at(-1).origin, "agent", "log-only turns retain the origin needed by --agents");
-    assert.equal(mine({ home }).total, 2);
-    assert.equal(mine({ home, agents: true }).total, 3);
-  } finally {
-    process.env.JEVIS_HOME = savedHome;
-    if (savedRecord === undefined) delete process.env.JEVIS_RECORD;
-    else process.env.JEVIS_RECORD = savedRecord;
-  }
-});
-
-test("mine: mixed sessions join calls by time, preserve gap context, and filter and limit both sources", () => {
-  const home = mkdtempSync(join(tmpdir(), "jevis-mine-mixed-"));
-  mkdirSync(join(home, "jev"));
-  const at = (ms) => new Date(Date.parse("2026-09-29T10:00:00Z") + ms).toISOString();
-  const full = `wrong ${"x".repeat(250)}`;
-  const call = (ms, event, text, correction = 0.1, origin = "person", duration = 0) => ({ at: at(ms), sessionId: "a", event, ms: duration, harness: "Codex", state: event === "prompt" ? { request: text, agent: { origin } } : { final_message: text }, answers: { "axis.correction": correction } });
-  const logRow = (ms, event, text, correction = 0.1, sessionId = "a") => ({ at: at(ms), sessionId, event, harness: "Codex", ...(event === "prompt" ? { request: text, profile: { correction } } : { final: text }) });
-  const writeRows = (file, rows) => writeFileSync(file, rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
-  writeRows(join(home, "jev", "calls.jsonl"), [
-    call(0, "prompt", "build a chart"),
-    call(6000, "stop", "full chart answer", 0, "person", 2000),
-    call(10000, "prompt", full, 0.9, "person", 1200),
-    call(13100, "prompt", "agent correction", 0.99, "agent"),
-    call(16000, "prompt", "person correction", 0.99),
-  ]);
-  writeRows(join(home, "log.jsonl"), [
-    logRow(5, "prompt", "build a chart"),
-    logRow(500, "prompt", "build a table", 0.1, "b"),
-    logRow(8005, "stop", "short chart answer"),
-    logRow(11201, "prompt", full.slice(0, 200), 0.9),
-    logRow(12000, "stop", "log-only answer"),
-    logRow(13000, "prompt", "gap correction", 0.7),
-    logRow(13105, "prompt", "agent correction", 0.99),
-    logRow(15000, "prompt", "wrong table", 0.85, "b"),
-  ]);
-  const r = mine({ home });
-  assert.equal(r.total, 4);
-  assert.deepEqual(r.corrections.map((c) => c.request), [full, "gap correction", "wrong table", "person correction"]);
-  assert.equal(r.corrections[0].final, "full chart answer", "the slower stop call wins over the shorter log text");
-  assert.deepEqual([r.corrections[1].before, r.corrections[1].final], [full, "log-only answer"]);
-  assert.equal(r.corrections[3].before, "agent correction", "excluded agent corrections still provide the preceding context");
-  assert.equal(mine({ home, agents: true }).total, 5, "a matched agent log row cannot sneak past --agents");
-  assert.equal(mine({ home, since: Date.parse(at(12000)) }).total, 3);
-  assert.deepEqual(mine({ home, min: 0.95 }).corrections.map((c) => c.request), ["person correction"]);
-  assert.deepEqual(mine({ home, limit: 2 }).corrections.map((c) => c.request), ["wrong table", "person correction"]);
-  assert.equal(mine({ home, limit: 0 }).corrections.length, 0);
 });
 
 test("export: rows in Laya's format, split by whole sessions, repeats dropped, files private", () => {
@@ -246,17 +130,19 @@ test("export: rows in Laya's format, split by whole sessions, repeats dropped, f
 
   const out = join(mkdtempSync(join(tmpdir(), "jevis-export-")), "ds");
   const r = exportDataset({ out, testShare: 0.5 });
-  assert.equal(r.duplicates, 1, "the repeated push call is one row");
-  assert.equal(r.train + r.test, 7, "4 prompts, 1 stop, and 2 distinct tool calls");
+  assert.equal(r.duplicates, 2, "both phases of the repeated push evaluation are deduplicated");
+  assert.equal(r.train + r.test, 9, "4 prompts, 1 stop, and 2 distinct two-phase tool evaluations");
   assert.ok(r.train > 0 && r.test > 0);
   const rows = (split) => gunzipSync(readFileSync(r.files[split])).toString().trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
   const bySession = {};
+  const toolQuestions = [];
   for (const split of ["train", "test"]) {
     if (process.platform !== "win32") assert.equal(statSync(r.files[split]).mode & 0o777, 0o600);
     for (const row of rows(split)) {
       assert.deepEqual(Object.keys(row).sort(), ["gold", "id", "questions", "state", "workflow"]);
       const q = JSON.parse(row.questions);
       const g = JSON.parse(row.gold);
+      if (row.workflow === "jevis/tool") toolQuestions.push(Object.keys(q).sort());
       assert.deepEqual(Object.keys(q).sort(), Object.keys(g).sort());
       assert.ok(Object.values(q).every((x) => x.type === "noul" && x.instructions));
       const state = JSON.parse(row.state);
@@ -264,15 +150,17 @@ test("export: rows in Laya's format, split by whole sessions, repeats dropped, f
       (bySession[s] ??= new Set()).add(split);
     }
   }
+  assert.equal(toolQuestions.filter((keys) => keys.includes("t/push") && !keys.includes("t/push#unless")).length, 2);
+  assert.equal(toolQuestions.filter((keys) => keys.length === 1 && keys[0] === "t/push#unless").length, 2);
   for (const [s, splits] of Object.entries(bySession)) assert.equal(splits.size, 1, `${s} is wholly in one split`);
   assert.equal(exportDataset({ out, events: ["tool"], testShare: 0 }).test, 0);
 
-  // A record written before a masking rule existed is masked on the way out.
+  // Export preserves original recorded data.
   const calls = join(process.env.JEVIS_HOME, "jev", "calls.jsonl");
-  const version = JSON.parse(readFileSync(calls, "utf8").split("\n")[0]).version;
+  const version = readFileSync(calls, "utf8").trim().split("\n").map(JSON.parse).find((row) => row.answers?.["t/push"] !== undefined).version;
   appendFileSync(calls, `${JSON.stringify({ at: new Date().toISOString(), event: "tool", version, sessionId: "old", state: { request: "x", tool: "Bash", input: 'aws configure set aws_secret_access_key "private phrase for test"' }, answers: { "t/push": 0.1 } })}\n`);
   const again = exportDataset({ out, testShare: 0 });
-  assert.ok(!gunzipSync(readFileSync(again.files.train)).toString().includes("private phrase for test"));
+  assert.ok(gunzipSync(readFileSync(again.files.train)).toString().includes("private phrase for test"));
 });
 
 test("tune: thresholds are judged only on the active decider's records", async () => {

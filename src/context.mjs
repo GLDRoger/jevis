@@ -17,9 +17,11 @@ import { commandText, readSession } from "./transcript.mjs";
 export function harnessOf(input, { withModel = true } = {}) {
   if (input.model_provider === "gemini-cli" || input.model_provider === "antigravity") return { harness: input.model_provider === "gemini-cli" ? "Gemini CLI" : "Antigravity CLI", model: input.model ? String(input.model) : null };
   if (input.model_provider === "meta") return { harness: "Muse Code", model: input.model ? String(input.model) : null };
-  if (input.model) return { harness: "Codex", model: String(input.model) };
+  // Claude Code now names the model on some events too, so its transcript path decides first.
   const claude = /[\\/]\.claude[\\/]projects[\\/]/.test(input.transcript_path ?? "") || "permission_mode" in input;
-  return { harness: claude ? "Claude Code" : "Codex", model: claude && withModel ? tailModel(input.transcript_path) : null };
+  if (claude) return { harness: "Claude Code", model: input.model ? String(input.model) : withModel ? tailModel(input.transcript_path) : null };
+  if (input.model) return { harness: "Codex", model: String(input.model) };
+  return { harness: "Codex", model: null };
 }
 
 /** The model from the end of a Claude Code transcript, without reading a long file whole. */
@@ -49,6 +51,14 @@ export const harnessWritten = (prompt) => HARNESS_WRAPPER.test(String(prompt ?? 
 export function originOf(prompt, env = process.env) {
   if (env.BROKER_JOB_ID !== undefined || env.BROKER_DEPTH !== undefined || Number(env.AGENT_CALL_DEPTH) > 0) return "agent";
   return /^\s*\[[\w-]*(agent|broker)[\w-]*\]/i.test(String(prompt ?? "")) ? "agent" : "person";
+}
+
+/** A worker's first prompt identifies the session without a model call. */
+export const WORKER_MARKER = "You were called by another agent. Do this task yourself.";
+export function isWorkerPrompt(prompt, env = process.env) {
+  const normalized = (text) => String(text ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  const marker = normalized(env.JEVIS_WORKER_MARKER || WORKER_MARKER);
+  return originOf(prompt, env) === "agent" || Boolean(marker && normalized(requestText(prompt)).includes(marker));
 }
 
 /** The user's words without the harness's attachment preamble and image tags. */
@@ -147,8 +157,8 @@ export function patchAdditions(patch) {
   return out.join("\n");
 }
 
-const UI_FILE = /\.(tsx|jsx|vue|svelte|astro|html|css|scss)$/;
-const TEST_PATH = /(\.(test|spec|stories)\.[cm]?[jt]sx?$|(^|\/)(__tests__|tests?|__mocks__|e2e)\/)/;
+export const UI_FILE = /\.(tsx|jsx|vue|svelte|astro|html|css|scss)$/;
+export const TEST_PATH = /(\.(test|spec|stories)\.[cm]?[jt]sx?$|(^|\/)(__tests__|tests?|__mocks__|e2e)\/)/;
 
 function describe(it, cwd) {
   if (it.type === "CommandExecution") return `${it.attempted ? "attempted, " : it.completed === false ? "running, " : it.success === true && it.exit_code == null ? "succeeded, " : it.success === false ? "failed, " : ""}exit ${it.exit_code ?? "?"}: ${clip(commandText(it).replace(/\s+/g, " "), 180)}`;
@@ -367,9 +377,9 @@ export function museTool(name, input = {}) {
  */
 export function hookItem(tool, input = {}) {
   if (tool === "Bash") return { type: "CommandExecution", command: input.command ?? "" };
-  if (["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool)) return input.file_path || input.notebook_path ? { type: "FileChange", changes: [{ path: input.file_path ?? input.notebook_path }] } : null;
+  if (["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool)) return input.file_path || input.path || input.notebook_path ? { type: "FileChange", changes: [{ path: input.file_path ?? input.path ?? input.notebook_path }] } : null;
   if (tool === "apply_patch") {
-    const paths = [...String(input.input ?? input.patch ?? input.command ?? "").matchAll(/^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$/gm)].map((m) => m[1].trim());
+    const paths = [...String(typeof input === "string" ? input : input.input ?? input.patch ?? input.command ?? "").matchAll(/^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$/gm)].map((m) => m[1].trim());
     return paths.length ? { type: "FileChange", changes: paths.map((path) => ({ path })) } : null;
   }
   const mcp = /^mcp__(.+?)__(.+)$/.exec(tool);

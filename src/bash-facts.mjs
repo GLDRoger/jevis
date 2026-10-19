@@ -9,6 +9,9 @@ const unknown = () => Object.fromEntries(BASH_FACTS.map((key) => [key, null]));
 const WRITERS = new Set(["tee", "cp", "mv", "install", "touch", "truncate"]);
 const OPENERS = new Set(["open", "say", "afplay", "osascript", "ffplay", "xdg-open"]);
 const RUNNERS = new Set(["npm", "pnpm", "yarn", "bun", "npx", "pytest", "jest", "vitest", "playwright", "tsc", "eslint", "cargo", "go", "make", "cmake", "ctest", "mvn", "gradle", "dotnet"]);
+const checkWords = ([program, ...args]) => RUNNERS.has(program) && args.some((a) => /(?:^|[:/.-])(?:test|tests|spec|check|typecheck|lint|build|jest|vitest|playwright|tsc|eslint)(?:$|[:/.-])/.test(a)) || ["pytest", "jest", "vitest", "playwright", "tsc", "eslint", "ctest"].includes(program) || program === "node" && args.includes("--test");
+/** Recognize check runners even with options outside the effect-proof grammar. */
+export const isCheckCommand = (command) => !String(command).endsWith("…") && Boolean(segments(String(command))?.some(checkWords));
 // These utilities neither execute arbitrary programs nor consume/set
 // credentials. Path/option words naming secrets still leave that lesson in.
 const LOCAL = new Set(["mkdir", "rmdir", "rm", "chmod", "chown", "kill", "pkill", "wait"]);
@@ -117,12 +120,29 @@ function gitParts(args) {
   return sub && knownOptions(args.slice(i + 1), GIT_OPTIONS[sub], sub === "log") ? sub : null;
 }
 
+// Writing lessons require writes_file === true, so a command the parser
+// can't fully prove (an unquoted heredoc, an inline script) still needs a
+// positive write signal. Only the command line is searched for a redirect:
+// a heredoc body is content, and HTML in it is full of `>`. Only interface
+// and copy files count: log and scratch redirects are most Bash writes and
+// no writing lesson can apply to them.
+const UI_FILE = String.raw`[\w./~$-]*\.(?:html?|css|scss|sass|less|[cm]?[jt]sx?|vue|svelte|astro|mdx?|svg)`;
+const REDIRECT = new RegExp(String.raw`(?:^|[^0-9&>])>>?\s*['"]?${UI_FILE}(?=$|[\s'"&|;)])`);
+const INLINE_SCRIPT = /\b(?:python3?|node|perl|ruby)\b[^\n]*<</;
+const SCRIPT_WRITE = /\.write_text\(|\.write_bytes\(|\bopen\([^)\n]*['"][wa]b?\+?['"]|\.write\(|writeFileSync|appendFileSync|fs\.(?:promises\.)?write|File\.write/;
+const SCRIPT_UI_PATH = new RegExp(String.raw`['"]${UI_FILE}['"]`);
+export const provenWrite = (text) => {
+  const [line, ...rest] = String(text).split("\n");
+  const body = rest.join("\n");
+  return REDIRECT.test(line) || INLINE_SCRIPT.test(line) && SCRIPT_WRITE.test(body) && SCRIPT_UI_PATH.test(body);
+};
+
 export function bashFacts(command) {
   const text = String(command ?? "");
   if (text.endsWith("…")) return unknown();
   const effects = { writes: false };
   const parts = segments(text, { effects });
-  if (!parts?.length) return unknown();
+  if (!parts?.length) return { ...unknown(), writes_file: provenWrite(text) ? true : null };
   const result = Object.fromEntries(BASH_FACTS.map((key) => [key, false]));
   const merge = (key, value) => { if (result[key] !== true) result[key] = value === true ? true : result[key] === null || value === null ? null : false; };
   const read = plainRead(text);
@@ -147,13 +167,12 @@ export function bashFacts(command) {
     const gitWrite = program === "git" && GIT_WRITES.has(sub);
     merge("git_write", gitWrite ? true : local || simpleWriter || simpleOpener || reader ? false : null);
     merge("writes_file", effects.writes || writer || program === "sed" && args.some((a) => a === "-i" || /^--in-place(?:=|$)/.test(a)) ? true : local || simpleOpener || reader ? false : null);
-    const runner = RUNNERS.has(program) && args.some((a) => /(?:^|[:/.-])(?:test|tests|spec|check|typecheck|lint|build|jest|vitest|playwright|tsc|eslint)(?:$|[:/.-])/.test(a));
-    merge("runs_tests", runner || ["pytest", "jest", "vitest", "playwright", "tsc", "eslint", "ctest"].includes(program) || program === "node" && args.includes("--test") ? true : local || simpleWriter || simpleOpener || reader ? false : null);
+    merge("runs_tests", checkWords([program, ...args]) ? true : local || simpleWriter || simpleOpener || reader ? false : null);
     // Script runners, git hooks, drivers and downloaded binaries can open
     // windows even when the executable's name doesn't look like an opener.
     merge("opens_app", opener ? true : local || reader || simpleWriter ? false : null);
     merge("uses_credentials", local && !/secret|token|passw|cred|api.?key|\.env|keychain|\.ssh|\.aws/i.test(text) ? false : null);
   }
-  if (effects.writes) result.writes_file = true;
+  if (effects.writes || result.writes_file === null && provenWrite(text)) result.writes_file = true;
   return result;
 }

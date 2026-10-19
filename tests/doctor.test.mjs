@@ -69,13 +69,13 @@ test("doctor: every installed handler must match its event, including duplicate 
   }
 });
 
-test("doctor: a broken settings file fails, shadow or disabled modes are named, and secrets stay masked", () => {
+test("doctor: a broken settings file fails, shadow or disabled modes are named, and setting values stay unchanged", () => {
   writeFileSync(join(process.env.JEVIS_HOME, "config.json"), "{ nope");
   assert.ok(settingsChecks({}).some((c) => c.status === "fail" && /not valid JSON/.test(c.detail)));
   writeFileSync(join(process.env.JEVIS_HOME, "config.json"), "{}");
   assert.ok(settingsChecks({ JEVIS_DISABLE: "1" }).some((c) => c.name === "mode" && c.status === "warn"));
   assert.ok(settingsChecks({ JEVIS_MODE: "shadow" }).some((c) => c.name === "mode" && /shadow/.test(c.detail)));
-  assert.ok(!JSON.stringify(settingsChecks({ JEVIS_JEV_URL: "https://example.test/v1/systemone?sig=topsecret" })).includes("topsecret"), "a signed URL's signature is masked");
+  assert.ok(JSON.stringify(settingsChecks({ JEVIS_JEV_URL: "https://example.test/v1/systemone?sig=topsecret" })).includes("topsecret"), "a signed URL is shown unchanged");
 });
 
 test("doctor: the decision model needs a key for TypeSafe, and a live answer", async () => {

@@ -3,7 +3,7 @@
 Thanks for helping. The most useful contributions, roughly in order:
 
 1. **Lessons.** A wiki entry for a failure you keep seeing from your coding agent, backed by real sessions.
-2. **Design telltales.** A new `slop/` refusal, with the edits it must catch and the look-alikes it must let through.
+2. **Design telltales.** A useful `nudges/*-ui-edit.md` design tip, backed by examples of better work.
 3. **Evidence.** Jevis has no public benchmark numbers yet. A SWE-bench, Terminal-Bench, or similar run with and without Jevis is very welcome, and so is a Laya checkpoint fine-tuned on Jevis's questions.
 4. **Harness adapters.** Support for an agent harness beyond Codex and Claude Code (see "Other agent harnesses" in the README).
 5. **Bug fixes**, especially anywhere a hook breaks, stalls, or blocks an agent wrongly.
@@ -24,7 +24,7 @@ npm run lint    # checks every wiki entry against WIKI.md
 
 Both run in CI on every pull request and must pass before merging.
 
-Live checks (`node bin/jevis.mjs ask`, `node eval/slop.mjs`, the simulations) call the decision model, so they need a TypeSafe key, an OpenAI key (with `JEVIS_DECIDER=luna`), or a self-hosted server (see the README). A change to how questions are asked or answered should be checked on both deciders: run the batteries once as is and once with `JEVIS_DECIDER=luna`, and report both. CI doesn't run them. When your change depends on them, paste their output into the pull request.
+Live checks (`node bin/jevis.mjs ask`, the simulations) call the decision model, so they need a TypeSafe key, an OpenAI key (with `JEVIS_DECIDER=luna`), or a self-hosted server (see the README). A change to how questions are asked or answered should be checked on both deciders: run the batteries once as is and once with `JEVIS_DECIDER=luna`, and report both. CI doesn't run them. When your change depends on them, paste their output into the pull request.
 
 ## Adding or changing a lesson
 
@@ -32,11 +32,11 @@ Live checks (`node bin/jevis.mjs ask`, `node eval/slop.mjs`, the simulations) ca
 
 - **It is one failure,** asked as one literal yes/no question that names the state field it reads.
 - **It has evidence.** `source:` says where the lesson came from: how many sessions, when, and the user's own words where they help. Anonymize it before you commit (see [Privacy](#privacy)).
-- **Refusals are careful.** A `deny` or `block` uses `min: 0.85` or higher, plus an `unless` that asks whether the user asked for exactly this.
+- **Jevis is not a gate.** Tool lessons use `action: context`, never change a call, and never manage permissions or filter data. Only the code-decided pass-claim Stop check and opt-in design review send an agent back.
 - **It is shown to work.** In the pull request, paste `jevis ask` output for at least one case that should fire and two look-alikes that shouldn't.
 - **Family-specific lessons are marked.** A lesson that fixes a habit of Claude models or of GPT models carries `family: claude` or `family: gpt`. Leave the field out for lessons every model needs.
 
-For a `slop/` entry, also add its cases to `eval/slop-cases.mjs`: the telltale edit, plus the look-alikes that must pass. Then run `node eval/slop.mjs` and paste the final score. Every existing case must stay right.
+For a design tip, verify it appears on the first UI edit and does not affect the call.
 
 A lesson that only fits your taste belongs in your own `~/.jevis/wiki/`, not here. The shipped wiki is for failures most users of that model would want caught.
 

@@ -7,7 +7,7 @@ import { isQualifiedPath, splitFolders } from "./paths.mjs";
  * Settings: every setting in the README's Configuration table can live in
  * ~/.jevis/config.json, keyed by its environment variable name:
  *
- *   { "JEVIS_MODE": "shadow", "JEVIS_CRITIC": "codex", "JEVIS_ENABLE": ["safety"] }
+ *   { "JEVIS_MODE": "shadow", "JEVIS_CRITIC": "codex" }
  *
  * Hook commands then carry no NAME=value prefix, which cmd and PowerShell
  * cannot run, and an install keeps what an earlier one saved. The
@@ -20,6 +20,7 @@ import { isQualifiedPath, splitFolders } from "./paths.mjs";
 const text = (v) => typeof v === "string" && v.trim() !== "";
 const oneOf = (...values) => (v) => values.includes(v);
 const number = (v) => (typeof v === "number" && v > 0) || (typeof v === "string" && Number(v) > 0);
+const price = (v) => (typeof v === "number" || text(v)) && Number.isFinite(Number(v)) && Number(v) >= 0;
 const list = (v) => text(v) || (Array.isArray(v) && v.length > 0 && v.every(text));
 export const absolutePaths = (v, platform = process.platform) => list(v) && [v].flat().flatMap((x) => splitFolders(x, platform === "win32" ? win32.delimiter : posix.delimiter)).every((x) => isQualifiedPath(x, platform));
 const httpUrl = (v) => typeof v === "string" && /^https?:\/\/[^\s'"`$;&|<>]+$/.test(v);
@@ -27,9 +28,10 @@ const httpUrl = (v) => typeof v === "string" && /^https?:\/\/[^\s'"`$;&|<>]+$/.t
 /** Each setting: how to check a value, how to write it as the environment reads it, and what it does. */
 export const SETTINGS = {
   JEVIS_MODE: { ok: oneOf("live", "shadow"), help: "live, or shadow: log what Jevis would do and change nothing" },
+  JEVIS_WORKER_MARKER: { ok: text, help: "the phrase that marks a session started by another agent" },
+  JEVIS_NUDGES: { ok: oneOf("on", "off"), help: "off stops every nudge" },
   JEVIS_DISABLE: { ok: oneOf(true, false, "1", "0"), env: (v) => (v === true || v === "1" ? "1" : null), help: "true turns every hook off" },
   JEVIS_SCOPE: { ok: list, env: (v) => [v].flat().join(delimiter), help: `folders Jevis acts in (a list, or ${process.platform === "win32" ? "semicolon" : "colon"}-separated)` },
-  JEVIS_ENABLE: { ok: list, env: (v) => [v].flat().join(","), help: "optional entries to turn on: safety, all, or entry ids" },
   JEVIS_CRITIC: { ok: oneOf("claude", "codex", "off"), help: "who reviews visual work: claude, codex, or off" },
   JEVIS_CRITIC_MODEL: { ok: text, help: "the model the critic uses" },
   JEVIS_DESIGN_LAW: { ok: text, help: "a Markdown file of your own design rules" },
@@ -42,6 +44,8 @@ export const SETTINGS = {
   JEVIS_JEV_CHUNK: { ok: number, env: String, help: "questions per request" },
   JEVIS_TIMEOUT_MS: { ok: number, env: String, help: "how long a hook waits for the decision model" },
   JEVIS_RECORD: { ok: oneOf("on", "off", true, false), env: (v) => (v === false || v === "off" ? "off" : "on"), help: "off keeps no record of decision-model calls" },
+  JEVIS_PRICE_IN: { ok: price, help: "USD per million recorded input tokens, including zero" },
+  JEVIS_PRICE_OUT: { ok: price, help: "USD per million recorded output tokens, including zero" },
 };
 
 const REFUSED = {

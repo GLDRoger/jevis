@@ -8,7 +8,7 @@ import { question, unlessKey, unlessQuestion } from "./engine.mjs";
 import { decider } from "./jev.mjs";
 import { jevisHome } from "./state.mjs";
 import { eachJsonl } from "./transcript.mjs";
-import { applies, conditionsHold, enabled, factsHold } from "./wiki.mjs";
+import { applies, conditionsHold, factsHold } from "./wiki.mjs";
 
 /**
  * `jevis stats --near`: each lesson against every recorded Jev answer to
@@ -53,12 +53,9 @@ export function tune(all, { file = join(jevisHome(), "jev", "calls.jsonl"), ques
     }
     return sets.get(version);
   };
-  // As the engine: an optional entry that is off is never asked, so it cannot fire today.
-  const entries = all.filter((e) => enabled(e));
-  const off = all.filter((e) => !enabled(e)).map((e) => e.id);
   const byEvent = {};
   const rows = {};
-  for (const e of entries) {
+  for (const e of all) {
     (byEvent[e.event] ??= []).push(e);
     rows[e.id] = { id: e.id, event: e.event, action: e.action, min: e.min, asked: 0, fires: 0, near: 0, stoodDown: 0, stale: 0, scores: [] };
   }
@@ -115,13 +112,13 @@ export function tune(all, { file = join(jevisHome(), "jev", "calls.jsonl"), ques
     scores.sort((a, b) => a - b);
     return { ...row, max: scores.at(-1) ?? null, p95: scores.length ? scores[Math.min(scores.length - 1, Math.floor(scores.length * 0.95))] : null };
   });
-  return { records, entries: out, off, decider: active };
+  return { records, entries: out, decider: active };
 }
 
 const fmt = (n) => (n === null ? "  -  " : n.toFixed(2));
 
 /** The table `jevis stats --near` prints: entries that fire or come close first, then the ones never asked. */
-export function formatTune({ records, entries, off = [], decider: who = "jev" }) {
+export function formatTune({ records, entries, decider: who = "jev" }) {
   const asked = entries.filter((e) => e.asked).sort((a, b) => b.fires - a.fires || b.near - a.near || (b.max ?? 0) - (a.max ?? 0));
   const width = Math.max(5, ...asked.map((e) => e.id.length));
   const lines = [`${records} recorded ${who === "luna" ? "GPT-6 Luna" : "Jev"} decisions. fires: would fire under today's rules; near: within ${NEAR} of min; stood down: cleared min, stopped by unless or when.`, ""];
@@ -129,7 +126,6 @@ export function formatTune({ records, entries, off = [], decider: who = "jev" })
   for (const e of asked) lines.push(`${e.id.padEnd(width)}  ${String(e.asked).padStart(5)}  ${String(e.fires).padStart(5)}  ${String(e.near).padStart(4)}  ${String(e.stoodDown).padStart(10)}  ${fmt(e.max)}  ${fmt(e.p95)}  ${fmt(e.min)}`);
   const never = entries.filter((e) => !e.asked);
   if (never.length) lines.push("", `Not asked in its current wording (new, reworded, or never a candidate): ${never.map((e) => e.id).join(", ")}`);
-  if (off.length) lines.push(`Optional and off (JEVIS_ENABLE turns them on): ${off.join(", ")}`);
   const stale = entries.reduce((n, e) => n + e.stale, 0);
   if (stale) lines.push(`${stale} answers to earlier wordings were left out.`);
   return lines.join("\n");

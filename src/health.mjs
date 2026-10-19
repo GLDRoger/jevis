@@ -1,12 +1,11 @@
 import { readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { redact } from "./redact.mjs";
 import { ensureDir, jevisHome } from "./state.mjs";
 
 export const FAILURE_WINDOW = 10 * 60_000;
 export const FAILURE_STREAK = 3;
 
-/** Error payloads are often objects, not strings. Mask before bounding. */
+/** Error payloads are often objects, not strings. Bound messages for log readability. */
 export function errorMessage(value, fallback = "unknown error") {
   let message;
   if (typeof value === "string") message = value;
@@ -15,7 +14,7 @@ export function errorMessage(value, fallback = "unknown error") {
     if (preferred !== undefined && preferred !== value) return errorMessage(preferred, fallback);
     try { message = JSON.stringify(value); } catch { message = fallback; }
   } else if (value != null) message = String(value);
-  return redact(message || fallback).replace(/\s+/g, " ").replaceAll("[object Object]", "unknown error").slice(0, 200);
+  return (message || fallback).replace(/\s+/g, " ").replaceAll("[object Object]", "unknown error").slice(0, 200);
 }
 
 /** Works for new errors and historical log strings (including old 402s). */
@@ -60,7 +59,5 @@ export function outageLine({ now = Date.now() } = {}) {
   if (process.env.JEVIS_MODE === "shadow" || process.env.JEVIS_JEV === "off") return null;
   const health = recentHealth();
   if (!(health?.count >= FAILURE_STREAK) || !Number.isFinite(health.since) || !Number.isFinite(health.lastAt) || now < health.lastAt || now - health.lastAt > FAILURE_WINDOW) return null;
-  const time = new Date(health.since).toISOString().slice(11, 16);
-  const kind = health.status === 402 ? "HTTP 402 billing" : `${health.status ? `HTTP ${health.status} ` : ""}${health.class}`;
-  return `Jevis: ${process.env.JEVIS_DECIDER === "luna" ? "GPT-6 Luna" : "Jev"} unavailable since ${time} UTC (${kind}). Hooks are passing everything through.`;
+  return "Jevis is unavailable right now.";
 }

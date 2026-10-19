@@ -58,14 +58,16 @@ test("plugin: bundled hooks run from a spaced installed path with isolated state
   mkdirSync(wiki);
   const fields = {
     prompt: "action: context\nask: Does `request` ask about the fixture?",
-    tool: "action: deny\ntools: [Bash]\nwhen: { marks.plain_read: false }\nask: Does `input` delete the fixture?\nunless: Does `request` explicitly authorize deletion?",
+    tool: "action: context\ntools: [Bash]\nwhen: { marks.plain_read: false }\nask: Does `input` delete the fixture?\nunless: Does `request` explicitly authorize deletion?",
     stop: "action: block\nask: Does `final_message` claim success?\nunless: Does `request` ask to skip verification?",
   };
   for (const [event, extra] of Object.entries(fields)) writeFileSync(join(wiki, `${event}.md`), `---\nevent: ${event}\n${extra}\nmin: 0.85\ntitle: Plugin ${event} fixture\nsource: offline plugin test\n---\nCheck the fictional fixture.\n`);
+  const requests = [];
   const server = createServer(async (req, res) => {
     let text = "";
     for await (const chunk of req) text += chunk;
     const body = JSON.parse(text);
+    requests.push(body);
     const answers = Object.fromEntries(Object.keys(body.questions).map((id) => [id, { type: "noul", noul: id.endsWith("#unless") ? 0.02 : fields[id] ? 0.95 : 0.5 }]));
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ answers }));
@@ -80,6 +82,7 @@ test("plugin: bundled hooks run from a spaced installed path with isolated state
   const events = { SessionStart: { source: "startup" }, UserPromptSubmit: { prompt: "Inspect the fixture." }, PreToolUse: { tool_name: "Bash", tool_input: { command: "fixture-delete --all" } }, PostToolUse: { tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 1 } }, Stop: { last_assistant_message: "Fixture finished." }, PostCompact: {} };
   for (const [event, payload] of Object.entries(events)) {
     const hook = hooks[event][0].hooks[0];
+    const before = requests.length;
     const output = await new Promise((resolve, reject) => {
       const child = spawn("/bin/sh", ["-c", hook.command], { env, cwd: scratch, timeout: 4000 });
       let stdout = "";
@@ -90,10 +93,17 @@ test("plugin: bundled hooks run from a spaced installed path with isolated state
       child.on("close", (code, signal) => code === 0 && !signal ? resolve(stdout) : reject(new Error(`${event}: ${code}, ${signal}, ${stderr}`)));
       child.stdin.end(JSON.stringify({ session_id: "plugin-fixture", model: "gpt-test", cwd: scratch, hook_event_name: event, ...payload }));
     });
-    if (event === "UserPromptSubmit") assert.match(JSON.parse(output).hookSpecificOutput.additionalContext, /Plugin prompt fixture/);
-    else if (event === "PreToolUse") assert.equal(JSON.parse(output).hookSpecificOutput.permissionDecision, "deny");
-    else if (event === "Stop") assert.equal(JSON.parse(output).decision, "block");
-    else assert.equal(output, "");
+    if (event === "PreToolUse") assert.match(JSON.parse(output).hookSpecificOutput.additionalContext, /Plugin tool fixture/);
+    else {
+      assert.equal(output, "");
+      assert.equal(requests.length, before, "only the tool hook calls the decision model");
+    }
+    if (event === "UserPromptSubmit") {
+      const session = json(join(scratch, "state/sessions/plugin-fixture.json"));
+      assert.equal(session.turn, 1);
+      assert.equal(session.request, "Inspect the fixture.");
+      assert.deepEqual(session.earlierRequests, []);
+    }
   }
   assert.ok(existsSync(join(scratch, "state/sessions/plugin-fixture.json")));
   const rows = readFileSync(join(scratch, "state/log.jsonl"), "utf8").trim().split("\n").map(JSON.parse);

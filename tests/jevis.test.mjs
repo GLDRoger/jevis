@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 
 // Every test runs against a private home and a scripted Jev: no network, no real state.
 process.env.JEVIS_HOME = mkdtempSync(join(tmpdir(), "jevis-home-"));
+// These wiki fixtures are independent of shipped nudge copy; nudges have their own suite.
+process.env.JEVIS_NUDGES_DIR = join(process.env.JEVIS_HOME, "empty-shipped-nudges");
 delete process.env.JEVIS_MODE;
 delete process.env.JEVIS_SCOPE;
 delete process.env.JEVIS_DISABLE;
@@ -15,10 +17,12 @@ delete process.env.BROKER_JOB_ID;
 delete process.env.BROKER_DEPTH;
 
 const { setJevTransport, questionsVersion, hedged } = await import("../src/jev.mjs");
-const { redact } = await import("../src/redact.mjs");
-const { parseEntry, validateEntry, conditionsHold, candidates, enabled, loadWiki, WIKI_ROOT } = await import("../src/wiki.mjs");
+const { parseEntry, validateEntry, conditionsHold, candidates, loadWiki, wikiRoots, WIKI_ROOT } = await import("../src/wiki.mjs");
 const { evaluate } = await import("../src/engine.mjs");
 const { onPrompt, onTool, onStop, onSession, inScope, MAX_STOP_BLOCKS } = await import("../src/hooks.mjs");
+const { setStopFired, stopEvaluations, stopHooks } = await import("./helpers/stop-fixture.mjs");
+const { onStop: stopWithFired } = await stopHooks;
+const stopEntry = (id) => loadWiki([wikiDir]).entries.find((e) => e.id === id);
 const { turnEvidence, harnessWritten, originOf, requestText, attachmentNames } = await import("../src/context.mjs");
 const { ensureDir, loadSession, readLog, saveSession } = await import("../src/state.mjs");
 
@@ -33,11 +37,11 @@ function entry(id, front, body = "Do the better thing instead.") {
 entry("design/open-page", { event: "prompt", ask: "Does `request` ask for a new page with its look left open?", when: '{ wants_change: ">=0.6" }', action: "context", title: "Open page", source: "test" }, "Pick a concept first.");
 entry("design/claude-only", { event: "prompt", ask: "Does `request` ask for a page?", family: "claude", action: "context", title: "Claude only", source: "test" });
 entry("design/gpt-only", { event: "prompt", ask: "Does `request` ask for anything?", family: "gpt", action: "context", title: "GPT only", source: "test" });
-entry("safety/force", { event: "tool", ask: "Does `input` force-push?", unless: "Does `request` ask for a force push?", tools: "[Bash]", min: 0.85, action: "deny", title: "Force push", source: "test" }, "Use a new commit.");
-entry("slop/glow", { event: "tool", ask: "Does `input` add glow blobs?", unless: "Does `request` ask for glow?", tools: "[Write, apply_patch]", min: 0.85, action: "deny", title: "Glow blobs", source: "test" }, "Show the product instead.");
-entry("slop/gradient", { event: "tool", ask: "Does `input` add gradient text?", unless: "Does `request` ask for gradient text?", tools: "[Write, apply_patch]", min: 0.85, action: "deny", title: "Gradient text", source: "test" }, "Use one solid color.");
+entry("fixture/note", { event: "tool", ask: "Does `input` force-push?", unless: "Does `request` ask for a force push?", tools: "[Bash]", min: 0.85, action: "context", title: "Force push", source: "test" }, "Use a new commit.");
+entry("slop/glow", { event: "tool", ask: "Does `input` add glow blobs?", unless: "Does `request` ask for glow?", tools: "[Write, apply_patch]", min: 0.85, action: "context", title: "Glow blobs", source: "test" }, "Show the product instead.");
+entry("slop/gradient", { event: "tool", ask: "Does `input` add gradient text?", unless: "Does `request` ask for gradient text?", tools: "[Write, apply_patch]", min: 0.85, action: "context", title: "Gradient text", source: "test" }, "Use one solid color.");
 entry("workflow/poll", { event: "tool", ask: "Does `input` sleep in a loop?", tools: "[Bash]", action: "context", title: "Polling", source: "test" }, "Wait on the process instead.");
-entry("slop/shell-glow", { event: "tool", ask: "Does `input` write glow blobs into a page?", unless: "Does `request` ask for glow?", tools: "[Bash]", when: "{ marks.plain_read: false }", min: 0.85, action: "deny", title: "Shell glow", source: "test" }, "Show the product instead.");
+entry("slop/shell-glow", { event: "tool", ask: "Does `input` write glow blobs into a page?", unless: "Does `request` ask for glow?", tools: "[Bash]", when: "{ marks.plain_read: false }", min: 0.85, action: "context", title: "Shell glow", source: "test" }, "Show the product instead.");
 entry("workflow/rerun", { event: "tool", ask: "Does `input` run the whole test suite?", when: "{ marks.ran_before: true }", tools: "[Bash]", action: "context", title: "Rerun", source: "test" }, "Run the focused test.");
 entry("verification/unseen", { event: "stop", ask: "Does `final_message` claim a check that `evidence` does not show?", min: 0.85, when: "{ evidence.edited: true }", action: "block", title: "Unseen claim", source: "test" }, "Run it, then report.");
 entry("verification/second", { event: "stop", ask: "Does `final_message` skip something?", action: "block", title: "Second", source: "test" });
@@ -84,7 +88,7 @@ test("hedged: identical requests race, the first answer wins, and the losers are
 });
 
 test("an entry parses from its frontmatter, and the parser rejects what the guide forbids", () => {
-  const e = parseEntry('---\nevent: tool\nask: Does `input` do it?\nunless: Does `request` ask?\ntools: [Bash, "mcp__*"]\nwhen: { destructive: ">=0.5", evidence.edited: true }\naction: deny\ntitle: T\nsource: s\n---\nBody', "a/b");
+  const e = parseEntry('---\nevent: tool\nask: Does `input` do it?\nunless: Does `request` ask?\ntools: [Bash, "mcp__*"]\nwhen: { destructive: ">=0.5", evidence.edited: true }\naction: context\ntitle: T\nsource: s\n---\nBody', "a/b");
   assert.deepEqual(e.tools, ["Bash", "mcp__*"]);
   assert.deepEqual(e.when, { destructive: ">=0.5", "evidence.edited": true });
   assert.equal(e.min, 0.75);
@@ -101,6 +105,18 @@ test("an entry parses from its frontmatter, and the parser rejects what the guid
 test("the shipped wiki lints clean", () => {
   const { broken } = loadWiki([fileURLToPath(new URL("../wiki", import.meta.url))]);
   assert.deepEqual(broken, []);
+});
+
+test("v2 shipped wiki loads only the code-decided Stop lesson, never archives", () => {
+  assert.equal(WIKI_ROOT, fileURLToPath(new URL("../wiki", import.meta.url)).replace(/\/$/, ""));
+  const roots = wikiRoots(null, { env: {} });
+  assert.ok(roots.includes(WIKI_ROOT));
+  assert.ok(roots.every((root) => !root.includes("archive")));
+  const { entries } = loadWiki(roots);
+  assert.deepEqual(entries.map((e) => [e.id, e.decide, e.action]), [["verification/claim-contradicted", "claim_contradicted", "block"]]);
+  const retired = loadWiki([fileURLToPath(new URL("../archive/wiki-v2-refusals", import.meta.url))]);
+  assert.equal(retired.broken.filter((b) => b.id.startsWith("slop/")).length, 30);
+  assert.ok(retired.entries.some((e) => e.id === "engineering/weakened-tests"));
 });
 
 test("your wiki adds entries, replaces a shipped id, and turns one off; a broken replacement leaves the shipped one", () => {
@@ -162,15 +178,15 @@ test("candidates filter by event, tool, and model family; other and unknown mode
 });
 
 test("an entry fires on its answer, its min, its when, and its unless", async () => {
-  reset({ "safety/force": 0.95, "safety/force#unless": 0.1 });
+  reset({ "fixture/note": 0.95, "fixture/note#unless": 0.1 });
   let r = await evaluate({ event: "tool", state: { request: "fix typo", tool: "Bash", input: "git push -f" }, tool: "Bash", record: false });
-  assert.deepEqual(r.fired.map((e) => e.id), ["safety/force"]);
+  assert.deepEqual(r.fired.map((e) => e.id), ["fixture/note"]);
   // The user asked for it: the unless answer stands the entry down.
-  reset({ "safety/force": 0.95, "safety/force#unless": 0.9 });
+  reset({ "fixture/note": 0.95, "fixture/note#unless": 0.9 });
   r = await evaluate({ event: "tool", state: { request: "force push it", tool: "Bash", input: "git push -f" }, tool: "Bash", record: false });
   assert.deepEqual(r.fired, []);
   // Below min.
-  reset({ "safety/force": 0.8, "safety/force#unless": 0.1 });
+  reset({ "fixture/note": 0.8, "fixture/note#unless": 0.1 });
   r = await evaluate({ event: "tool", state: { request: "x", tool: "Bash", input: "git push -f" }, tool: "Bash", record: false });
   assert.deepEqual(r.fired, []);
   // A prompt entry whose axis condition fails.
@@ -238,18 +254,24 @@ test("Jev failing means Jevis does nothing", async () => {
   setJevTransport(scripted);
 });
 
-test("prompt: a matching note is injected once per session, and again after compaction", async () => {
+test("prompt: bookkeeping only, including after compaction, with no notes or transport calls", async () => {
   reset({ "design/open-page": 0.9, "axis.wants_change": 0.9 });
   const id = newSession();
-  const first = await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "make me a landing page", model: "gpt-6-astra" });
-  assert.match(first.hookSpecificOutput.additionalContext, /Open page\.\*\* Pick a concept first\./);
-  assert.match(first.hookSpecificOutput.additionalContext, /the user's instructions differ, theirs win/);
-  const second = await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "another landing page", model: "gpt-6-astra" });
-  assert.equal(second, null);
+  const prompt = (text) => onPrompt({ session_id: id, cwd: tmpdir(), prompt: text, model: "gpt-6-astra" });
+  assert.equal(await prompt("make me a landing page"), null);
+  assert.equal(await prompt("another landing page"), null);
   onSession({ session_id: id, source: "compact", hook_event_name: "SessionStart" });
-  const third = await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "one more", model: "gpt-6-astra" });
-  assert.ok(third);
-  assert.equal(loadSession(id).turn, 3);
+  assert.equal(await prompt("one more"), null);
+  const session = loadSession(id);
+  assert.equal(session.turn, 3);
+  assert.equal(session.request, "one more");
+  assert.equal(session.previousRequest, "another landing page");
+  assert.deepEqual(session.earlierRequests, ["make me a landing page", "another landing page"]);
+  assert.deepEqual(session.shown, {});
+  assert.equal(calls.length, 0);
+  const rows = readLog().filter((r) => r.sessionId === id && r.event === "prompt");
+  assert.equal(rows.length, 3);
+  assert.ok(rows.every((r) => r.acted.length === 0));
 });
 
 test("prompt: harness-written prompts are not requests and leave the turn alone", async () => {
@@ -266,10 +288,19 @@ test("prompt: harness-written prompts are not requests and leave the turn alone"
 
 test("prompt: shadow mode logs but never injects", async () => {
   reset({ "design/open-page": 0.9, "axis.wants_change": 0.9 });
+  const id = newSession();
   process.env.JEVIS_MODE = "shadow";
   try {
-    assert.equal(await onPrompt({ session_id: newSession(), cwd: tmpdir(), prompt: "make me a landing page", model: "gpt-6-astra" }), null);
-    assert.equal(calls.length, 1);
+    assert.equal(await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "make me a landing page", model: "gpt-6-astra" }), null);
+    assert.equal(calls.length, 0);
+    const session = loadSession(id);
+    assert.equal(session.turn, 1);
+    assert.equal(session.request, "make me a landing page");
+    assert.deepEqual(session.earlierRequests, []);
+    const row = readLog().at(-1);
+    assert.equal(row.event, "prompt");
+    assert.equal(row.mode, "shadow");
+    assert.deepEqual(row.acted, []);
   } finally {
     delete process.env.JEVIS_MODE;
   }
@@ -295,26 +326,38 @@ test("prompt: JEVIS_SCOPE and JEVIS_DISABLE keep Jevis out", async () => {
   }
 });
 
-test("prompt: in Claude Code, claude-family entries apply on the first turn, before the transcript names a model", async () => {
+test("prompt: Claude and Codex first turns record model identity without evaluating family lessons", async () => {
   reset({ "design/claude-only": 0.95 });
   const dir = mkdtempSync(join(tmpdir(), "jevis-cc-"));
   const transcript = join(dir, ".claude", "projects", "p", "t.jsonl");
   mkdirSync(join(transcript, ".."), { recursive: true });
   writeFileSync(transcript, "");
-  const out = await onPrompt({ session_id: newSession(), cwd: dir, prompt: "make me a page", transcript_path: transcript, permission_mode: "default" });
-  assert.match(out.hookSpecificOutput.additionalContext, /Claude only/);
+  const id = newSession();
+  const out = await onPrompt({ session_id: id, cwd: dir, prompt: "make me a page", transcript_path: transcript, permission_mode: "default" });
+  assert.equal(out, null);
+  assert.equal(calls.length, 0);
+  assert.equal(loadSession(id).model, "claude-unknown");
+  assert.equal(loadSession(id).turn, 1);
+  assert.equal(loadSession(id).request, "make me a page");
+  assert.deepEqual(loadSession(id).earlierRequests, []);
   reset({ "design/claude-only": 0.95 });
-  const codex = await onPrompt({ session_id: newSession(), cwd: dir, prompt: "make me a page", model: "gpt-6-sol" });
-  assert.doesNotMatch(codex?.hookSpecificOutput?.additionalContext ?? "", /Claude only/);
+  const codexId = newSession();
+  const codex = await onPrompt({ session_id: codexId, cwd: dir, prompt: "make me a page", model: "gpt-6-sol" });
+  assert.equal(codex, null);
+  assert.equal(calls.length, 0);
+  assert.equal(loadSession(codexId).model, "gpt-6-sol");
+  assert.equal(loadSession(codexId).turn, 1);
+  assert.equal(loadSession(codexId).request, "make me a page");
+  assert.deepEqual(loadSession(codexId).earlierRequests, []);
 });
 
-test("tool: a deny entry refuses the call with its reason, and reads the user's current request", async () => {
+test("tool: a context entry adds advice without changing the call, and reads the user's current request", async () => {
   const id = newSession();
-  reset((key, body) => (key === "safety/force" ? 0.97 : key === "safety/force#unless" ? (/force push/.test(body.state.request) ? 0.95 : 0.05) : 0.02));
+  reset((key, body) => (key === "fixture/note" ? 0.97 : key === "fixture/note#unless" ? (/force push/.test(body.state.request) ? 0.95 : 0.05) : 0.02));
   await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "fix the typo and push", model: "gpt-6-sol" });
-  const denied = await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "git push --force origin main" } });
-  assert.equal(denied.hookSpecificOutput.permissionDecision, "deny");
-  assert.match(denied.hookSpecificOutput.permissionDecisionReason, /Force push: Use a new commit\./);
+  const result = await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "git push --force origin main" } });
+  assert.deepEqual(Object.keys(result.hookSpecificOutput).sort(), ["additionalContext", "hookEventName"]);
+  assert.match(result.hookSpecificOutput.additionalContext, /Force push\.\*\* Use a new commit\./);
   assert.equal(calls.at(-1).state.request, "fix the typo and push");
   await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "squash and force push the branch", model: "gpt-6-sol" });
   assert.equal(await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "git push --force origin main" } }), null);
@@ -330,11 +373,13 @@ test("tool: checks read the session's earlier messages, so permission given a fe
   assert.deepEqual(calls.at(-1).state.earlier_requests, ["commit locally whenever it makes sense"]);
 });
 
-test("prompt: lessons about a person's habits skip briefs another agent wrote", async () => {
+test("engine: historical prompt origin gates distinguish people from agent briefs", async () => {
   const habits = ["workflow/subagent-cost", "verification/account-for-every-item", "communication/name-the-scope-of-numbers"];
   reset((key) => (habits.includes(key) || key === "axis.wants_change" ? 0.95 : 0.05));
+  // Historical/offline evaluation remains supported, without loading archives.
+  const wiki = { entries: habits.map((id) => ({ ...stopEntry("design/open-page"), id, when: { "agent.origin": "person" } })) };
   const state = (origin) => ({ request: "Round 4: fix every item below and report the totals.", previous_request: null, attachments: [], workspace: {}, agent: { harness: "Codex", model: "gpt-6-sol", origin } });
-  const fired = async (origin) => (await evaluate({ event: "prompt", state: state(origin), model: "gpt-6-sol", record: false, wiki: loadWiki([WIKI_ROOT]) })).fired.map((e) => e.id);
+  const fired = async (origin) => (await evaluate({ event: "prompt", state: state(origin), model: "gpt-6-sol", record: false, wiki })).fired.map((e) => e.id);
   const person = await fired("person");
   const agent = await fired("agent");
   for (const id of habits) {
@@ -343,15 +388,15 @@ test("prompt: lessons about a person's habits skip briefs another agent wrote", 
   }
 });
 
-test("tool: an edit shows Jev only what it adds, and every matching deny goes back in one reason", async () => {
+test("tool: an edit shows Jev only what it adds, and matching context notes arrive together", async () => {
   const id = newSession();
   reset({ "slop/glow": 0.95, "slop/gradient": 0.93 });
   const patch = "*** Begin Patch\n*** Update File: src/Hero.tsx\n@@\n-<h1 className=\"old\">Hi</h1>\n+<h1 className=\"bg-clip-text\">Hi</h1>\n <p>kept</p>\n*** End Patch";
-  const denied = await onTool({ session_id: id, cwd: tmpdir(), tool_name: "apply_patch", tool_input: { input: patch } });
+  const result = await onTool({ session_id: id, cwd: tmpdir(), tool_name: "apply_patch", tool_input: { input: patch } });
   assert.equal(calls.at(-1).state.input, "*** Update File: src/Hero.tsx\n<h1 className=\"bg-clip-text\">Hi</h1>", "removed and context lines are not shown");
-  const reason = denied.hookSpecificOutput.permissionDecisionReason;
-  assert.match(reason, /^Jevis stopped this call:\n- Glow blobs: Show the product instead\.\n- Gradient text: Use one solid color\./);
-  assert.match(reason, /Redo the call without this\./);
+  assert.match(result.hookSpecificOutput.additionalContext, /Glow blobs\.\*\* Show the product instead\./);
+  assert.match(result.hookSpecificOutput.additionalContext, /Gradient text\.\*\* Use one solid color\./);
+  assert.deepEqual(Object.keys(result.hookSpecificOutput).sort(), ["additionalContext", "hookEventName"]);
 });
 
 test("tool: a context note is added once per session", async () => {
@@ -369,7 +414,7 @@ test("tool: a plain read no entry asks about is counted in the log, without its 
   // Only the gated entry applies to Bash here.
   const only = mkdtempSync(join(tmpdir(), "jevis-wiki-gated-"));
   mkdirSync(join(only, "slop"));
-  writeFileSync(join(only, "slop", "shell-glow.md"), `---\nevent: tool\nask: Does \`input\` write glow blobs?\nunless: Does \`request\` ask for glow?\ntools: [Bash]\nwhen: { marks.plain_read: false }\naction: deny\ntitle: Shell glow\nsource: test\n---\nShow the product.\n`);
+  writeFileSync(join(only, "slop", "shell-glow.md"), `---\nevent: tool\nask: Does \`input\` write glow blobs?\nunless: Does \`request\` ask for glow?\ntools: [Bash]\nwhen: { marks.plain_read: false }\naction: context\ntitle: Shell glow\nsource: test\n---\nShow the product.\n`);
   process.env.JEVIS_WIKI = only;
   try {
     assert.equal(await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "git log --oneline -3" } }), null);
@@ -412,36 +457,36 @@ test("stop: caps distinct lessons per turn at MAX_STOP_BLOCKS, and resets on the
   const id = newSession();
   // A private, empty project: in a shared /tmp, other processes' writes count as this turn's edits.
   const cwd = mkdtempSync(join(tmpdir(), "jevis-stop-"));
-  reset({ "verification/unseen": 0.95, "verification/second": 0.9, "verification/third": 0.9 });
+  setStopFired(["verification/second", "verification/third"].map(stopEntry));
   await onPrompt({ session_id: id, cwd, prompt: "fix the button", model: "gpt-6-sol" });
   const stop = { session_id: id, cwd, model: "gpt-6-sol", last_assistant_message: "Fixed and verified in the browser." };
-  const first = await onStop(stop);
+  const first = await stopWithFired(stop);
   assert.equal(first.decision, "block");
-  // The facts gate: no transcript means no edits, so the unseen-claim entry cannot fire; the other two can.
+  // The stub supplies two fired entries; the real hook enforces the cap.
   assert.match(first.reason, /Second/);
   assert.match(first.reason, /Third/);
   assert.doesNotMatch(first.reason, /Unseen claim/);
   assert.match(first.reason, /give your complete final answer again/);
   assert.equal(MAX_STOP_BLOCKS, 2);
   // Two entries blocked already: the turn is released.
-  assert.equal(await onStop(stop), null);
+  assert.equal(await stopWithFired(stop), null);
   await onPrompt({ session_id: id, cwd, prompt: "now the header", model: "gpt-6-sol" });
-  assert.ok(await onStop(stop));
+  assert.ok(await stopWithFired(stop));
 });
 
 test("stop: a second blocking output cannot exceed the remaining distinct-lesson budget", async () => {
   const id = newSession();
   const cwd = mkdtempSync(join(tmpdir(), "jevis-stop-budget-"));
-  reset({ "verification/second": 0.95 });
+  setStopFired([stopEntry("verification/second")]);
   await onPrompt({ session_id: id, cwd, prompt: "fix it", model: "gpt-6-sol" });
   const input = { session_id: id, cwd, last_assistant_message: "Done" };
-  assert.match((await onStop(input)).reason, /Second/);
-  reset({ "verification/third": 0.95, "verification/fourth": 0.9 });
-  const next = await onStop(input);
+  assert.match((await stopWithFired(input)).reason, /Second/);
+  setStopFired(["verification/third", "verification/fourth"].map(stopEntry));
+  const next = await stopWithFired(input);
   assert.match(next.reason, /Third/);
   assert.doesNotMatch(next.reason, /Fourth/);
   assert.equal(loadSession(id).stop.blocked.length, MAX_STOP_BLOCKS);
-  assert.equal(await onStop(input), null);
+  assert.equal(await stopWithFired(input), null);
 });
 
 test("stop: the evidence comes from the session log, and an entry never blocks twice in a turn", async () => {
@@ -466,22 +511,22 @@ test("stop: the evidence comes from the session log, and an entry never blocks t
   ];
   writeFileSync(transcript, `${earlier.map((r) => JSON.stringify(r)).join("\n")}\n`);
   const id = newSession();
-  reset({ "verification/unseen": 0.95 });
+  setStopFired([stopEntry("verification/unseen")]);
   await onPrompt({ session_id: id, cwd: dir, prompt: "fix the checkout button", transcript_path: transcript, permission_mode: "default" });
   // The turn is written after the prompt hook, as the harness does.
   appendFileSync(transcript, rows.map((r) => JSON.stringify(r)).join("\n"));
   assert.equal(loadSession(id).model, "claude-opus-5-5");
   // The turn started at the prompt hook; the log's rows are timestamped after it in this fixture.
   const stop = { session_id: id, cwd: dir, transcript_path: transcript, permission_mode: "default", stop_hook_active: false };
-  const first = await onStop(stop);
+  const first = await stopWithFired(stop);
   assert.match(first.reason, /Unseen claim: Run it, then report\./);
-  const evidence = calls.at(-1).state.evidence;
+  const evidence = stopEvaluations.at(-1).state.evidence;
   assert.equal(evidence.edited, true);
   assert.deepEqual(evidence.files_changed, ["src/Checkout.tsx"], "the earlier turn's Footer.tsx edit is outside this turn");
   assert.deepEqual(evidence.ui_files_changed, ["src/Checkout.tsx"]);
   assert.deepEqual(evidence.actions_after_last_edit, ["exit 0: npm test"]);
-  assert.equal(calls.at(-1).state.final_message, "Fixed; it works in the browser.");
-  assert.equal(await onStop({ ...stop, stop_hook_active: true }), null);
+  assert.equal(stopEvaluations.at(-1).state.final_message, "Fixed; it works in the browser.");
+  assert.equal(await stopWithFired({ ...stop, stop_hook_active: true }), null);
 });
 
 test("replay: a Claude prompt with an image keeps its words and names the image, never the bytes", async () => {
@@ -491,17 +536,6 @@ test("replay: a Claude prompt with an image keeps its words and names the image,
   const text = items[0].it.content[0].text;
   assert.equal(text, "[Image #1]\nboxes getting these colored left edges are slop too");
   assert.deepEqual(attachmentNames(text), ["Image #1"]);
-});
-
-test("optional entries are off until JEVIS_ENABLE names their id, their area, or all", () => {
-  const e = { id: "safety/force-push", optional: true };
-  assert.equal(enabled(e, ""), false);
-  assert.equal(enabled(e, "safety/force-push"), true);
-  assert.equal(enabled(e, "design, safety"), true);
-  assert.equal(enabled(e, "all"), true);
-  assert.equal(enabled({ id: "workspace/visible-window-or-sound" }, ""), true, "entries without optional are always on");
-  const shipped = loadWiki([WIKI_ROOT]).entries.filter((x) => x.optional).map((x) => x.id).sort();
-  assert.deepEqual(shipped, ["safety/browser-security-settings", "safety/docker-machine-wide-destruction", "safety/force-push", "safety/narrowest-delete"]);
 });
 
 test("turn evidence: facts only, from items after the turn began", () => {
@@ -574,11 +608,7 @@ test("an edit that failed or was refused is not evidence of a change, in either 
   assert.deepEqual(turnEvidence(readRollout(rollout).items, { cwd: "/p" }).files_changed, ["good.css"]);
 });
 
-test("secrets are masked before they leave the machine", () => {
-  const out = redact("key sk-abcdefghijklmnopqrstuv and postgres://u:hunter22@db/x and token=abcdef123456 and apikey_ABCDEFGHIJKLMNOPQRST");
-  assert.doesNotMatch(out, /abcdefghijklmnop|hunter22|abcdef123456|ABCDEFGHIJKLMNOPQRST/);
-  assert.match(out, /postgres:\/\/u:\[redacted\]@db/);
-});
+
 
 test("the call record keeps each answer as its probability, and JEVIS_RECORD=off keeps none", async () => {
   const file = join(process.env.JEVIS_HOME, "jev", "calls.jsonl");
@@ -620,4 +650,27 @@ test("a question set's version changes with its questions, not their order", () 
   const b = { y: a.y, x: a.x };
   assert.equal(questionsVersion(a), questionsVersion(b));
   assert.notEqual(questionsVersion(a), questionsVersion({ ...a, x: { type: "noul", instructions: "c" } }));
+});
+
+test("stop: critic off with edits ignores model-judged blocks and makes zero transport calls", async () => {
+  const saved = process.env.JEVIS_CRITIC;
+  process.env.JEVIS_CRITIC = "off";
+  try {
+    reset(() => 0.99);
+    const id = newSession();
+    const cwd = mkdtempSync(join(tmpdir(), "jevis-stop-off-"));
+    await onPrompt({ session_id: id, cwd, prompt: "fix the button", model: "gpt-6-sol" });
+    await onTool({ session_id: id, cwd, tool_name: "Write", tool_input: { file_path: "button.tsx", content: "export const Button = () => null" } });
+    calls = [];
+    assert.equal(await onStop({ session_id: id, cwd, last_assistant_message: "Done and verified." }), null);
+    assert.equal(calls.length, 0);
+    const row = readLog().filter((r) => r.sessionId === id && r.event === "stop").at(-1);
+    assert.equal(row.evidence.edited, true);
+    assert.equal(row.evidence.files, 1);
+    assert.deepEqual(row.acted, []);
+    assert.deepEqual(loadSession(id).stop.blocked, []);
+  } finally {
+    if (saved === undefined) delete process.env.JEVIS_CRITIC;
+    else process.env.JEVIS_CRITIC = saved;
+  }
 });

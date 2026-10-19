@@ -9,12 +9,12 @@ process.env.JEVIS_HOME = mkdtempSync(join(tmpdir(), "jevis-home-"));
 for (const k of ["JEVIS_MODE", "JEVIS_SCOPE", "JEVIS_DISABLE", "JEVIS_CRITIC", "AGENT_CALL_DEPTH", "BROKER_JOB_ID", "BROKER_DEPTH"]) delete process.env[k];
 const wikiDir = mkdtempSync(join(tmpdir(), "jevis-wiki-"));
 mkdirSync(join(wikiDir, "slop"), { recursive: true });
-writeFileSync(join(wikiDir, "slop", "glow.md"), "---\nevent: tool\ntools: [Write]\nask: Does `input` add glow blobs?\nunless: Does `request` ask for glow?\nmin: 0.85\naction: deny\ntitle: Glow blobs\nsource: test\n---\nBlurred orbs behind the hero are filler.\n\nInstead: show the product.\n");
+writeFileSync(join(wikiDir, "slop", "glow.md"), "---\nevent: tool\ntools: [Write]\nask: Does `input` add glow blobs?\nunless: Does `request` ask for glow?\nmin: 0.85\naction: context\ntitle: Glow blobs\nsource: test\n---\nBlurred orbs behind the hero are filler.\n\nInstead: show the product.\n");
 process.env.JEVIS_WIKI = wikiDir;
 
 const { setJevTransport } = await import("../src/jev.mjs");
 const { onPrompt, onStop } = await import("../src/hooks.mjs");
-const { criticPrompt, findUrls, parseReview, formatReview, setCapture, setCritic, telltales, REVIEW_ROUNDS } = await import("../src/review.mjs");
+const { criticPrompt, findUrls, parseReview, formatReview, capture, filmSound, setCapture, setCritic, telltales, REVIEW_ROUNDS } = await import("../src/review.mjs");
 const { loadSession, readLog } = await import("../src/state.mjs");
 
 let script = {};
@@ -125,10 +125,59 @@ test("review: fails open when the critic errors or talks nonsense", async () => 
   script = VISUAL;
   critic = () => ({ error: "exit 1: not logged in" });
   assert.equal(await onStop((await visualTurn()).stop), null);
+  critic = () => ({ error: "HTTP 402: private exception\n    at secretStack", text: FIX });
+  assert.equal(await onStop((await visualTurn()).stop), null, "a verdict cannot override a critic failure");
+  critic = () => { throw "private thrown value"; };
+  assert.equal(await onStop((await visualTurn()).stop), null, "non-Error throws stay local too");
   critic = () => ({ text: "I think it looks nice." });
   assert.equal(await onStop((await visualTurn()).stop), null);
   const last = readLog().filter((e) => e.event === "review").at(-1);
   assert.equal(last.error, "unreadable critic reply");
+});
+
+test("render diagnostics: exception details stay in local logs, never critic facts", async (t) => {
+  const { chromium } = await import("playwright-core");
+  const childProcess = (await import("node:child_process")).default;
+  const { syncBuiltinESMExports } = await import("node:module");
+  const detail = "HTTP 402: private-capture-detail\n    at privateStack";
+  t.mock.method(chromium, "launch", async () => ({
+    async newPage({ viewport }) {
+      const handlers = {};
+      return {
+        on: (name, handler) => { handlers[name] = handler; },
+        async goto(url) {
+          if (url.endsWith("broken.html")) throw new Error(detail);
+          handlers.pageerror(new Error(detail));
+          handlers.console({ type: () => "error", text: () => detail });
+        },
+        async waitForTimeout() {},
+        async screenshot() { return Buffer.from("fixture"); },
+        async evaluate(fn) {
+          const source = String(fn);
+          if (source.includes("scrollHeight")) return 900;
+          if (source.includes("scrollWidth")) return 0;
+          return false;
+        },
+        viewportSize: () => viewport,
+        async close() {},
+      };
+    },
+    async close() {},
+  }));
+  const dir = mkdtempSync(join(tmpdir(), "jevis-render-diagnostics-"));
+  const seen = await capture(["file:///page.html", "file:///broken.html"], { dir });
+  assert.equal(seen.shots.length, 3);
+  assert.deepEqual(seen.facts, ["The page logged 4 error(s).", "Could not render file:///broken.html."]);
+  writeFileSync(join(dir, "film.mp4"), "fixture video");
+  t.mock.method(childProcess, "execFileSync", () => { throw new Error(detail); });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const sound = filmSound({ cwd: dir, dir });
+  assert.deepEqual(sound.facts, ["The soundtrack could not be analysed."]);
+  assert.doesNotMatch(JSON.stringify([...seen.facts, ...sound.facts]), /HTTP 402|private-capture-detail|privateStack/);
+  const rows = readLog();
+  assert.ok(rows.some((row) => row.event === "render-errors" && row.errors.some((error) => error.includes("private-capture-detail"))));
+  for (const event of ["render-error", "soundtrack-error"]) assert.ok(rows.some((row) => row.event === event && row.error.includes("private-capture-detail")));
 });
 
 test("review: skipped for non-visual work, for turns that changed no interface file, and in shadow mode", async () => {
@@ -198,6 +247,9 @@ test("criticPrompt: a follow-up is judged with the conversation's first request,
 });
 
 test("formatReview and telltales read cleanly", () => {
+  for (const error of ["HTTP 402: private exception\n    at secretStack", "timeout", "exit 1"]) {
+    assert.equal(formatReview({ error, verdict: parseReview(FIX) }, 1), "", "failed reviews have no hook-visible text");
+  }
   const text = formatReview({ kind: "page", targets: ["http://localhost:5173/"], shots: ["/h/reviews/s/turn1-round1/a.png"], verdict: parseReview(FIX), backend: "claude" }, 1);
   assert.match(text, /Claude looked at renders of http:\/\/localhost:5173\/ at 1440 and 390 px/);
   assert.ok(text.includes(`screenshots are in ${dirname("/h/reviews/s/turn1-round1/a.png")}`));

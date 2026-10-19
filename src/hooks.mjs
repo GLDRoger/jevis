@@ -1,16 +1,18 @@
-import { attachmentNames, clip, commandKey, harnessOf, harnessWritten, hookItem, inputMarks, lastAgentMessage, lastUserMessageAt, mergeToolResults, museTool, originOf, requestText, sessionItems, toolInput, transcriptSize, turnEvidence, turnTexts, withTouched, workspaceOf } from "./context.mjs";
+import { clip, commandKey, harnessOf, harnessWritten, hookItem, inputMarks, isWorkerPrompt, lastAgentMessage, lastUserMessageAt, mergeToolResults, museTool, originOf, requestText, sessionItems, TEST_PATH, toolInput, transcriptSize, turnEvidence, turnTexts, UI_FILE, withTouched, workspaceOf } from "./context.mjs";
 import { evaluate } from "./engine.mjs";
-import { redact, redactDeep } from "./redact.mjs";
-import { criticBackend, designLaw, formatReview, review, roundsFor } from "./review.mjs";
+import { criticBackend, formatReview, review, roundsFor } from "./review.mjs";
 import { loadSession, log, saveSession } from "./state.mjs";
 import { wikiFor } from "./wiki.mjs";
 import { insideFolder, splitFolders } from "./paths.mjs";
-import { outageLine } from "./health.mjs";
+import { errorMessage, outageLine } from "./health.mjs";
 import { RESULT_MEMORY, toolResult } from "./post.mjs";
+import { nudgeText } from "./nudges.mjs";
+import { isCheckCommand } from "./bash-facts.mjs";
 
 /**
  * The hooks. Every one fails open: no Jev, no key, a timeout, or a bug
- * means the agent carries on untouched.
+ * means the agent carries on untouched. Tool hooks only add context;
+ * the code-decided Stop check and optional design review can send work back.
  *
  * Limits learned from an earlier hook system, which once held a session for hours over one wrong block:
  * - a context note is given once per session (again after the context is compacted);
@@ -21,7 +23,6 @@ import { RESULT_MEMORY, toolResult } from "./post.mjs";
 export const MAX_NOTES = 4;
 export const NOTE_BUDGET = 3000;
 export const MAX_STOP_BLOCKS = 2;
-export const MAX_DENIES = 3;
 /** The model name used for Claude Code before its transcript names one: in the claude family. */
 export const CLAUDE_UNKNOWN = "claude-unknown";
 /** How many distinct commands a session remembers for marks.ran_before. */
@@ -58,6 +59,68 @@ function sessionOutage(session) {
   return line;
 }
 
+/** Nudges never judge or block; even their loading and bookkeeping fail open. */
+function nudgeContext(hook, sessionId, harness, model, session, key = null) {
+  try {
+    if (shadow()) return "";
+    const { ids, text } = nudgeText(hook, model);
+    if (!text) return "";
+    if (hook === "ui-edit" || hook === "repeat-check") {
+      const flag = hook === "ui-edit" ? "uiEdit" : "repeatCheck";
+      const now = loadSession(sessionId);
+      if (now.turn !== session.turn || now.nudged?.[flag] === session.turn) return "";
+      now.nudged = { ...now.nudged, [flag]: session.turn };
+      if (!saveSession(sessionId, now)) return "";
+    }
+    if (hook === "search" || hook === "port-in-use") {
+      const flag = hook === "search" ? "search" : "portInUse";
+      // Once per session; a compaction or clear resets it, since the earlier tip is gone from context.
+      const now = loadSession(sessionId);
+      if (now.nudged?.[flag]) return "";
+      now.nudged = { ...now.nudged, [flag]: true };
+      // A port error is shown once; only a new one brings the tip back after a compaction.
+      if (hook === "port-in-use") now.portInUse = false;
+      if (!saveSession(sessionId, now)) return "";
+    }
+    if (hook === "repeat-failure") {
+      const now = loadSession(sessionId);
+      if (!key || now.nudged?.repeatFailure?.[key]) return "";
+      now.nudged = { ...now.nudged, repeatFailure: { ...now.nudged?.repeatFailure, [key]: true } };
+      if (!saveSession(sessionId, now)) return "";
+    }
+    log({ event: "nudge", sessionId, harness, model, hook, ids, turn: session.turn });
+    return text;
+  } catch { return ""; }
+}
+
+function uiEditNudge(tool, rawInput, sessionId, harness, session) {
+  try {
+    const item = hookItem(tool, rawInput ?? {});
+    if (item?.type !== "FileChange" || !item.changes.some(({ path }) => UI_FILE.test(path) && !TEST_PATH.test(path.replaceAll("\\", "/")))) return "";
+    return nudgeContext("ui-edit", sessionId, harness, session.model, session);
+  } catch { return ""; }
+}
+
+/** A shell command that searches with grep or find, as a command word (not `git grep`, not an argument). */
+export const LEGACY_SEARCH = /(?:^|[;&|(`]|\$\(|\bxargs(?:\s+-\S+)*)\s*(?:sudo\s+)?(?:[ef]?grep|find)\s/;
+function searchNudge(tool, shown, sessionId, harness, session) {
+  try {
+    if (tool !== "Bash" || !LEGACY_SEARCH.test(shown)) return "";
+    return nudgeContext("search", sessionId, harness, session.model, session);
+  } catch { return ""; }
+}
+
+const PORT_IN_USE = /EADDRINUSE|address already in use|port \d+ is already in use/i;
+function midSessionNudges(key, check, sessionId, harness, session) {
+  try {
+    const hooks = [];
+    if (key && session.commandFailures?.[key] >= 2) hooks.push("repeat-failure");
+    if (key && check && session.checkEdits?.[key] === (session.editVersion ?? 0)) hooks.push("repeat-check");
+    if (session.portInUse) hooks.push("port-in-use");
+    return hooks.map((hook) => nudgeContext(hook, sessionId, harness, session.model, session, key)).filter(Boolean).join("\n\n");
+  } catch { return ""; }
+}
+
 /** Notes that fit the budget, strongest first, each at most once per session. */
 function pickNotes(fired, session, limit = MAX_NOTES) {
   const out = [];
@@ -74,6 +137,23 @@ function pickNotes(fired, session, limit = MAX_NOTES) {
 
 const formatNotes = (notes, lead) => [lead, ...notes.map((e) => `**${e.title}.** ${e.body}`)].join("\n\n");
 
+/**
+ * Short feedback that says something missed without saying what: "not good",
+ * "try again", "doesn't fit what I had in mind". The whole message has to be
+ * the complaint: a negative word inside a longer instruction ("this doesn't
+ * work for X, so do Y"), a question, or a conditional ("if I'm not wrong") is
+ * not vague feedback. A replay over 4,637 logged prompts (Oct 2026) found 9
+ * matches under the old rule, 8 of them false. Code only; every match is
+ * logged as a feedback nudge, so misses and false matches show up in review.
+ */
+const VAGUE = /\b(?:not (?:good|great|right|it|quite|there|like (?:this|that)|what i (?:wanted|meant|asked for|had in mind))|(?:doesn'?t|does not|didn'?t|did not|isn'?t|is not) (?:fit|work|look right|feel right|match|land|it|right)(?! (?:for|on|with|in|when|if|because|since|unless|at|yet)\b)|try again|try something else|start over|redo it|do it again|still (?:wrong|broken|bad|not (?:it|right|good))|that'?s not it|no+pe|meh|nah|(?<!not )wrong|worse|ugly|hate it|not a fan|missed the point)\b/;
+const VAGUE_MAX_WORDS = 8;
+export function isVagueFeedback(text) {
+  const t = String(text ?? "").replace(/\[image #\d+\]/gi, "").trim().toLowerCase().replaceAll("\u2019", "'");
+  if (!t || t.length > 150 || t.includes("?")) return false;
+  return t.split(/\s+/).length <= VAGUE_MAX_WORDS && VAGUE.test(t);
+}
+
 /** UserPromptSubmit: profile the request and hand over the lessons that match it. */
 export async function onPrompt(input) {
   const { session_id: sessionId, cwd, prompt } = input;
@@ -81,11 +161,11 @@ export async function onPrompt(input) {
   const { harness, model } = harnessOf(input);
   const session = loadSession(sessionId);
   const outage = sessionOutage(session);
-  // Stored masked: session files sit on disk, and everything downstream reads the request from here.
-  const request = clip(redact(requestText(prompt)), 2000);
+  const request = clip(requestText(prompt), 2000);
+  if ((session.turn === 0 && isWorkerPrompt(prompt)) || originOf("", process.env) === "agent") session.worker = true;
   Object.assign(session, {
     previousRequest: session.request,
-    // Permission given a few messages back ("commit whenever it makes sense") still holds: tool checks read these.
+    // Tool notes can read the recent conversation, not just its latest request.
     earlierRequests: session.request ? [...(session.earlierRequests ?? []), clip(session.request, EARLIER_CLIP)].slice(-EARLIER_MEMORY) : session.earlierRequests ?? [],
     request,
     // The design review judges a follow-up against what the conversation set out to build.
@@ -103,46 +183,42 @@ export async function onPrompt(input) {
     model: model ?? session.model ?? (harness === "Claude Code" ? CLAUDE_UNKNOWN : null),
   });
   if (!saveSession(sessionId, session)) return null;
-  const state = {
-    request: session.request,
-    previous_request: session.previousRequest ? clip(session.previousRequest, 600) : null,
-    attachments: attachmentNames(prompt),
-    workspace: workspaceOf(cwd),
-    agent: { harness, model: session.model, origin: originOf(prompt) },
-    // Whether this user keeps a design law file (see designLaw in review.mjs).
-    user: { design_law: designLaw() !== null },
-  };
-  const result = await evaluate({ event: "prompt", state, model: session.model, harness, sessionId, timeoutMs: timeout("prompt"), wiki: wikiFor(cwd) });
-  const notes = pickNotes(result.fired, session);
-  log({ event: "prompt", sessionId, harness, model: session.model, origin: state.agent.origin, turn: session.turn, cwd, request: clip(session.request, 200), ...summary(result), acted: notes.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
-  if ((!notes.length && !outage) || shadow()) return null;
-  const now = loadSession(sessionId);
-  for (const e of notes) now.shown[e.id] = session.turn;
-  if (!saveSession(sessionId, now)) return null;
-  return {
-    hookSpecificOutput: {
-      hookEventName: "UserPromptSubmit",
-      additionalContext: [outage, notes.length ? formatNotes(notes, "Jevis: lessons from past sessions where requests like this went wrong. Use what fits; where the user's instructions differ, theirs win.") : null].filter(Boolean).join("\n\n"),
-    },
-  };
+  // v2: no lesson notes and no decision-model call on prompts. A month of
+  // real use (Sep 28 - Oct 18 2026) showed 0 of 60 sampled notes changed an
+  // outcome the agent's own instruction files would not have produced; the
+  // place for a standing lesson is AGENTS.md / CLAUDE.md, not a runtime note.
+  // The hook stays for the session bookkeeping the tool and stop hooks read.
+  log({ event: "prompt", worker: session.worker || undefined, sessionId, harness, model: session.model, origin: originOf(prompt), turn: session.turn, cwd, request: clip(session.request, 200), acted: [], mode: shadow() ? "shadow" : "live" });
+  if (shadow()) return null;
+  // Vague feedback after an agent turn: the first gets the feedback tip, later ones in the session the stronger one.
+  let feedback = "";
+  if (!session.worker && session.turn > 1 && isVagueFeedback(request)) {
+    const seen = session.vagueFeedback ?? 0;
+    feedback = nudgeContext(seen ? "feedback-repeat" : "feedback", sessionId, harness, session.model, session);
+    const now = loadSession(sessionId);
+    now.vagueFeedback = seen + 1;
+    saveSession(sessionId, now);
+  }
+  const additionalContext = [outage, session.worker ? "" : nudgeContext("prompt", sessionId, harness, session.model, session), feedback, session.worker ? nudgeContext("worker", sessionId, harness, session.model, session) : ""].filter(Boolean).join("\n\n");
+  return additionalContext ? { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext } } : null;
 }
 
-function denyReason(denies) {
-  const lines = denies.length === 1
-    ? [`Jevis stopped this call. ${denies[0].title}: ${denies[0].body}`]
-    : ["Jevis stopped this call:", ...denies.map((e) => `- ${e.title}: ${e.body}`)];
-  lines.push("Redo the call without this. If the user explicitly asked for exactly this, tell them why it was stopped and let them run it.");
-  return lines.join("\n");
-}
-
-/** Pre-tool hooks know permission, not execution success. Keep only allowed
- * calls as fallback evidence; redact before bounding, independently of RECORD.
+/** Pre-tool hooks record attempts, not execution success. Keep bounded
+ * calls as fallback evidence, independently of RECORD.
  */
-function rememberAllowedTool(input, tool, rawInput, key) {
+function rememberTool(input, tool, rawInput, key, check) {
   const now = loadSession(input.session_id);
   let changed = false;
+  const item = hookItem(tool, rawInput ?? {});
+  if (item?.type === "FileChange") {
+    now.editVersion = (now.editVersion ?? 0) + 1;
+    changed = true;
+  }
+  if (key && check) {
+    now.checkEdits = { ...now.checkEdits, [key]: now.editVersion ?? 0 };
+    changed = true;
+  }
   if (!input.transcript_path) {
-    const item = redactDeep(hookItem(tool, rawInput ?? {}));
     if (item) {
       if (item.type === "CommandExecution") item.command = clip(item.command, HOOK_ITEM_CLIP);
       if (item.type === "FileChange") item.changes = item.changes.slice(0, 20).map((c) => ({ path: clip(c.path, 200) }));
@@ -170,18 +246,34 @@ function rememberAllowedTool(input, tool, rawInput, key) {
 export function onPost(input) {
   try {
     if (!input.session_id || !inScope(input.cwd)) return null;
-    const row = toolResult(input);
-    if (!row) return null;
     const session = loadSession(input.session_id);
-    if (row.turnId && session.turnId && row.turnId !== session.turnId) return null;
+    if (input.turn_id && session.turnId && input.turn_id !== session.turnId) return null;
+    // Inspect the result, never the command/arguments. Keep only the fact, not tool output.
+    const row = toolResult(input);
+    // Only a failed call counts: output that merely contains the words (a diff, a file read) is not a port error.
+    const response = input.tool_response && typeof input.tool_response === "object" ? input.tool_response : {};
+    const failed = row ? row.it.success === false : input.hook_event_name === "PostToolUseFailure" || response.is_error === true || (response.exit_code ?? 0) !== 0;
+    const port = failed && (PORT_IN_USE.test(typeof input.tool_response === "string" ? input.tool_response : JSON.stringify(input.tool_response) ?? "") || PORT_IN_USE.test(input.error ?? ""));
+    if (!row && !port) return null;
+    if (port) session.portInUse = true;
     const prior = session.hookResults ?? [];
-    session.hookResults = mergeToolResults(prior, [row]).slice(-RESULT_MEMORY);
+    if (row) {
+      const it = row.it;
+      const duplicate = it.id && prior.some(({ it: old }) => old.id === it.id && old.completed !== false && old.success === it.success && old.exit_code === it.exit_code);
+      if (it.type === "CommandExecution" && it.completed !== false && !duplicate) {
+        const key = commandKey(it.command);
+        // Persist across prompts, which clear turn-local hookResults. Unknown outcomes break the streak.
+        session.commandFailures = { ...session.commandFailures, [key]: it.success === false ? Math.min(2, (session.commandFailures?.[key] ?? 0) + 1) : 0 };
+      }
+      if (it.type === "FileChange" && it.success === true && !duplicate) session.editVersion = (session.editVersion ?? 0) + 1;
+      session.hookResults = mergeToolResults(prior, [row]).slice(-RESULT_MEMORY);
+    }
     saveSession(input.session_id, session);
   } catch { /* post hooks always fail open */ }
   return null;
 }
 
-/** PreToolUse: refuse a call a deny entry matches; otherwise add a note the first time one applies. */
+/** PreToolUse: add a matching context note or a design tip, never change the call. */
 export async function onTool(input) {
   const { session_id: sessionId, cwd } = input;
   const { harness } = harnessOf(input, { withModel: false });
@@ -190,33 +282,31 @@ export async function onTool(input) {
   const session = loadSession(sessionId);
   const shown = toolInput(tool, rawInput);
   const key = tool === "Bash" ? commandKey(shown) : null;
+  const check = tool === "Bash" && isCheckCommand(shown);
   const commands = session.commands ?? [];
   const state = { request: session.request ?? "", earlier_requests: session.earlierRequests ?? [], tool, input: shown, marks: inputMarks(shown, { tool, ranBefore: key !== null && commands.includes(key) }), workspace: workspaceOf(cwd) };
-  const result = await evaluate({ event: "tool", state, tool, model: session.model, harness, sessionId, timeoutMs: timeout("tool"), wiki: wikiFor(cwd) });
+  const result = session.worker
+    ? { skipped: "worker", fired: [] }
+    : await evaluate({ event: "tool", state, tool, model: session.model, harness, sessionId, timeoutMs: timeout("tool"), wiki: wikiFor(cwd) });
   if (result.skipped) {
-    rememberAllowedTool(input, tool, rawInput, key);
     // Logged without the input: a skipped call is counted by `jevis stats`, not judged.
-    log({ event: "tool", sessionId, harness, turn: session.turn, tool, skipped: result.skipped, plain_read: state.marks.plain_read || undefined });
-    return null;
+    log({ event: "tool", worker: session.worker || undefined, sessionId, harness, turn: session.turn, tool, skipped: result.skipped, plain_read: state.marks.plain_read || undefined });
   }
-  // Every matching deny goes back at once: an edit with three slop patterns should be fixed in one retry, not three.
-  const denies = result.fired.filter((e) => e.action === "deny").slice(0, MAX_DENIES);
-  const notes = denies.length ? [] : pickNotes(result.fired, session, 2);
-  log({ event: "tool", sessionId, harness, turn: session.turn, tool, input: clip(state.input, 200), subagent: input.agent_id ? true : undefined, ...summary(result), acted: denies.length ? denies.map((e) => e.id) : notes.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
+  const notes = pickNotes(result.fired, session, 2);
+  if (!result.skipped) log({ event: "tool", worker: session.worker || undefined, sessionId, harness, turn: session.turn, tool, input: clip(state.input, 200), subagent: input.agent_id ? true : undefined, ...summary(result), acted: notes.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
   if (shadow()) {
-    rememberAllowedTool(input, tool, rawInput, key);
+    rememberTool(input, tool, rawInput, key, check);
     return null;
   }
-  if (denies.length) {
-    return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: denyReason(denies) } };
+  rememberTool(input, tool, rawInput, key, check);
+  if (notes.length) {
+    // Re-read before writing: other hooks of this session (parallel tool calls, subagents) may have saved while Jev answered.
+    const now = loadSession(sessionId);
+    for (const e of notes) now.shown[e.id] = session.turn;
+    if (!saveSession(sessionId, now)) return null;
   }
-  rememberAllowedTool(input, tool, rawInput, key);
-  if (!notes.length) return null;
-  // Re-read before writing: other hooks of this session (parallel tool calls, subagents) may have saved while Jev answered.
-  const now = loadSession(sessionId);
-  for (const e of notes) now.shown[e.id] = session.turn;
-  if (!saveSession(sessionId, now)) return null;
-  return { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: formatNotes(notes, "Jevis, before this call:") } };
+  const additionalContext = [notes.length ? formatNotes(notes, "Jevis, before this call:") : "", uiEditNudge(tool, rawInput, sessionId, harness, session), searchNudge(tool, shown, sessionId, harness, session), midSessionNudges(key, check, sessionId, harness, session)].filter(Boolean).join("\n\n");
+  return additionalContext ? { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext } } : null;
 }
 
 /** Stop: send the agent back once per lesson when its final message and the turn's evidence match a block entry. */
@@ -236,10 +326,15 @@ export async function onStop(input) {
   const { harness } = harnessOf(input, { withModel: false });
   const since = session.turnStartedAt ?? lastUserMessageAt(items);
   const state = { request: session.request ?? "", final_message: clip(final, 3000), evidence: withTouched(turnEvidence(items ?? [], { since, cwd }), cwd, session.turnStartedAt, items) };
-  const result = await evaluate({ event: "stop", state, model: session.model, harness, sessionId, timeoutMs: timeout("stop"), wiki: wikiFor(cwd) });
+  // v2: only code-decided stop entries may block. Model-judged stop blocks
+  // caught 4 real problems in a month against 54 harmful blocks (audit,
+  // Oct 18 2026). The decision model is asked only for the review's axes,
+  // and only when a review could run at all.
+  const reviewPossible = !session.worker && criticBackend() !== "off" && session.stop.reviews < roundsFor(session) && (state.evidence.ui_files_changed.length > 0 || state.evidence.files_changed_count > 0);
+  const result = await evaluate({ event: "stop", state, model: session.model, harness, sessionId, timeoutMs: timeout("stop"), wiki: wikiFor(cwd), codeOnly: true, axes: reviewPossible, local: Boolean(session.worker) });
   const blocks = wikiSpent ? [] : result.fired.filter((e) => e.action === "block" && !session.stop.blocked.includes(e.id)).slice(0, MAX_STOP_BLOCKS - session.stop.blocked.length);
-  log({ event: "stop", sessionId, harness, turn: session.turn, final: clip(final, 200), evidence: { edited: state.evidence.edited, files: state.evidence.files_changed_count, ui_files: state.evidence.ui_files_changed.length, after: state.evidence.actions_after_last_edit.length }, ...summary(result), acted: blocks.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
-  if (!blocks.length) return reviewTurn({ input, session, sessionId, cwd, harness, state, profile: result.profile, items, since, final });
+  log({ event: "stop", worker: session.worker || undefined, sessionId, harness, turn: session.turn, final: clip(final, 200), evidence: { edited: state.evidence.edited, files: state.evidence.files_changed_count, ui_files: state.evidence.ui_files_changed.length, after: state.evidence.actions_after_last_edit.length }, ...summary(result), acted: blocks.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
+  if (!blocks.length) return session.worker ? null : reviewTurn({ input, session, sessionId, cwd, harness, state, profile: result.profile, items, since, final });
   if (shadow()) return null;
   session.stop.blocked.push(...blocks.map((e) => e.id));
   const now = loadSession(sessionId);
@@ -291,7 +386,7 @@ async function reviewTurn({ input, session, sessionId, cwd, harness, state, prof
   try {
     r = await review({ kind: film ? "film" : "page", sessionId, turn: session.turn, round, of: rounds, cwd, request: session.request ?? "", firstRequest: session.firstRequest !== session.request ? session.firstRequest : null, files: state.evidence.files_changed, texts: [...turnTexts(items ?? [], { since }), final], shown: session.shown });
   } catch (e) {
-    r = { error: e.message.slice(0, 200) };
+    r = { error: errorMessage(e) };
   }
   log({ ...base, kind: r.kind, targets: r.targets, ms: r.ms, verdict: r.verdict?.verdict, items: r.verdict?.must_fix?.length, skipped: r.skipped, error: r.error, facts: r.facts });
   // A round counts once it rendered something, so a broken critic cannot hold the turn forever.
@@ -312,9 +407,20 @@ export function onSession(input) {
   const session = loadSession(sessionId);
   if (source === "compact" || source === "clear") {
     session.shown = {};
+    if (session.nudged) Object.assign(session.nudged, { search: false, repeatFailure: {}, repeatCheck: null, portInUse: false });
+    if (source === "clear") {
+      session.vagueFeedback = 0;
+    }
     log({ event: "session", sessionId, source, reset: true });
   }
   const outage = input.hook_event_name === "PostCompact" ? null : sessionOutage(session);
-  if (!saveSession(sessionId, session) || !outage) return null;
-  return { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: outage } };
+  if (!saveSession(sessionId, session)) return null;
+  const nudge = input.hook_event_name !== "PostCompact" && ["startup", "resume", "clear", "compact"].includes(source)
+    ? (() => {
+      const { harness } = harnessOf(input, { withModel: false });
+      // Claude Code's SessionStart may not name the model; it runs Claude models, so Claude's design list applies.
+      return nudgeContext("session", sessionId, harness, input.model ?? session.model ?? (harness === "Claude Code" ? CLAUDE_UNKNOWN : null), session);
+    })() : "";
+  const additionalContext = [outage, nudge].filter(Boolean).join("\n\n");
+  return additionalContext ? { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext } } : null;
 }

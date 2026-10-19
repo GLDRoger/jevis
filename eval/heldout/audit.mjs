@@ -23,7 +23,7 @@ const rows = wiki.entries
       e.event === "tool"
         ? over
           ? "Owner recommendation: inspect real near-miss edits and gate marks before lowering; do not tune tool rules on contaminated batteries."
-          : "Keep unchanged; optional safety is intentionally off. No deletion now."
+          : "Keep unchanged; no near-miss evidence supports a change."
         : e.id === "verification/fixed-without-repro"
           ? "min 0.90 → 0.75: one tune catch, zero false blocks."
           : over

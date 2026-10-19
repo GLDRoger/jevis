@@ -2,7 +2,7 @@
   "name": "jevis",
   "version": "0.1.0",
   "private": true,
-  "description": "Hooks that give Codex, Claude Code, and other coding agents a second pair of eyes: lessons at the right moment, refusals before mistakes, and a design review before done.",
+  "description": "Hooks that give Codex, Claude Code, and other coding agents a second pair of eyes: tips at the right moment and an opt-in design review before done.",
   "license": "MIT",
   "repository": {
     "type": "git",

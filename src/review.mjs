@@ -3,10 +3,10 @@ import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { homedir } from "node:os";
-import { ensureDir, jevisHome } from "./state.mjs";
+import { ensureDir, jevisHome, log } from "./state.mjs";
 import { findOnPath, insideFolder } from "./paths.mjs";
-import { redact } from "./redact.mjs";
 import { loadWiki, wikiFor } from "./wiki.mjs";
+import { errorMessage } from "./health.mjs";
 
 /**
  * The reviewers: when a turn ends on visual work, Jevis renders what the agent
@@ -173,7 +173,10 @@ async function capturePage(browser, url, dir, i) {
   await shoot(phone, file, PAGE_MAX_HEIGHT);
   shots.push({ file, what: `${url} at 390 wide (a phone), the page from the top` });
   await phone.close();
-  if (errors.length) facts.push(`The page logged ${errors.length} error(s): ${[...new Set(errors)].slice(0, 3).join(" | ")}`);
+  if (errors.length) {
+    log({ event: "render-errors", errors });
+    facts.push(`The page logged ${errors.length} error(s).`);
+  }
   return { shots, facts };
 }
 
@@ -260,7 +263,10 @@ async function captureFilm(browser, url, dir) {
       hooks = await frameHooks();
     }
     started = "not pressed: frames were drawn directly through renderAt(t)";
-  } else started = await start(page).catch((e) => `start failed: ${e.message.slice(0, 120)}`);
+  } else started = await start(page).catch((e) => {
+    log({ event: "render-start-error", error: String(e?.message ?? e) });
+    return "playback did not start";
+  });
   const stills = hooks.renderAt && hooks.length;
   const duration = stills ? hooks.length : Math.min(hooks.length ?? FILM_MAX_SECONDS, FILM_MAX_SECONDS);
   const t0 = Date.now();
@@ -284,7 +290,10 @@ async function captureFilm(browser, url, dir) {
   facts.push(`Start: ${started}.`);
   const still = diffs.filter((d) => d.diff < STATIC_DIFF);
   if (still.length) facts.push(`The picture barely changed going into ${still.map((d) => `${d.at}s`).join(", ")} (mean change under ${STATIC_DIFF}/255).`);
-  if (errors.length) facts.push(`The page logged ${errors.length} error(s): ${[...new Set(errors)].slice(0, 3).join(" | ")}`);
+  if (errors.length) {
+    log({ event: "render-errors", errors });
+    facts.push(`The page logged ${errors.length} error(s).`);
+  }
   return { shots, facts };
 }
 
@@ -337,7 +346,8 @@ export function filmSound({ cwd, dir, files = [] }) {
     const peak = summary.match(/Peak:\s+(-?[\d.]+) dBFS/)?.[1];
     if (I) facts.push(`Soundtrack: ${I} LUFS integrated, ${peak ?? "?"} dBFS true peak.`);
   } catch (e) {
-    facts.push(`The soundtrack could not be analysed: ${String(e.message).split("\n")[0].slice(0, 120)}`);
+    log({ event: "soundtrack-error", error: String(e?.message ?? e) });
+    facts.push("The soundtrack could not be analysed.");
   }
   return { shots, facts };
 }
@@ -371,7 +381,8 @@ export async function capture(targets, { dir, film = false }) {
         out.shots.push(...r.shots);
         out.facts.push(...r.facts);
       } catch (e) {
-        out.facts.push(`Could not render ${url}: ${e.message.split("\n")[0].slice(0, 160)}`);
+        log({ event: "render-error", target: url, error: String(e?.message ?? e) });
+        out.facts.push(`Could not render ${url}.`);
       }
     }
     return out;
@@ -552,7 +563,7 @@ export async function review({ kind = "page", sessionId, turn, round, of = REVIE
   try {
     seen = await (captureRunner ?? capture)(targets, { dir, film: kind === "film" });
   } catch (e) {
-    return { error: `render failed: ${e.message.split("\n")[0].slice(0, 200)}`, targets };
+    return { error: `render failed: ${errorMessage(e)}`, targets };
   }
   if (!seen.shots.length) return { error: "no screenshots", targets, facts: seen.facts };
   if (kind === "film" && !captureRunner) {
@@ -560,8 +571,7 @@ export async function review({ kind = "page", sessionId, turn, round, of = REVIE
     seen = { shots: [...seen.shots, ...sound.shots], facts: [...seen.facts, ...sound.facts] };
   }
   const wiki = wikiFor(cwd);
-  // The critic is a model call off this machine: the request passes through the same mask as Jev's state.
-  const prompt = redact(criticPrompt({ kind, request, firstRequest, targets, shots: seen.shots, facts: seen.facts, files, telltales: telltales(wiki), lessons: lessonsShown(shown, wiki), round, of }));
+  const prompt = criticPrompt({ kind, request, firstRequest, targets, shots: seen.shots, facts: seen.facts, files, telltales: telltales(wiki), lessons: lessonsShown(shown, wiki), round, of });
   const t = Date.now();
   const reply = await runCritic(prompt, { cwd, dir, shots: seen.shots });
   const ms = Date.now() - t;
@@ -573,6 +583,7 @@ export async function review({ kind = "page", sessionId, turn, round, of = REVIE
 
 /** The stop block the agent reads: what is there now, what to do instead. */
 export function formatReview(r, round, of = REVIEW_ROUNDS) {
+  if (r.error || r.skipped || r.verdict?.verdict !== "fix") return "";
   const who = r.backend === "codex" ? "Codex" : "Claude";
   const what = r.kind === "film" ? `frames sampled from ${r.targets.join(", ")}` : `renders of ${r.targets.join(", ")} at 1440 and 390 px`;
   return [

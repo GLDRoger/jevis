@@ -42,7 +42,7 @@ export function gateReplay({ file = join(jevisHome(), "log.jsonl"), wiki = loadW
     for (const id of fired) {
       const entry = entries.get(id);
       if (!entry) { report.missingLessons[id] = (report.missingLessons[id] ?? 0) + 1; continue; }
-      // Audit optional lessons even when currently disabled.
+      // Audit recorded fires against every matching lesson.
       if (applies(entry, opts) && factsHold(entry.when, { event: "tool", state })) continue;
       report.lostFires++;
       report.byLesson[id] = (report.byLesson[id] ?? 0) + 1;

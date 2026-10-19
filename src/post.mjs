@@ -1,5 +1,4 @@
 import { clip, harnessOf, hookItem, museTool } from "./context.mjs";
-import { redactDeep } from "./redact.mjs";
 
 export const RESULT_MEMORY = 200;
 export const RESULT_CLIP = 4000;
@@ -11,7 +10,7 @@ export const RESULT_CLIP = 4000;
 export function toolResult(input, { now = Date.now(), startedAt = null, endedAt = null } = {}) {
   const { harness } = harnessOf(input, { withModel: false });
   const { tool, input: args } = harness === "Muse Code" ? museTool(input.tool_name, input.tool_input) : { tool: input.tool_name, input: input.tool_input };
-  const it = redactDeep(hookItem(tool, typeof args === "string" ? { command: args, input: args } : args ?? {}));
+  const it = hookItem(tool, typeof args === "string" ? { command: args, input: args } : args ?? {});
   if (!it) return null;
   let response = input.tool_response;
   if (typeof response === "string" && response.length < 16_384) {
@@ -33,7 +32,7 @@ export function toolResult(input, { now = Date.now(), startedAt = null, endedAt 
   if (it.type === "FileChange") it.changes = it.changes.slice(0, 20).map((c) => ({ path: clip(c.path, 200) }));
   if (it.type === "McpToolCall") {
     // Result evidence needs the tool identity, not potentially huge arguments
-    // or output (which may include file contents and secrets).
+    // or output.
     it.server = clip(it.server, 100);
     it.tool = clip(it.tool, 100);
     delete it.arguments;
@@ -42,5 +41,5 @@ export function toolResult(input, { now = Date.now(), startedAt = null, endedAt 
     start: Number.isFinite(startedAt) && startedAt >= 0 ? startedAt : null,
     end: !pending && Number.isFinite(endedAt) && endedAt >= 0 ? endedAt : null,
   };
-  return redactDeep({ t: execution.end ?? execution.start, execution, receivedAt: now, turnId: clip(input.turn_id ?? "", 200) || undefined, it });
+  return { t: execution.end ?? execution.start, execution, receivedAt: now, turnId: clip(input.turn_id ?? "", 200) || undefined, it };
 }

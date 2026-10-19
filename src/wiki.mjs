@@ -23,9 +23,9 @@ import { insideFolder, isQualifiedPath, samePath, splitFolders } from "./paths.m
 
 export const WIKI_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "wiki");
 const EVENTS = ["prompt", "tool", "stop"];
-const ACTIONS = { prompt: ["context"], tool: ["context", "deny"], stop: ["block"] };
+const ACTIONS = { prompt: ["context"], tool: ["context"], stop: ["block"] };
 const REQUIRED = ["event", "ask", "action", "title", "source"];
-const KNOWN = new Set([...REQUIRED, "yes", "no", "min", "when", "tools", "family", "unless", "unless_max", "optional", "off", "decide"]);
+const KNOWN = new Set([...REQUIRED, "yes", "no", "min", "when", "tools", "family", "unless", "unless_max", "off", "decide"]);
 export const DEFAULT_UNLESS_MAX = 0.5;
 export const DEFAULT_MIN = 0.75;
 
@@ -85,7 +85,7 @@ function splitTop(text) {
   return parts;
 }
 
-export function parseEntry(text, id) {
+export function parseFrontmatter(text, id) {
   const m = String(text).replaceAll("\r\n", "\n").match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!m) throw new Error(`${id}: no frontmatter`);
   const entry = { id };
@@ -107,6 +107,11 @@ export function parseEntry(text, id) {
     entry[key] = ["ask", "yes", "no", "title", "source", "unless"].includes(key) ? unquote(raw) : parseValue(raw);
   }
   entry.body = m[2].trim();
+  return entry;
+}
+
+export function parseEntry(text, id) {
+  const entry = parseFrontmatter(text, id);
   entry.min = entry.min ?? DEFAULT_MIN;
   entry.when = entry.when ?? {};
   if (entry.unless !== undefined) entry.unless_max = entry.unless_max ?? DEFAULT_UNLESS_MAX;
@@ -119,12 +124,12 @@ export function validateEntry(e) {
   for (const k of REQUIRED) if (e[k] === undefined || e[k] === "") errors.push(`missing ${k}`);
   for (const k of Object.keys(e)) if (!["id", "body"].includes(k) && !KNOWN.has(k)) errors.push(`unknown field ${k}`);
   if (!EVENTS.includes(e.event)) errors.push(`event must be one of ${EVENTS.join(", ")}`);
-  else if (!ACTIONS[e.event].includes(e.action)) errors.push(`action on ${e.event} must be ${ACTIONS[e.event].join(" or ")}`);
+  if (e.action === "deny") errors.push("Jevis never refuses a call: use action: context");
+  else if (EVENTS.includes(e.event) && !ACTIONS[e.event].includes(e.action)) errors.push(`action on ${e.event} must be ${ACTIONS[e.event].join(" or ")}`);
   if (typeof e.min !== "number" || e.min <= 0 || e.min > 1) errors.push("min must be a number in (0, 1]");
   if (!e.body) errors.push("empty body");
   if (e.body && e.body.length > 900) errors.push(`body is ${e.body.length} characters; keep it under 900`);
   if (e.tools !== undefined && (e.event !== "tool" || !Array.isArray(e.tools))) errors.push("tools is a list, on tool entries only");
-  if (e.optional !== undefined && typeof e.optional !== "boolean") errors.push("optional is true or false");
   if (e.decide !== undefined && !RULES.includes(e.decide)) errors.push(`decide must be one of ${RULES.join(", ")}`);
   if (e.family !== undefined && !FAMILIES.includes(e.family)) errors.push(`family is ${FAMILIES.join(" or ")}; leave it out for every model`);
   if (typeof e.when !== "object" || Array.isArray(e.when)) errors.push("when is a map");
@@ -137,7 +142,6 @@ export function validateEntry(e) {
   }
   if (typeof e.ask === "string" && !/`[\w.]+`/.test(e.ask)) errors.push("ask must name the state field it reads, in backticks");
   if (e.unless !== undefined && !/`[\w.]+`/.test(String(e.unless))) errors.push("unless must name the state field it reads, in backticks");
-  if (e.action === "deny" && !e.unless) errors.push("a deny needs an unless: the user's own request must be able to stand it down");
   if (e.unless_max !== undefined && (typeof e.unless_max !== "number" || e.unless_max <= 0 || e.unless_max > 1)) errors.push("unless_max must be a number in (0, 1]");
   return errors;
 }
@@ -194,7 +198,7 @@ export const projectContains = (real, parent, separator = sep) => real.startsWit
 /**
  * Project lessons: the nearest <folder>/.jevis/wiki at or above `cwd`, below
  * the home folder (whose .jevis is Jevis's own home). A project's lessons
- * are text the agent reads and can turn off shipped refusals, and a cloned
+ * are text the agent reads and can turn off shipped lessons, and a cloned
  * repository could ship either, so they load only once the user trusts them
  * with `jevis trust`. Trust is pinned to the files' contents: any change (a
  * pull, an edit) needs trusting again, as with direnv's `allow`.
@@ -313,10 +317,7 @@ export function wikiFor(cwd) {
  * root replaced, and ids it turned off. A broken replacement leaves the earlier
  * entry in force until it is fixed.
  *
- * A `guarded` root (a project's lessons) can add entries and change any
- * lesson but a safety one: turning off or replacing the check that stops a
- * force push or a machine-wide delete is the user's call, in ~/.jevis/wiki,
- * not something a cloned repository brings along.
+ * A `guarded` root uses the bounded, regular-file-only project walk.
  */
 export function loadWiki(roots = wikiRoots(), { guarded = [], files = {} } = {}) {
   const byId = new Map();
@@ -328,10 +329,6 @@ export function loadWiki(roots = wikiRoots(), { guarded = [], files = {} } = {})
       const id = relative(root, file).split(process.platform === "win32" ? "\\" : "/").join("/").replace(/\.md$/, "");
       try {
         const e = parseEntry(readFileSync(file, "utf8"), id);
-        if (guarded.includes(root) && id.startsWith("safety/") && byId.has(id)) {
-          broken.push({ id, file, errors: ["a project's lessons cannot turn off or replace a safety entry; do that in ~/.jevis/wiki"] });
-          continue;
-        }
         if (e.off === true) {
           byId.delete(id);
           off.push(id);
@@ -353,16 +350,6 @@ export function loadWiki(roots = wikiRoots(), { guarded = [], files = {} } = {})
 
 const glob = (pattern) => new RegExp(`^${String(pattern).replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`, "i");
 
-/**
- * Optional entries are off unless JEVIS_ENABLE names them: a comma list of
- * ids (`safety/force-push`), areas (`safety`), or `all`.
- */
-export function enabled(e, list = process.env.JEVIS_ENABLE) {
-  if (!e.optional) return true;
-  const on = String(list ?? "").split(",").map((x) => x.trim()).filter(Boolean);
-  return on.includes("all") || on.includes(e.id) || on.includes(e.id.split("/")[0]);
-}
-
 /** An entry can apply to this event, before Jev is asked: event, tool name, model family. */
 export function applies(e, { event, tool = null, model = null }) {
   if (e.event !== event) return false;
@@ -371,8 +358,8 @@ export function applies(e, { event, tool = null, model = null }) {
   return !(e.family && family && e.family !== family);
 }
 
-/** The entries to ask about this event: those that apply and are turned on. */
-export const candidates = (entries, opts) => entries.filter((e) => enabled(e) && applies(e, opts));
+/** The entries to ask about this event: those that apply. */
+export const candidates = (entries, opts) => entries.filter((e) => applies(e, opts));
 
 const lookup = (obj, path) => path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
 
@@ -390,9 +377,11 @@ export function conditionsHold(when, { profile, state }) {
   for (const [key, want] of Object.entries(when ?? {})) {
     const cmp = typeof want === "string" ? want.match(/^(>=|<=|>|<)\s*([\d.]+)$/) : null;
     const actual = key in profile ? profile[key] : lookup(state, key);
-    // Tri-state Bash proofs: an unknown operation keeps both the pre-call
-    // pool and the final gate open. Other missing facts retain strict checks.
-    if (actual === null && (key === "marks.em_dash" || BASH_FACTS.some((fact) => key === `marks.${fact}`))) continue;
+    // Tri-state Bash proofs keep unknown facts open, except writes_file:
+    // null covered ~89% of Bash calls and ran every slop lesson on reads like
+    // `git log | head`. Writing lessons require a proven write, not null.
+    // Other Bash facts and em_dash retain null tolerance; missing facts stay strict.
+    if (actual === null && (key === "marks.em_dash" || BASH_FACTS.some((fact) => fact !== "writes_file" && key === `marks.${fact}`))) continue;
     if (cmp) {
       if (typeof actual !== "number") return false;
       const n = Number(cmp[2]);
