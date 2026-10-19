@@ -119,6 +119,9 @@ export async function onPrompt(input) {
   const outage = sessionOutage(session);
   const request = clip(requestText(prompt), 2000);
   if ((session.turn === 0 && isWorkerPrompt(prompt)) || originOf("", process.env) === "agent") session.worker = true;
+  // A worker gets its tip once, on the prompt that made it a worker (the session tips arrived before Jevis knew).
+  const workerTipDue = Boolean(session.worker && !session.workerTipShown);
+  if (workerTipDue) session.workerTipShown = true;
   Object.assign(session, {
     previousRequest: session.request,
     // Tool notes can read the recent conversation, not just its latest request.
@@ -155,7 +158,7 @@ export async function onPrompt(input) {
     now.vagueFeedback = seen + 1;
     saveSession(sessionId, now);
   }
-  const additionalContext = [outage, session.worker ? "" : nudgeContext("prompt", sessionId, harness, session.model, session), feedback].filter(Boolean).join("\n\n");
+  const additionalContext = [outage, session.worker ? "" : nudgeContext("prompt", sessionId, harness, session.model, session), feedback, workerTipDue ? nudgeContext("worker", sessionId, harness, session.model, session) : ""].filter(Boolean).join("\n\n");
   return additionalContext ? { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext } } : null;
 }
 

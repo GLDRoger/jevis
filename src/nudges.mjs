@@ -10,7 +10,7 @@ export const NUDGES_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "
 const defaultRoots = () => [process.env.JEVIS_NUDGES_DIR || NUDGES_ROOT, join(jevisHome(), "nudges")];
 /** "other" is every model outside the known families, including an unknown one. */
 const NUDGE_FAMILIES = [...FAMILIES, "other"];
-export const HOOKS = ["session", "prompt", "feedback", "feedback-repeat", "ui-edit"];
+export const HOOKS = ["session", "prompt", "feedback", "feedback-repeat", "ui-edit", "worker"];
 
 /** Flat Markdown files, with a later root replacing the same filename entirely. */
 export function loadNudges({ roots = defaultRoots() } = {}) {

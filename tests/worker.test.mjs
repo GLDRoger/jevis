@@ -29,7 +29,7 @@ beforeEach(() => {
   process.env.JEVIS_CRITIC = "claude";
   process.env.JEVIS_JEV = "on";
   for (const dir of [process.env.JEVIS_HOME, process.env.JEVIS_NUDGES_DIR, process.env.JEVIS_WIKI]) mkdirSync(dir);
-  for (const hook of ["session", "prompt", "feedback", "feedback-repeat", "ui-edit"]) writeFileSync(join(process.env.JEVIS_NUDGES_DIR, `${hook}.md`), `---\nhook: ${hook}\n---\n${hook} tip.\n`);
+  for (const hook of ["session", "prompt", "feedback", "feedback-repeat", "ui-edit", "worker"]) writeFileSync(join(process.env.JEVIS_NUDGES_DIR, `${hook}.md`), `---\nhook: ${hook}\n---\n${hook} tip.\n`);
   writeFileSync(join(process.env.JEVIS_WIKI, "tool.md"), "---\nevent: tool\ntools: [Edit, Bash]\nask: Does `input` need a note?\naction: context\ntitle: Tool note\nsource: test\n---\nConsider this.\n");
   calls = []; external = [];
   setJevTransport(async (body) => {
@@ -68,7 +68,7 @@ test("worker marker is a configurable text setting", () => {
 test("workers keep session and UI tips, suppress prompt and both feedback tips, and never call Jev on tools", async () => {
   const id = "worker";
   assert.equal(context(onSession({ session_id: id, cwd, model: "gpt-6.1-sol", source: "startup" })), "session tip.");
-  assert.equal(await prompt(id, `${WORKER_MARKER} Fix x.`), null);
+  assert.equal(context(await prompt(id, `${WORKER_MARKER} Fix x.`)), "worker tip.", "the worker tip arrives once, on the first prompt");
   assert.equal(loadSession(id).worker, true);
   assert.equal(context(await tool(id)), "ui-edit tip.");
   assert.equal(await tool(id), null, "UI tip is still once per turn");
@@ -81,7 +81,7 @@ test("workers keep session and UI tips, suppress prompt and both feedback tips, 
   const rows = readLog().filter((r) => ["prompt", "tool"].includes(r.event));
   assert.ok(rows.every((r) => r.worker === true));
   assert.ok(rows.filter((r) => r.event === "tool").every((r) => r.skipped === "worker"));
-  assert.deepEqual(readLog().filter((r) => r.event === "nudge").map((r) => r.hook), ["session", "ui-edit", "ui-edit"]);
+  assert.deepEqual(readLog().filter((r) => r.event === "nudge").map((r) => r.hook), ["session", "worker", "ui-edit", "ui-edit"]);
   assert.equal(existsSync(join(process.env.JEVIS_HOME, "jev")), false);
   onSession({ session_id: id, cwd, source: "clear" });
   assert.equal(loadSession(id).worker, true, "worker status is sticky even across a clear");
@@ -94,7 +94,7 @@ test("marker is first-prompt only; env markers on later prompts become sticky", 
   await tool("person");
   assert.equal(calls.length, 1, "non-worker tool fixture really calls Jev");
   process.env.AGENT_CALL_DEPTH = "1";
-  assert.equal(await prompt("person", "not good"), null);
+  assert.equal(context(await prompt("person", "not good")), "worker tip.", "a session that becomes a worker later gets the tip then");
   delete process.env.AGENT_CALL_DEPTH;
   assert.equal(await prompt("person", "try again"), null);
   const before = calls.length;
@@ -155,6 +155,6 @@ test("configured marker replaces the default in the real CLI prompt hook", () =>
     env: process.env, encoding: "utf8", input: JSON.stringify({ session_id: "configured", cwd, model: "gpt-6.1-sol", prompt: "DELEGATED\n TASK: Fix x." }),
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, "");
+  assert.equal(JSON.parse(result.stdout).hookSpecificOutput.additionalContext, "worker tip.");
   assert.equal(loadSession("configured").worker, true);
 });

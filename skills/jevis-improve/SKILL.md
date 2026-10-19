@@ -46,7 +46,7 @@ The instruction files that steer the user's agents, which your proposals target:
 - `stop`: `final` (clipped), `evidence{edited,files,ui_files,after}`, `fired`, `acted` (checks that blocked).
 - `prompt`: `request` (clipped), `origin` (`person` or an agent), `turn`. Since v2 it makes no model call.
 - `review`: `verdict`, `items`, `ms`, `error`.
-- `nudge`: `hook` (`session`, `prompt`, `feedback`, `feedback-repeat`, `ui-edit`), `ids` (the tip files sent), `model`, `turn`. A tip from `nudges/` was added to the agent's context. No model call.
+- `nudge`: `hook` (`session`, `prompt`, `feedback`, `feedback-repeat`, `ui-edit`, `worker`), `ids` (the tip files sent), `model`, `turn`. A tip from `nudges/` was added to the agent's context. No model call.
 
 Worker sessions carry `worker: true` on prompt, tool and Stop rows. Their tool rows have `skipped: "worker"`; they make no decision-model or critic calls.
 

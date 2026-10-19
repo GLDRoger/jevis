@@ -49,7 +49,7 @@ A tip earns its place only if it teaches the model something it doesn't already 
 
 ### Worker sessions
 
-Sessions started by another agent make no decision-model or external-model calls. The first prompt identifies a worker through the phrase "You were called by another agent. Do this task yourself." (case-insensitive, whitespace-collapsed), an agent-origin prefix, or environment markers such as `AGENT_CALL_DEPTH`. `JEVIS_WORKER_MARKER` replaces the default phrase. Worker status stays set for the session; environment markers can also set it on later prompts. Workers keep session tips and the first UI-edit design tip, but get no prompt or feedback tips. Their Stop hook runs only code-decided checks, never the critic. Prompt, tool and Stop log rows carry `worker: true`, and tool rows say `skipped: "worker"`.
+Sessions started by another agent make no decision-model or external-model calls. The first prompt identifies a worker through the phrase "You were called by another agent. Do this task yourself." (case-insensitive, whitespace-collapsed), an agent-origin prefix, or environment markers such as `AGENT_CALL_DEPTH`. `JEVIS_WORKER_MARKER` replaces the default phrase. Worker status stays set for the session; environment markers can also set it on later prompts. Workers keep session tips and the first UI-edit design tip, get the worker tip (`nudges/base-worker.md`: no one can answer questions, so make the call and list assumptions) once on the prompt that marks them, and get no prompt or feedback tips. Their Stop hook runs only code-decided checks, never the critic. Prompt, tool and Stop log rows carry `worker: true`, and tool rows say `skipped: "worker"`.
 
 ### Checks
 
