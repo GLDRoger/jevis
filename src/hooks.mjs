@@ -1,4 +1,4 @@
-import { attachmentNames, clip, commandKey, harnessOf, harnessWritten, hookItem, inputMarks, lastAgentMessage, lastUserMessageAt, mergeToolResults, museTool, originOf, requestText, sessionItems, toolInput, transcriptSize, turnEvidence, turnTexts, withTouched, workspaceOf } from "./context.mjs";
+import { attachmentNames, clip, commandKey, harnessOf, harnessWritten, hookItem, inputMarks, lastAgentMessage, lastUserMessageAt, mergeToolResults, museTool, originOf, requestText, sessionItems, TEST_PATH, toolInput, transcriptSize, turnEvidence, turnTexts, UI_FILE, withTouched, workspaceOf } from "./context.mjs";
 import { evaluate } from "./engine.mjs";
 import { redact, redactDeep } from "./redact.mjs";
 import { criticBackend, designLaw, formatReview, review, roundsFor } from "./review.mjs";
@@ -7,6 +7,7 @@ import { wikiFor } from "./wiki.mjs";
 import { insideFolder, splitFolders } from "./paths.mjs";
 import { outageLine } from "./health.mjs";
 import { RESULT_MEMORY, toolResult } from "./post.mjs";
+import { nudgeText } from "./nudges.mjs";
 
 /**
  * The hooks. Every one fails open: no Jev, no key, a timeout, or a bug
@@ -58,6 +59,31 @@ function sessionOutage(session) {
   return line;
 }
 
+/** Nudges never judge or block; even their loading and bookkeeping fail open. */
+function nudgeContext(hook, sessionId, harness, model, session) {
+  try {
+    if (shadow()) return "";
+    const { ids, text } = nudgeText(hook, model);
+    if (!text) return "";
+    if (hook === "ui-edit") {
+      const now = loadSession(sessionId);
+      if (now.turn !== session.turn || now.nudged?.uiEdit === session.turn) return "";
+      now.nudged = { ...now.nudged, uiEdit: session.turn };
+      if (!saveSession(sessionId, now)) return "";
+    }
+    log({ event: "nudge", sessionId, harness, model, hook, ids, turn: session.turn });
+    return text;
+  } catch { return ""; }
+}
+
+function uiEditNudge(tool, rawInput, sessionId, harness, session) {
+  try {
+    const item = hookItem(tool, rawInput ?? {});
+    if (item?.type !== "FileChange" || !item.changes.some(({ path }) => UI_FILE.test(path) && !TEST_PATH.test(path.replaceAll("\\", "/")))) return "";
+    return nudgeContext("ui-edit", sessionId, harness, session.model, session);
+  } catch { return ""; }
+}
+
 /** Notes that fit the budget, strongest first, each at most once per session. */
 function pickNotes(fired, session, limit = MAX_NOTES) {
   const out = [];
@@ -84,6 +110,17 @@ export function isApproval(text) {
   const request = text.trim().toLowerCase().replaceAll("’", "'").replace(/[\s\p{P}\p{S}\p{M}\u200d]+$/gu, "");
   const m = request.length <= 60 && !/\b(?:no|don't|dont|not|stop|wait|never|but|instead)\b/.test(request) && APPROVAL.exec(request);
   return Boolean(m) && m[1].replace(/^[\s,.!]+/, "").split(/\s+/).filter(Boolean).length <= 4;
+}
+
+/**
+ * Short feedback that says something missed without saying what: "not good",
+ * "try again", "doesn't fit what I had in mind". Code only; every match is
+ * logged as a feedback nudge, so misses and false matches show up in review.
+ */
+const VAGUE = /\b(?:not (?:good|great|right|it|quite|there|what i (?:wanted|meant|asked for|had in mind))|(?:doesn'?t|does not|didn'?t|did not) (?:fit|work|look right|feel right|match|land)|try again|start over|redo it|do it again|still (?:wrong|broken|bad|not)|that'?s not it|no+pe|meh|nah|wrong|worse|ugly|hate it|not a fan|missed the point)\b/;
+export function isVagueFeedback(text) {
+  const t = String(text ?? "").trim().toLowerCase().replaceAll("\u2019", "'");
+  return t.length > 0 && t.length <= 150 && VAGUE.test(t);
 }
 
 /** UserPromptSubmit: profile the request and hand over the lessons that match it. */
@@ -125,8 +162,18 @@ export async function onPrompt(input) {
   // place for a standing lesson is AGENTS.md / CLAUDE.md, not a runtime note.
   // The hook stays for the session bookkeeping the tool and stop hooks read.
   log({ event: "prompt", sessionId, harness, model: session.model, origin: originOf(prompt), turn: session.turn, cwd, request: clip(session.request, 200), acted: [], mode: shadow() ? "shadow" : "live" });
-  if (!outage || shadow()) return null;
-  return { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: outage } };
+  if (shadow()) return null;
+  // Vague feedback after an agent turn: the first gets the feedback tip, later ones in the session the stronger one.
+  let feedback = "";
+  if (session.turn > 1 && isVagueFeedback(request)) {
+    const seen = session.vagueFeedback ?? 0;
+    feedback = nudgeContext(seen ? "feedback-repeat" : "feedback", sessionId, harness, session.model, session);
+    const now = loadSession(sessionId);
+    now.vagueFeedback = seen + 1;
+    saveSession(sessionId, now);
+  }
+  const additionalContext = [outage, nudgeContext("prompt", sessionId, harness, session.model, session), feedback].filter(Boolean).join("\n\n");
+  return additionalContext ? { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext } } : null;
 }
 
 function denyReason(denies) {
@@ -199,15 +246,13 @@ export async function onTool(input) {
   const scoped = lifted.size ? { ...wiki, entries: wiki.entries.filter((e) => !lifted.has(e.id)) } : wiki;
   const result = await evaluate({ event: "tool", state, tool, model: session.model, harness, sessionId, timeoutMs: timeout("tool"), wiki: scoped });
   if (result.skipped) {
-    rememberAllowedTool(input, tool, rawInput, key);
     // Logged without the input: a skipped call is counted by `jevis stats`, not judged.
     log({ event: "tool", sessionId, harness, turn: session.turn, tool, skipped: result.skipped, plain_read: state.marks.plain_read || undefined });
-    return null;
   }
   // Every matching deny goes back at once: an edit with three slop patterns should be fixed in one retry, not three.
   const denies = result.fired.filter((e) => e.action === "deny").slice(0, MAX_DENIES);
   const notes = denies.length ? [] : pickNotes(result.fired, session, 2);
-  log({ event: "tool", sessionId, harness, turn: session.turn, tool, input: clip(state.input, 200), subagent: input.agent_id ? true : undefined, ...summary(result), acted: denies.length ? denies.map((e) => e.id) : notes.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
+  if (!result.skipped) log({ event: "tool", sessionId, harness, turn: session.turn, tool, input: clip(state.input, 200), subagent: input.agent_id ? true : undefined, ...summary(result), acted: denies.length ? denies.map((e) => e.id) : notes.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
   if (shadow()) {
     rememberAllowedTool(input, tool, rawInput, key);
     return null;
@@ -219,12 +264,14 @@ export async function onTool(input) {
     return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: denyReason(denies) } };
   }
   rememberAllowedTool(input, tool, rawInput, key);
-  if (!notes.length) return null;
-  // Re-read before writing: other hooks of this session (parallel tool calls, subagents) may have saved while Jev answered.
-  const now = loadSession(sessionId);
-  for (const e of notes) now.shown[e.id] = session.turn;
-  if (!saveSession(sessionId, now)) return null;
-  return { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: formatNotes(notes, "Jevis, before this call:") } };
+  if (notes.length) {
+    // Re-read before writing: other hooks of this session (parallel tool calls, subagents) may have saved while Jev answered.
+    const now = loadSession(sessionId);
+    for (const e of notes) now.shown[e.id] = session.turn;
+    if (!saveSession(sessionId, now)) return null;
+  }
+  const additionalContext = [notes.length ? formatNotes(notes, "Jevis, before this call:") : "", uiEditNudge(tool, rawInput, sessionId, harness, session)].filter(Boolean).join("\n\n");
+  return additionalContext ? { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext } } : null;
 }
 
 /** Stop: send the agent back once per lesson when its final message and the turn's evidence match a block entry. */
@@ -328,10 +375,14 @@ export function onSession(input) {
     if (source === "clear") {
       session.allowed = [];
       session.denied = null;
+      session.vagueFeedback = 0;
     }
     log({ event: "session", sessionId, source, reset: true });
   }
   const outage = input.hook_event_name === "PostCompact" ? null : sessionOutage(session);
-  if (!saveSession(sessionId, session) || !outage) return null;
-  return { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: outage } };
+  if (!saveSession(sessionId, session)) return null;
+  const nudge = input.hook_event_name !== "PostCompact" && ["startup", "resume", "clear", "compact"].includes(source)
+    ? nudgeContext("session", sessionId, harnessOf(input, { withModel: false }).harness, input.model ?? session.model, session) : "";
+  const additionalContext = [outage, nudge].filter(Boolean).join("\n\n");
+  return additionalContext ? { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext } } : null;
 }

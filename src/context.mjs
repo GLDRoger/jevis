@@ -147,8 +147,8 @@ export function patchAdditions(patch) {
   return out.join("\n");
 }
 
-const UI_FILE = /\.(tsx|jsx|vue|svelte|astro|html|css|scss)$/;
-const TEST_PATH = /(\.(test|spec|stories)\.[cm]?[jt]sx?$|(^|\/)(__tests__|tests?|__mocks__|e2e)\/)/;
+export const UI_FILE = /\.(tsx|jsx|vue|svelte|astro|html|css|scss)$/;
+export const TEST_PATH = /(\.(test|spec|stories)\.[cm]?[jt]sx?$|(^|\/)(__tests__|tests?|__mocks__|e2e)\/)/;
 
 function describe(it, cwd) {
   if (it.type === "CommandExecution") return `${it.attempted ? "attempted, " : it.completed === false ? "running, " : it.success === true && it.exit_code == null ? "succeeded, " : it.success === false ? "failed, " : ""}exit ${it.exit_code ?? "?"}: ${clip(commandText(it).replace(/\s+/g, " "), 180)}`;
@@ -367,9 +367,9 @@ export function museTool(name, input = {}) {
  */
 export function hookItem(tool, input = {}) {
   if (tool === "Bash") return { type: "CommandExecution", command: input.command ?? "" };
-  if (["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool)) return input.file_path || input.notebook_path ? { type: "FileChange", changes: [{ path: input.file_path ?? input.notebook_path }] } : null;
+  if (["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool)) return input.file_path || input.path || input.notebook_path ? { type: "FileChange", changes: [{ path: input.file_path ?? input.path ?? input.notebook_path }] } : null;
   if (tool === "apply_patch") {
-    const paths = [...String(input.input ?? input.patch ?? input.command ?? "").matchAll(/^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$/gm)].map((m) => m[1].trim());
+    const paths = [...String(typeof input === "string" ? input : input.input ?? input.patch ?? input.command ?? "").matchAll(/^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$/gm)].map((m) => m[1].trim());
     return paths.length ? { type: "FileChange", changes: paths.map((path) => ({ path })) } : null;
   }
   const mcp = /^mcp__(.+?)__(.+)$/.exec(tool);

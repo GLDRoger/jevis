@@ -1,12 +1,12 @@
 # Jevis
 
-Jevis is a set of coding-agent hooks for code-checked facts, hard guards, and an optional independent design review. In v2, the prompt hook only keeps session bookkeeping: it injects no lessons and makes no decision-model calls. Tool hooks check commands and edits; Stop runs code-decided checks and, when enabled, the design review.
+Every good role-playing game teaches you how to play it while you play: a tip when you reach a new area, a hint when you're stuck, a guide you can open whenever you want. Jevis does that for coding agents. It's a set of hooks that gives each agent the right short tip at the moment it matters, tuned to that model's known habits, plus a few safety guards.
 
-It supports **Codex**, **Claude Code**, and other harnesses through adapters. Standing advice belongs in the user's AGENTS.md or CLAUDE.md, not a prompt-time note.
+Tips never take the controller away. They add a line of context and the agent carries on. Only the guards refuse anything: safety guards (force-pushing, a machine-wide Docker wipe, deleting more than the task needs) and checks for telltale generated-design patterns in file edits. When the agent tells you why it was stopped and you reply "go ahead", that guard stands down for the rest of the session.
 
-The decision model is TypeSafe's hosted [Jev](https://typesafe.ai), GPT-6 Luna through OpenAI's Decisions API, or any Jev-compatible server such as a self-hosted [Laya](https://github.com/NandhaKishorM/laya) (with caveats, [below](#laya-self-hosted)).
+It's built to be hackable. Every tip is a short Markdown file you can read, edit, or switch off. Everything Jevis does is logged as plain JSON lines on your machine. `jevis cost` shows what the hooks cost from day one, and [`skills/jevis-improve`](skills/jevis-improve/SKILL.md) is a guide any agent can follow to review that history and propose changes for you to approve.
 
-Some lesson questions now have exact code rules: destructive git commands, em dashes in interface prose, literal gradient text, and emoji feature markers. Those skip the pattern question when code can prove the answer. User-permission exceptions, unfamiliar syntax, and design judgments still go to the active decision model; see [`decide` in the wiki format](WIKI.md#format).
+It supports **Codex**, **Claude Code**, and other harnesses through adapters. Tips are chosen by code and make no decision-model call; their only cost is the few lines they add to the agent's context. The safety guards and design-pattern checks ask a decision model only when code can't settle the case: TypeSafe's hosted [Jev](https://typesafe.ai), GPT-6 Luna through OpenAI's Decisions API, or any Jev-compatible server such as a self-hosted [Laya](https://github.com/NandhaKishorM/laya) (with caveats, [below](#laya-self-hosted)).
 
 <img src="docs/media/before-after.jpg" width="560" alt="The same pottery-studio prompt given to Codex (GPT-6 Sol) twice. Bare, it made a plain two-column page with a grey 'Studio photo to add' placeholder. With Jevis, it made a full-bleed photo of hands throwing a pot with the headline 'Clock off. Clay on.'">
 
@@ -29,19 +29,25 @@ Some lesson questions now have exact code rules: destructive git commands, em da
 
 ## What it does
 
-Jevis keeps session state, checks tool calls, records results, and optionally reviews finished work.
-
-| Moment | Hook | What Jevis can do |
+| Moment | Hook | What Jevis does |
 |---|---|---|
-| You send a message | `UserPromptSubmit` | Bookkeeping only: remember the request, earlier requests, model and turn; no lesson injection or decision-model call. An outage warning may still appear. |
-| The agent is about to run a command or edit a file | `PreToolUse` | Apply code rules and hard guards; deny slop on file-edit tools only, never Bash. Retained tool advisories can add a note. |
-| A tool finishes | `PostToolUse` | Record bounded, redacted completion facts and exit codes locally, without a model call or block. Claude failures use `PostToolUseFailure`. |
-| The agent is about to end its turn | `Stop` | Run only entries with a code `decide` rule (none shipped); model-judged Stop lessons are retired. With the critic off, the shipped wiki makes no decision-model calls at Stop. |
-| The agent reports visual work done | `Stop` | Render the page (1440 and 390 px) or sample the film, and have Claude or Codex review it as a director who didn't make it. It can send the work back at most twice. |
+| A session starts, or its context is compacted | `SessionStart` | Gives the model its session tips: for GPT models, how to read for intent, handle ambiguity, and finish the outcome rather than the words. |
+| You send a message | `UserPromptSubmit` | Adds a one-line tip for the model's known habits. Short, vague feedback ("not good", "try again") gets its own tip on working out what missed. Remembers the request for the other hooks. No decision-model call. |
+| The agent is about to run a command or edit a file | `PreToolUse` | The first interface edit of a turn gets a design tip naming that model's usual defaults. Safety guards and design-pattern checks can refuse a call; code settles most cases, and the decision model is asked only when it can't. |
+| A tool finishes | `PostToolUse` | Records exit codes and changed files locally, with no model call. |
+| The agent is about to end its turn | `Stop` | Runs code-decided checks, such as a final message saying tests pass when the last test run after an edit failed. With the design review on, renders the page (1440 and 390 px) and has Claude or Codex review it as a director who didn't make it, sending it back at most twice. |
 
-The shipped `wiki/` has **36 tool lessons**: 30 slop denials on file edits, 4 safety guards, the visible-window/sound guard, and the weakened-tests advisory. Exact code rules settle supported cases; ambiguous inputs and permission exceptions may still need the decision model.
+### Tips
 
-The 61 retired v1 lessons (38 prompt, 15 Stop, 8 tool notes) live in `archive/wiki-v1/` and are not loaded. Put standing lessons worth keeping in your AGENTS.md or CLAUDE.md.
+Tips live in [`nudges/`](nudges/), one Markdown file each. The frontmatter says when the tip is shown (`hook: session`, `prompt`, `feedback`, or `ui-edit`) and, optionally, which model family sees it (`family: gpt` or `claude`). The body is the text the agent reads. A file with the same name in `~/.jevis/nudges/` replaces a shipped tip, `off: true` in that file switches it off, and `JEVIS_NUDGES=off` switches them all off.
+
+The shipped tips target GPT models, whose habits are the best documented here: they take the words literally, assume the standard pattern instead of checking how the project works, retry the same idea after vague feedback, and fall back on a recognisable set of interface defaults. Claude models currently get no tips.
+
+A tip earns its place only if it teaches the model something it doesn't already do, at the moment it matters. Generic advice repeated on every message changed nothing in a month of real use. That is why v1's 38 prompt-time notes were retired. Check each tip against your own logs (`jevis-improve` shows how), and cut the ones that change nothing.
+
+### Guards
+
+The shipped `wiki/` has **36 tool lessons**: 30 design-pattern refusals on file edits, 4 safety guards, the visible-window/sound guard, and the weakened-tests advisory. Exact code rules settle supported cases; ambiguous inputs and permission exceptions may still need the decision model. The 61 retired v1 lessons (38 prompt, 15 Stop, 8 tool notes) live in `archive/wiki-v1/` and are not loaded.
 
 Jevis always fails open. With no key, a timeout, an error, or the decision model down, the agent carries on as if Jevis weren't there.
 

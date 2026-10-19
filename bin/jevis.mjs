@@ -9,6 +9,7 @@ import { evaluate } from "../src/engine.mjs";
 import { formatGateReplay, gateReplay } from "../src/gate-replay.mjs";
 import { exportDataset, formatExport, TEST_SHARE } from "../src/export.mjs";
 import { onPost, onPrompt, onSession, onStop, onTool } from "../src/hooks.mjs";
+import { HOOKS as NUDGE_HOOKS, loadNudges } from "../src/nudges.mjs";
 import { findSession, replay } from "../src/replay.mjs";
 import { eachLog, jevisHome, log } from "../src/state.mjs";
 import { formatTune, sinceTime, tune } from "../src/tune.mjs";
@@ -113,7 +114,11 @@ const commands = {
     // A Bash entry without this gate is asked about every ls and git log: correct, but each one waits on the decision model.
     const ungated = entries.filter((e) => e.event === "tool" && e.tools?.includes("Bash") && e.when?.["marks.plain_read"] !== false);
     for (const e of ungated) console.log(`note: ${e.id} applies to Bash without when { marks.plain_read: false }, so every plain read (ls, rg, git log) asks it; add the gate unless it is about reads`);
-    process.exit(broken.length ? 1 : 0);
+    const nudgeReport = loadNudges();
+    const nudgeCounts = NUDGE_HOOKS.map((hook) => `${hook} ${nudgeReport.nudges.filter((n) => n.hook === hook).length}`).join(", ");
+    console.log(`nudges: ${nudgeReport.nudges.length} (${nudgeCounts})`);
+    for (const b of nudgeReport.broken) console.log(`BROKEN nudge ${b.file}: ${b.error}`);
+    process.exit(broken.length || nudgeReport.broken.length ? 1 : 0);
   },
 
   // Is Jevis installed and working? jevis doctor [--offline] [--json]

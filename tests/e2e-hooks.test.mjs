@@ -87,6 +87,8 @@ async function checkInstalledHooks(t, { nodeWithSpaces = false, selectedEvents =
   // Personal settings and keys must not turn an isolated test off or redirect its server.
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith("JEVIS_") && !["TYPESAFE_API_KEY", "HOME", "USERPROFILE", "BASH_ENV", "ENV"].includes(key.toUpperCase())));
   Object.assign(env, { HOME: home, USERPROFILE: home });
+  // Keep these installed wiki fixtures independent of shipped nudge copy.
+  env.JEVIS_NUDGES_DIR = join(root, "empty-shipped-nudges");
   const requests = [];
   const serverErrors = [];
   const ids = new Set(["prompt", "tool", "stop"]);

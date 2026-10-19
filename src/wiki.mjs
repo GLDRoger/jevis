@@ -85,7 +85,7 @@ function splitTop(text) {
   return parts;
 }
 
-export function parseEntry(text, id) {
+export function parseFrontmatter(text, id) {
   const m = String(text).replaceAll("\r\n", "\n").match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!m) throw new Error(`${id}: no frontmatter`);
   const entry = { id };
@@ -107,6 +107,11 @@ export function parseEntry(text, id) {
     entry[key] = ["ask", "yes", "no", "title", "source", "unless"].includes(key) ? unquote(raw) : parseValue(raw);
   }
   entry.body = m[2].trim();
+  return entry;
+}
+
+export function parseEntry(text, id) {
+  const entry = parseFrontmatter(text, id);
   entry.min = entry.min ?? DEFAULT_MIN;
   entry.when = entry.when ?? {};
   if (entry.unless !== undefined) entry.unless_max = entry.unless_max ?? DEFAULT_UNLESS_MAX;

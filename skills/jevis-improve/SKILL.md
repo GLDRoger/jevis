@@ -27,6 +27,7 @@ This guide replaced `jevis mine`. That command read a model score the prompt hoo
 | `~/.jevis/sessions/<id>.json` | Per-session memory: current request, turn, notes shown, denies, lifted checks (`allowed`) | small each |
 | `~/.jevis/reviews/<session>/turn<N>-round<M>/` | Design-review renders and verdicts | images |
 | `~/.jevis/wiki/` | The user's own lessons, which override the shipped `wiki/` by id | small |
+| `<repo>/nudges/`, `~/.jevis/nudges/` | Tips: fixed lines of context, one Markdown file each; a user file replaces the shipped one with the same name | small |
 | `~/.jevis/config.json` | Settings (`JEVIS_DECIDER`, `JEVIS_CRITIC`, prices, …) | tiny |
 | `<repo>/wiki/`, `<repo>/archive/wiki-v1/` | Shipped lessons, and the v1 lessons retired in October 2026 with the reason | small |
 | `~/.claude/projects/<dir>/<session>.jsonl` | Claude Code transcripts. Typed user messages are rows with `type=="user"` whose `.message.content` is a string | large |
@@ -46,6 +47,7 @@ The instruction files that steer the user's agents, which your proposals target:
 - `prompt`: `request` (clipped), `origin` (`person` or an agent), `turn`. Since v2 it makes no model call.
 - `approve`: `lifted[ids]`, `request`. The user said "go ahead" after a deny, so those checks are off for the rest of that session.
 - `review`: `verdict`, `items`, `ms`, `error`.
+- `nudge`: `hook` (`session`, `prompt`, `feedback`, `feedback-repeat`, `ui-edit`), `ids` (the tip files sent), `model`, `turn`. A tip from `nudges/` was added to the agent's context. No model call.
 
 A `calls.jsonl` row has `at, event, sessionId, harness, model, decider, deciderModel, ms, state, answers, usage{input_tokens,output_tokens}, error`.
 
@@ -90,6 +92,8 @@ Also check what never acted:
 ```sh
 ls <jevis repo>/wiki/*/*.md ~/.jevis/wiki/*/*.md   # then compare ids against the acted counts above
 ```
+
+Judge tips (`nudge` rows) the same way: for a sample of each tip, read what the agent did right after it. A tip that never changes the next action is noise and costs context on every send; propose `off: true` or a rewrite. For `feedback` tips, also check the user's next message: a second vague correction right after means the tip didn't help. Look for vague feedback the code missed too: short dissatisfied messages with no `feedback` row in the same turn.
 
 A check that acted zero times in 30 days and costs a model call is a candidate for removal. One decided in code (`decide:` in its frontmatter) costs nothing and can stay.
 

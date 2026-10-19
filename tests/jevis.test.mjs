@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 
 // Every test runs against a private home and a scripted Jev: no network, no real state.
 process.env.JEVIS_HOME = mkdtempSync(join(tmpdir(), "jevis-home-"));
+// These wiki fixtures are independent of shipped nudge copy; nudges have their own suite.
+process.env.JEVIS_NUDGES_DIR = join(process.env.JEVIS_HOME, "empty-shipped-nudges");
 delete process.env.JEVIS_MODE;
 delete process.env.JEVIS_SCOPE;
 delete process.env.JEVIS_DISABLE;
