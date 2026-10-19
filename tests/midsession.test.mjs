@@ -122,16 +122,18 @@ test("port-in-use: next tool, any result tool, each spelling and case, once per 
   assert.equal(await bash("echo ok"), null);
   post("echo EADDRINUSE", { exit_code: 0, stdout: "ready" });
   assert.equal(await bash("echo ok"), null, "only result text counts, not a command mentioning the error");
+  post("cat src/hooks.mjs", { exit_code: 0, stdout: "const PORT_IN_USE = /EADDRINUSE|address already in use/" });
+  assert.equal(await bash("echo ok"), null, "a successful call whose output mentions the error is not a port error");
   for (const error of ["listen EADDRINUSE: 3000", "Address Already In Use", "Port 5173 is already in use"]) {
     const session_id = `port-${++sequence}`;
-    onPost({ session_id, cwd, tool_name: "SomeTool", tool_response: { stderr: error } });
+    onPost({ session_id, cwd, tool_name: "SomeTool", tool_response: { stderr: error, exit_code: 1 } });
     assert.equal(context(await tool("Read", { file_path: "a.mjs" }, { session_id })), tips["port-in-use"]);
     assert.equal(await bash("echo ok", { session_id }), null);
   }
   post("npm start", null, { hook_event_name: "PostToolUseFailure", error: "eaddrinuse" });
   await prompt();
   assert.equal(context(await tool("Read", { file_path: "a.mjs" })), tips["port-in-use"], "pending tip survives a turn");
-  post("npm start", "address already in use");
+  post("npm start", { exit_code: 1, stderr: "address already in use" });
   await prompt();
   assert.equal(await bash("echo ok"), null, "a new error does not renew the allowance");
 });
@@ -143,7 +145,7 @@ test("mid-session tips reset session allowances on compact and clear", async () 
   assert.equal(context(await bash("node broken.mjs")), expected);
   for (const source of ["compact", "clear"]) {
     onSession({ session_id: "s", cwd, source });
-    assert.equal(context(await bash("node broken.mjs")), expected, source);
+    assert.equal(context(await bash("node broken.mjs")), tips["repeat-failure"], `${source}: the port tip needs a new port error`);
     assert.equal(await bash("node broken.mjs"), null);
   }
 });

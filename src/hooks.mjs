@@ -249,8 +249,11 @@ export function onPost(input) {
     const session = loadSession(input.session_id);
     if (input.turn_id && session.turnId && input.turn_id !== session.turnId) return null;
     // Inspect the result, never the command/arguments. Keep only the fact, not tool output.
-    const port = PORT_IN_USE.test(typeof input.tool_response === "string" ? input.tool_response : JSON.stringify(input.tool_response) ?? "") || PORT_IN_USE.test(input.error ?? "");
     const row = toolResult(input);
+    // Only a failed call counts: output that merely contains the words (a diff, a file read) is not a port error.
+    const response = input.tool_response && typeof input.tool_response === "object" ? input.tool_response : {};
+    const failed = row ? row.it.success === false : input.hook_event_name === "PostToolUseFailure" || response.is_error === true || (response.exit_code ?? 0) !== 0;
+    const port = failed && (PORT_IN_USE.test(typeof input.tool_response === "string" ? input.tool_response : JSON.stringify(input.tool_response) ?? "") || PORT_IN_USE.test(input.error ?? ""));
     if (!row && !port) return null;
     if (port) session.portInUse = true;
     const prior = session.hookResults ?? [];
