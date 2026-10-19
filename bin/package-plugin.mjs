@@ -13,7 +13,7 @@ if (args.length !== 2 || args[0] !== "--out") {
 const out = resolve(args[1]);
 if (existsSync(out)) throw new Error(`Output already exists: ${out}`);
 mkdirSync(out, { recursive: true });
-for (const file of ["plugin.json", "hooks", "skills", "src", "wiki", "nudges", "WIKI.md", "README.md", "docs/tips.md", "docs/configuration.md", "docs/harnesses.md", "docs/evidence.md", "SECURITY.md", "LICENSE", "package.json", "package-lock.json"]) {
+for (const file of ["plugin.json", "hooks", "skills", "src", "wiki", "nudges", "WIKI.md", "README.md", "docs/tips.md", "docs/configuration.md", "docs/harnesses.md", "docs/evidence.md", "docs/models.md", "SECURITY.md", "LICENSE", "package.json", "package-lock.json"]) {
   cpSync(join(root, file), join(out, file), { recursive: true });
 }
 // The runtime archive omits demo media and contributor tooling; keep those documentation links usable.
