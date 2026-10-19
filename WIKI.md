@@ -1,6 +1,6 @@
 # Writing lessons
 
-A lesson is a check you add to Jevis: a yes/no question that a decision model (or code) answers about what the agent is doing, and what to do when the answer is yes. Use one when a fixed [tip](README.md#tips) isn't enough because whether it applies depends on the content of a command, an edit, or a final message.
+A lesson is a check you add to Jevis: a yes/no question that a decision model (or code) answers about what the agent is doing, and what to do when the answer is yes. Use one when a fixed [tip](docs/tips.md) isn't enough because whether it applies depends on the content of a command, an edit, or a final message.
 
 Each lesson is one Markdown file, `wiki/<area>/<name>.md`. Its id is the path without `wiki/` and `.md`, such as `verification/claim-contradicted`.
 

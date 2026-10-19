@@ -26,7 +26,7 @@ Then find the row:
 | retune, replace, or turn off a shipped lesson | a file with the same id | `~/.jevis/wiki/<same id>.md` |
 | give everyone in one repository a lesson | a lesson in the repository; the user runs `jevis trust <repo>` | `<repo>/.jevis/wiki/<area>/<name>.md` |
 | have the design reviewer judge by the user's own rules | the design law | `~/.jevis/design-law.md` |
-| change the reviewer, act only in some folders, go quiet, switch decision model | configuration | `~/.jevis/config.json` (README, Configuration) |
+| change the reviewer, act only in some folders, go quiet, switch decision model | configuration | `~/.jevis/config.json` (docs/configuration.md) |
 | show a tip at a moment no `hook:` covers | code: a new hook value | `src/nudges.mjs` (`HOOKS`) and the call site in `src/hooks.mjs` |
 | judge a fact the state doesn't carry, such as a count | code: a new fact | `src/context.mjs` or `src/hooks.mjs`, then WIKI.md |
 | change how pages or films are reviewed | code | `src/review.mjs` (`criticPrompt`, `REVIEW_ROUNDS`) |

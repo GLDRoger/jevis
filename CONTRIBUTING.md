@@ -4,7 +4,7 @@ Thanks for helping. The most useful contributions:
 
 1. **Tips** that change what a model does, backed by sessions where it went wrong without them.
 2. **Evidence.** A SWE-bench, Terminal-Bench, or similar run with and without Jevis.
-3. **Harness adapters** beyond the ones the README lists.
+3. **Harness adapters** beyond the ones in [docs/harnesses.md](docs/harnesses.md).
 4. **Bug fixes**, especially anywhere a hook breaks, stalls, or sends an agent back wrongly.
 
 For a large change, open an issue first so we can agree on the shape before you build it.
@@ -25,7 +25,7 @@ Both run in CI, on Linux, macOS, and Windows, and must pass before merging.
 
 ## Adding or changing a tip
 
-A tip is a file in `nudges/` (see the README's [Tips](README.md#tips)). It gets merged when:
+A tip is a file in `nudges/` (see [docs/tips.md](docs/tips.md)). It gets merged when:
 
 - **It changes behaviour.** Show a session where the model went wrong at that moment, and say what the tip would have changed. A tip that restates what models already do is noise on every send.
 - **It doesn't contradict instruction files.** A tip may restate a common rule in fewer words. It never adds one that a user's `AGENTS.md` or `CLAUDE.md` would fight.
@@ -44,7 +44,7 @@ A tip is a file in `nudges/` (see the README's [Tips](README.md#tips)). It gets 
 - **Stay inside the time budgets:** 1.5 s for a tool hook and 3 s for a stop hook, before the optional review. Tool hooks run on every command the agent makes.
 - **Add a test** beside the existing ones in `tests/`. A fix comes with a test that fails without it.
 - **Keep dependencies minimal.** The one runtime dependency is `playwright-core`, for the design review. Explain any new one.
-- **Update the docs your change touches:** a new tip moment or setting in the README, a new state fact or axis in WIKI.md.
+- **Update the docs your change touches:** a new tip moment in docs/tips.md, a new setting in docs/configuration.md, a new state fact or axis in WIKI.md.
 
 ## Pull requests
 

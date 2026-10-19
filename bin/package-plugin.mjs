@@ -13,7 +13,7 @@ if (args.length !== 2 || args[0] !== "--out") {
 const out = resolve(args[1]);
 if (existsSync(out)) throw new Error(`Output already exists: ${out}`);
 mkdirSync(out, { recursive: true });
-for (const file of ["plugin.json", "hooks", "skills", "src", "wiki", "WIKI.md", "README.md", "SECURITY.md", "LICENSE", "package.json", "package-lock.json"]) {
+for (const file of ["plugin.json", "hooks", "skills", "src", "wiki", "nudges", "WIKI.md", "README.md", "docs/tips.md", "docs/configuration.md", "docs/harnesses.md", "docs/evidence.md", "SECURITY.md", "LICENSE", "package.json", "package-lock.json"]) {
   cpSync(join(root, file), join(out, file), { recursive: true });
 }
 // The runtime archive omits demo media and contributor tooling; keep those documentation links usable.
@@ -26,4 +26,4 @@ mkdirSync(join(out, "bin"));
 for (const file of ["jevis.mjs", "install.mjs"]) cpSync(join(root, "bin", file), join(out, "bin", file));
 mkdirSync(join(out, ".agents", "plugins"), { recursive: true });
 cpSync(join(root, ".agents", "plugins", "marketplace.json"), join(out, ".agents", "plugins", "marketplace.json"));
-console.log(`Plugin source: ${out}\nInstall its locked dependencies with npm ci before installing the plugin. See README.md, Native Codex plugin.`);
+console.log(`Plugin source: ${out}\nInstall its locked dependencies with npm ci before installing the plugin. See docs/harnesses.md, The Codex plugin.`);

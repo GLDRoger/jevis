@@ -239,9 +239,9 @@ test('Antigravity valid disabled and context-only tool calls defer to native pol
   }
 });
 
-test('README Google configurations cover supported events and run each adapter command', async () => {
+test('Google configurations in docs/harnesses.md cover supported events and run each adapter command', async () => {
   const { spawnSync } = await import('node:child_process');
-  const section = readFileSync(join(repo, 'README.md'), 'utf8').split('### Gemini CLI and Antigravity CLI')[1]?.split(/\n#{2,3} /)[0];
+  const section = readFileSync(join(repo, 'docs', 'harnesses.md'), 'utf8').split('## Gemini CLI and Antigravity CLI')[1]?.split(/\n#{2,3} /)[0];
   assert.ok(section, 'manual setup subsection exists');
   const examples = [...section.matchAll(/```json\n([\s\S]*?)\n```/g)].map(match => JSON.parse(match[1]));
   assert.equal(examples.length, 2);
