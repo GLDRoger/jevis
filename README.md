@@ -41,7 +41,7 @@ It supports **Codex**, **Claude Code**, and other harnesses through adapters. Ti
 
 ### Tips
 
-Tips live in [`nudges/`](nudges/), one Markdown file each. The frontmatter says when the tip is shown (`hook: session`, `prompt`, `feedback`, or `ui-edit`) and, optionally, which model family sees it (`family: gpt`, `claude`, or `other` for every model outside those two). The body is the text the agent reads. A file with the same name in `~/.jevis/nudges/` replaces a shipped tip, `off: true` in that file switches it off, and `JEVIS_NUDGES=off` switches them all off.
+Tips live in [`nudges/`](nudges/), one Markdown file each. The frontmatter says when the tip is shown (`hook: session`, `prompt`, `feedback`, `feedback-repeat`, `ui-edit`, or `worker`) and, optionally, which model family sees it (`family: gpt`, `claude`, or `other` for every model outside those two). The body is the text the agent reads. A file with the same name in `~/.jevis/nudges/` replaces a shipped tip, `off: true` in that file switches it off, and `JEVIS_NUDGES=off` switches them all off.
 
 Every model gets the base tips (`base-*.md`): how to work in a session, what to do with short vague feedback, and where to take design direction from. Each model family also gets lines naming its own documented habits. GPT models (`gpt-*.md`) take words literally and assume the standard pattern, so they get a one-line tip on every message. Each family's design tip lists the generated-looking defaults it reached for most in the maintainer's logs. Models outside both families (`family: other`) get the base tips and a design tip combining both families' lists.
 
