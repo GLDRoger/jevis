@@ -152,7 +152,7 @@ function toItem(call, result, detail) {
     return { type: "CommandExecution", id, command: String(input.command ?? ""), aggregated_output: stdout || output, exit_code: code };
   }
   // The tool name and input ride along so a replay can show Jev the edit exactly as the live hook did.
-  // An edit that errored (old_string not found, or refused by a hook such as Jevis's own deny) changed nothing.
+  // An edit that errored (old_string not found, or rejected by the harness) changed nothing.
   if (EDIT_TOOLS.has(name)) return result?.is_error ? null : { type: "FileChange", id, tool: name, input, changes: [{ path: String(input.file_path ?? input.notebook_path ?? "") }] };
   if (name?.startsWith("mcp__")) {
     const [, server, ...tool] = name.split("__");

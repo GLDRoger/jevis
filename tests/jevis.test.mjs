@@ -17,7 +17,6 @@ delete process.env.BROKER_JOB_ID;
 delete process.env.BROKER_DEPTH;
 
 const { setJevTransport, questionsVersion, hedged } = await import("../src/jev.mjs");
-const { redact } = await import("../src/redact.mjs");
 const { parseEntry, validateEntry, conditionsHold, candidates, loadWiki, wikiRoots, WIKI_ROOT } = await import("../src/wiki.mjs");
 const { evaluate } = await import("../src/engine.mjs");
 const { onPrompt, onTool, onStop, onSession, inScope, MAX_STOP_BLOCKS } = await import("../src/hooks.mjs");
@@ -38,11 +37,11 @@ function entry(id, front, body = "Do the better thing instead.") {
 entry("design/open-page", { event: "prompt", ask: "Does `request` ask for a new page with its look left open?", when: '{ wants_change: ">=0.6" }', action: "context", title: "Open page", source: "test" }, "Pick a concept first.");
 entry("design/claude-only", { event: "prompt", ask: "Does `request` ask for a page?", family: "claude", action: "context", title: "Claude only", source: "test" });
 entry("design/gpt-only", { event: "prompt", ask: "Does `request` ask for anything?", family: "gpt", action: "context", title: "GPT only", source: "test" });
-entry("fixture/deny", { event: "tool", ask: "Does `input` force-push?", unless: "Does `request` ask for a force push?", tools: "[Bash]", min: 0.85, action: "deny", title: "Force push", source: "test" }, "Use a new commit.");
-entry("slop/glow", { event: "tool", ask: "Does `input` add glow blobs?", unless: "Does `request` ask for glow?", tools: "[Write, apply_patch]", min: 0.85, action: "deny", title: "Glow blobs", source: "test" }, "Show the product instead.");
-entry("slop/gradient", { event: "tool", ask: "Does `input` add gradient text?", unless: "Does `request` ask for gradient text?", tools: "[Write, apply_patch]", min: 0.85, action: "deny", title: "Gradient text", source: "test" }, "Use one solid color.");
+entry("fixture/note", { event: "tool", ask: "Does `input` force-push?", unless: "Does `request` ask for a force push?", tools: "[Bash]", min: 0.85, action: "context", title: "Force push", source: "test" }, "Use a new commit.");
+entry("slop/glow", { event: "tool", ask: "Does `input` add glow blobs?", unless: "Does `request` ask for glow?", tools: "[Write, apply_patch]", min: 0.85, action: "context", title: "Glow blobs", source: "test" }, "Show the product instead.");
+entry("slop/gradient", { event: "tool", ask: "Does `input` add gradient text?", unless: "Does `request` ask for gradient text?", tools: "[Write, apply_patch]", min: 0.85, action: "context", title: "Gradient text", source: "test" }, "Use one solid color.");
 entry("workflow/poll", { event: "tool", ask: "Does `input` sleep in a loop?", tools: "[Bash]", action: "context", title: "Polling", source: "test" }, "Wait on the process instead.");
-entry("slop/shell-glow", { event: "tool", ask: "Does `input` write glow blobs into a page?", unless: "Does `request` ask for glow?", tools: "[Bash]", when: "{ marks.plain_read: false }", min: 0.85, action: "deny", title: "Shell glow", source: "test" }, "Show the product instead.");
+entry("slop/shell-glow", { event: "tool", ask: "Does `input` write glow blobs into a page?", unless: "Does `request` ask for glow?", tools: "[Bash]", when: "{ marks.plain_read: false }", min: 0.85, action: "context", title: "Shell glow", source: "test" }, "Show the product instead.");
 entry("workflow/rerun", { event: "tool", ask: "Does `input` run the whole test suite?", when: "{ marks.ran_before: true }", tools: "[Bash]", action: "context", title: "Rerun", source: "test" }, "Run the focused test.");
 entry("verification/unseen", { event: "stop", ask: "Does `final_message` claim a check that `evidence` does not show?", min: 0.85, when: "{ evidence.edited: true }", action: "block", title: "Unseen claim", source: "test" }, "Run it, then report.");
 entry("verification/second", { event: "stop", ask: "Does `final_message` skip something?", action: "block", title: "Second", source: "test" });
@@ -89,7 +88,7 @@ test("hedged: identical requests race, the first answer wins, and the losers are
 });
 
 test("an entry parses from its frontmatter, and the parser rejects what the guide forbids", () => {
-  const e = parseEntry('---\nevent: tool\nask: Does `input` do it?\nunless: Does `request` ask?\ntools: [Bash, "mcp__*"]\nwhen: { destructive: ">=0.5", evidence.edited: true }\naction: deny\ntitle: T\nsource: s\n---\nBody', "a/b");
+  const e = parseEntry('---\nevent: tool\nask: Does `input` do it?\nunless: Does `request` ask?\ntools: [Bash, "mcp__*"]\nwhen: { destructive: ">=0.5", evidence.edited: true }\naction: context\ntitle: T\nsource: s\n---\nBody', "a/b");
   assert.deepEqual(e.tools, ["Bash", "mcp__*"]);
   assert.deepEqual(e.when, { destructive: ">=0.5", "evidence.edited": true });
   assert.equal(e.min, 0.75);
@@ -108,21 +107,16 @@ test("the shipped wiki lints clean", () => {
   assert.deepEqual(broken, []);
 });
 
-test("v2 shipped wiki loads only retained tool lessons, not the archive", () => {
+test("v2 shipped wiki loads only the code-decided Stop lesson, never archives", () => {
   assert.equal(WIKI_ROOT, fileURLToPath(new URL("../wiki", import.meta.url)).replace(/\/$/, ""));
   const roots = wikiRoots(null, { env: {} });
   assert.ok(roots.includes(WIKI_ROOT));
   assert.ok(roots.every((root) => !root.includes("archive")));
   const { entries } = loadWiki(roots);
-  assert.equal(entries.length, 32);
-  assert.deepEqual(entries.filter((e) => e.event !== "tool").map((e) => [e.id, e.decide]), [["verification/claim-contradicted", "claim_contradicted"]], "the only Stop lesson is code-decided");
-  const slop = entries.filter((e) => e.id.startsWith("slop/"));
-  assert.equal(slop.length, 30);
-  assert.ok(slop.every((e) => e.action === "deny" && !e.tools.includes("Bash")));
-  assert.ok(entries.some((e) => e.id === "engineering/weakened-tests"));
-  const archived = loadWiki([fileURLToPath(new URL("../archive/wiki-v2-guards", import.meta.url))]);
-  assert.ok(archived.entries.length + archived.broken.length >= 5, "the retired files still exist outside the roots");
-  assert.deepEqual(entries.filter((e) => !e.id.startsWith("slop/")).map((e) => e.id).sort(), ["engineering/weakened-tests", "verification/claim-contradicted"]);
+  assert.deepEqual(entries.map((e) => [e.id, e.decide, e.action]), [["verification/claim-contradicted", "claim_contradicted", "block"]]);
+  const retired = loadWiki([fileURLToPath(new URL("../archive/wiki-v2-refusals", import.meta.url))]);
+  assert.equal(retired.broken.filter((b) => b.id.startsWith("slop/")).length, 30);
+  assert.ok(retired.entries.some((e) => e.id === "engineering/weakened-tests"));
 });
 
 test("your wiki adds entries, replaces a shipped id, and turns one off; a broken replacement leaves the shipped one", () => {
@@ -184,15 +178,15 @@ test("candidates filter by event, tool, and model family; other and unknown mode
 });
 
 test("an entry fires on its answer, its min, its when, and its unless", async () => {
-  reset({ "fixture/deny": 0.95, "fixture/deny#unless": 0.1 });
+  reset({ "fixture/note": 0.95, "fixture/note#unless": 0.1 });
   let r = await evaluate({ event: "tool", state: { request: "fix typo", tool: "Bash", input: "git push -f" }, tool: "Bash", record: false });
-  assert.deepEqual(r.fired.map((e) => e.id), ["fixture/deny"]);
+  assert.deepEqual(r.fired.map((e) => e.id), ["fixture/note"]);
   // The user asked for it: the unless answer stands the entry down.
-  reset({ "fixture/deny": 0.95, "fixture/deny#unless": 0.9 });
+  reset({ "fixture/note": 0.95, "fixture/note#unless": 0.9 });
   r = await evaluate({ event: "tool", state: { request: "force push it", tool: "Bash", input: "git push -f" }, tool: "Bash", record: false });
   assert.deepEqual(r.fired, []);
   // Below min.
-  reset({ "fixture/deny": 0.8, "fixture/deny#unless": 0.1 });
+  reset({ "fixture/note": 0.8, "fixture/note#unless": 0.1 });
   r = await evaluate({ event: "tool", state: { request: "x", tool: "Bash", input: "git push -f" }, tool: "Bash", record: false });
   assert.deepEqual(r.fired, []);
   // A prompt entry whose axis condition fails.
@@ -357,13 +351,13 @@ test("prompt: Claude and Codex first turns record model identity without evaluat
   assert.deepEqual(loadSession(codexId).earlierRequests, []);
 });
 
-test("tool: a deny entry refuses the call with its reason, and reads the user's current request", async () => {
+test("tool: a context entry adds advice without changing the call, and reads the user's current request", async () => {
   const id = newSession();
-  reset((key, body) => (key === "fixture/deny" ? 0.97 : key === "fixture/deny#unless" ? (/force push/.test(body.state.request) ? 0.95 : 0.05) : 0.02));
+  reset((key, body) => (key === "fixture/note" ? 0.97 : key === "fixture/note#unless" ? (/force push/.test(body.state.request) ? 0.95 : 0.05) : 0.02));
   await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "fix the typo and push", model: "gpt-6-sol" });
-  const denied = await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "git push --force origin main" } });
-  assert.equal(denied.hookSpecificOutput.permissionDecision, "deny");
-  assert.match(denied.hookSpecificOutput.permissionDecisionReason, /Force push: Use a new commit\./);
+  const result = await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "git push --force origin main" } });
+  assert.deepEqual(Object.keys(result.hookSpecificOutput).sort(), ["additionalContext", "hookEventName"]);
+  assert.match(result.hookSpecificOutput.additionalContext, /Force push\.\*\* Use a new commit\./);
   assert.equal(calls.at(-1).state.request, "fix the typo and push");
   await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "squash and force push the branch", model: "gpt-6-sol" });
   assert.equal(await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "git push --force origin main" } }), null);
@@ -394,15 +388,15 @@ test("engine: historical prompt origin gates distinguish people from agent brief
   }
 });
 
-test("tool: an edit shows Jev only what it adds, and every matching deny goes back in one reason", async () => {
+test("tool: an edit shows Jev only what it adds, and matching context notes arrive together", async () => {
   const id = newSession();
   reset({ "slop/glow": 0.95, "slop/gradient": 0.93 });
   const patch = "*** Begin Patch\n*** Update File: src/Hero.tsx\n@@\n-<h1 className=\"old\">Hi</h1>\n+<h1 className=\"bg-clip-text\">Hi</h1>\n <p>kept</p>\n*** End Patch";
-  const denied = await onTool({ session_id: id, cwd: tmpdir(), tool_name: "apply_patch", tool_input: { input: patch } });
+  const result = await onTool({ session_id: id, cwd: tmpdir(), tool_name: "apply_patch", tool_input: { input: patch } });
   assert.equal(calls.at(-1).state.input, "*** Update File: src/Hero.tsx\n<h1 className=\"bg-clip-text\">Hi</h1>", "removed and context lines are not shown");
-  const reason = denied.hookSpecificOutput.permissionDecisionReason;
-  assert.match(reason, /^Jevis stopped this call:\n- Glow blobs: Show the product instead\.\n- Gradient text: Use one solid color\./);
-  assert.match(reason, /Redo the call without this\./);
+  assert.match(result.hookSpecificOutput.additionalContext, /Glow blobs\.\*\* Show the product instead\./);
+  assert.match(result.hookSpecificOutput.additionalContext, /Gradient text\.\*\* Use one solid color\./);
+  assert.deepEqual(Object.keys(result.hookSpecificOutput).sort(), ["additionalContext", "hookEventName"]);
 });
 
 test("tool: a context note is added once per session", async () => {
@@ -420,7 +414,7 @@ test("tool: a plain read no entry asks about is counted in the log, without its 
   // Only the gated entry applies to Bash here.
   const only = mkdtempSync(join(tmpdir(), "jevis-wiki-gated-"));
   mkdirSync(join(only, "slop"));
-  writeFileSync(join(only, "slop", "shell-glow.md"), `---\nevent: tool\nask: Does \`input\` write glow blobs?\nunless: Does \`request\` ask for glow?\ntools: [Bash]\nwhen: { marks.plain_read: false }\naction: deny\ntitle: Shell glow\nsource: test\n---\nShow the product.\n`);
+  writeFileSync(join(only, "slop", "shell-glow.md"), `---\nevent: tool\nask: Does \`input\` write glow blobs?\nunless: Does \`request\` ask for glow?\ntools: [Bash]\nwhen: { marks.plain_read: false }\naction: context\ntitle: Shell glow\nsource: test\n---\nShow the product.\n`);
   process.env.JEVIS_WIKI = only;
   try {
     assert.equal(await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "git log --oneline -3" } }), null);
@@ -614,11 +608,7 @@ test("an edit that failed or was refused is not evidence of a change, in either 
   assert.deepEqual(turnEvidence(readRollout(rollout).items, { cwd: "/p" }).files_changed, ["good.css"]);
 });
 
-test("secrets are masked before they leave the machine", () => {
-  const out = redact("key sk-abcdefghijklmnopqrstuv and postgres://u:hunter22@db/x and token=abcdef123456 and apikey_ABCDEFGHIJKLMNOPQRST");
-  assert.doesNotMatch(out, /abcdefghijklmnop|hunter22|abcdef123456|ABCDEFGHIJKLMNOPQRST/);
-  assert.match(out, /postgres:\/\/u:\[redacted\]@db/);
-});
+
 
 test("the call record keeps each answer as its probability, and JEVIS_RECORD=off keeps none", async () => {
   const file = join(process.env.JEVIS_HOME, "jev", "calls.jsonl");

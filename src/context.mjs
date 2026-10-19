@@ -51,6 +51,14 @@ export function originOf(prompt, env = process.env) {
   return /^\s*\[[\w-]*(agent|broker)[\w-]*\]/i.test(String(prompt ?? "")) ? "agent" : "person";
 }
 
+/** A worker's first prompt identifies the session without a model call. */
+export const WORKER_MARKER = "You were called by another agent. Do this task yourself.";
+export function isWorkerPrompt(prompt, env = process.env) {
+  const normalized = (text) => String(text ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  const marker = normalized(env.JEVIS_WORKER_MARKER || WORKER_MARKER);
+  return originOf(prompt, env) === "agent" || Boolean(marker && normalized(requestText(prompt)).includes(marker));
+}
+
 /** The user's words without the harness's attachment preamble and image tags. */
 export function requestText(prompt) {
   const text = String(prompt ?? "");

@@ -1,7 +1,6 @@
 import { readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { redact } from "./redact.mjs";
 import { commandText, eachJsonl } from "./transcript.mjs";
 
 /** Offline transcript lookup. Raw commands stay in memory, never in the
@@ -67,9 +66,7 @@ export function recoverToolInputs(rows, { roots = [join(homedir(), ".claude/proj
       const matches = new Set();
       for (let i = lo; i < commands.length && commands[i].t <= t + windowMs; i++) {
         const input = commands[i].input;
-        // Hook logs redact after display clipping. Also accept a redacted
-        // full prefix, without ever emitting the unredacted command.
-        if (input.startsWith(prefix) || redact(input.slice(0, 200)).startsWith(prefix) || redact(input).startsWith(prefix)) matches.add(input);
+        if (input.startsWith(prefix)) matches.add(input);
       }
       if (matches.size === 1) recovered.set(row, matches.values().next().value);
     }

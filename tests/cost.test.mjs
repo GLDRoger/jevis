@@ -21,7 +21,7 @@ writeRows(join(home, "jev", "calls.jsonl"), [
   call("03", "tool", 300, 30, { error: "timeout" }), call("04", "stop", 400, 40), call("04", "review", 500, 50),
   call("05", "tool", 600, 60, { at: "2026-10-06T01:00:00+05:30" }), call("05", "prompt", 0, 0, { usage: undefined }),
   { at: "2026-09-30T23:59:59Z", event: "tool", usage: { input_tokens: 9999, output_tokens: 9999 } },
-  { at: "not a date", event: "tool" }, call("07", "approve", 9999, 9999), null,
+  { at: "not a date", event: "tool" }, call("07", "session", 9999, 9999), null,
 ]);
 writeRows(join(home, "log.jsonl"), [
   call("01", "prompt", 9999, 9999, { ms: 1 }), call("01", "tool", 9999, 9999, { ms: 2 }),

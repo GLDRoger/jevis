@@ -9,7 +9,7 @@ process.env.JEVIS_HOME = mkdtempSync(join(tmpdir(), "jevis-home-"));
 for (const k of ["JEVIS_MODE", "JEVIS_SCOPE", "JEVIS_DISABLE", "JEVIS_CRITIC", "AGENT_CALL_DEPTH", "BROKER_JOB_ID", "BROKER_DEPTH"]) delete process.env[k];
 const wikiDir = mkdtempSync(join(tmpdir(), "jevis-wiki-"));
 mkdirSync(join(wikiDir, "slop"), { recursive: true });
-writeFileSync(join(wikiDir, "slop", "glow.md"), "---\nevent: tool\ntools: [Write]\nask: Does `input` add glow blobs?\nunless: Does `request` ask for glow?\nmin: 0.85\naction: deny\ntitle: Glow blobs\nsource: test\n---\nBlurred orbs behind the hero are filler.\n\nInstead: show the product.\n");
+writeFileSync(join(wikiDir, "slop", "glow.md"), "---\nevent: tool\ntools: [Write]\nask: Does `input` add glow blobs?\nunless: Does `request` ask for glow?\nmin: 0.85\naction: context\ntitle: Glow blobs\nsource: test\n---\nBlurred orbs behind the hero are filler.\n\nInstead: show the product.\n");
 process.env.JEVIS_WIKI = wikiDir;
 
 const { setJevTransport } = await import("../src/jev.mjs");

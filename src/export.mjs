@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
-import { redactDeep } from "./redact.mjs";
 import { jevisHome } from "./state.mjs";
 import { eachJsonl } from "./transcript.mjs";
 
@@ -12,7 +11,7 @@ import { eachJsonl } from "./transcript.mjs";
  *
  *   { id, workflow, state, questions, gold }   state, questions, gold as JSON strings
  *
- * Each recorded call is one row: the masked state Jev saw, the questions it
+ * Each recorded call is one row: the state Jev saw, the questions it
  * answered (from questions/<version>.json), and its answers as the gold,
  * `{ label, probabilities: { true, false }, noul }` for a yes/no. Fine-tuning
  * Laya on it distills Jev on this user's own work, for a local model with no
@@ -97,7 +96,6 @@ export function exportDataset({ out, home = jevisHome(), events = ["prompt", "to
   const test = pickTest(counts, testShare);
   mkdirSync(out, { recursive: true, mode: 0o700 });
   const files = { train: join(out, "train.jsonl.gz"), test: join(out, "test.jsonl.gz") };
-  // Prompts and file names are masked for secrets, not anonymized: the files are private like the record they come from.
   const writers = Object.fromEntries(Object.entries(files).map(([k, f]) => [k, gzipWriter(f)]));
   const sets = new Map();
   const questionSet = (version) => {
@@ -120,8 +118,7 @@ export function exportDataset({ out, home = jevisHome(), events = ["prompt", "to
       if (r.error || !r.answers) return void (n.errors += 1);
       const qs = questionSet(r.version);
       if (!qs) return void (n.unanswerable += 1);
-      // Masked again: a record written before a masking rule was added can hold what today's rules catch.
-      const state = JSON.stringify(redactDeep(r.state));
+      const state = JSON.stringify(r.state);
       const key = hash(`${r.version}\0${state}`);
       if (seen.has(key)) return void (n.duplicates += 1);
       seen.add(key);
@@ -155,7 +152,7 @@ export function formatExport(r) {
     `Left out: ${r.errors} failed calls, ${r.duplicates} repeats, ${r.unanswerable} with no yes/no answers or a missing question set.`,
     ...(r.otherDeciders ? [`Skipped ${r.otherDeciders} non-Jev calls (including Luna): Laya training exports keep only Jev labels.`] : []),
     "",
-    "The rows hold your prompts, commands, and file names. Secrets that Jevis's masking recognizes are masked (again, with today's rules); anything it does not recognize, and everything else, is as you wrote it. Upload them only as a private dataset.",
+    "The rows hold your prompts, commands, and file names. All data is as you wrote it, including secrets. Upload them only as a private dataset.",
     "",
     "To fine-tune Laya on them, change the notebook's two load_dataset calls to read these files (on Kaggle, from your private dataset's path):",
     `  ds_train = load_dataset("json", data_files={"train": "train.jsonl.gz"}, split="train")`,

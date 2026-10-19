@@ -34,11 +34,12 @@ test('Antigravity uses the latest user step and only a final after that step', (
   assert.equal(input.prompt, 'new');assert.equal(input.turn_id, '3');assert.equal(input.last_assistant_message, undefined);
   assert.equal(input.cwd, '/w');
 });
-test('Google deny and retry outputs preserve actual enforcement', () => {
-  const denied = { hookSpecificOutput: { permissionDecision: 'deny', permissionDecisionReason: 'Unsafe' } };
-  assert.deepEqual(googleOutput('gemini-cli', 'BeforeTool', denied), { decision: 'deny', reason: 'Unsafe' });
-  assert.deepEqual(googleOutput('antigravity', 'PreToolUse', denied), { decision: 'deny', reason: 'Unsafe' });
-  assert.deepEqual(googleOutput('antigravity', 'Stop', { decision: 'block', reason: 'Verify first' }), { decision: 'continue', reason: 'Verify first' });
+test('Google Stop retry outputs preserve the code-decided check', () => {
+  const blocked = { decision: 'block', reason: 'Check failed' };
+  assert.deepEqual(googleOutput('gemini-cli', 'AfterAgent', blocked), { decision: 'deny', reason: 'Check failed' });
+  assert.deepEqual(googleOutput('antigravity', 'Stop', blocked), { decision: 'continue', reason: 'Check failed' });
+  assert.deepEqual(googleOutput('gemini-cli', 'BeforeTool', blocked), {});
+  assert.deepEqual(googleOutput('antigravity', 'PreToolUse', blocked), { decision: 'allow' });
 });
 test('Context is emitted only in provider-supported shapes', () => {
   const note = { hookSpecificOutput: { additionalContext: 'lesson' } };
@@ -148,8 +149,8 @@ test('Google read tools normalize provider paths for Read-only lessons', () => {
   }
 });
 
-test('Antigravity non-deny evaluations leave native policy unchanged', () => {
-  for (const output of [null, {}, { hookSpecificOutput: { permissionDecision: 'allow' } }, { hookSpecificOutput: { additionalContext: 'lesson' } }]) {
+test('Antigravity context-only evaluations leave native policy unchanged', () => {
+  for (const output of [null, {}, { hookSpecificOutput: { additionalContext: 'lesson' } }]) {
     assert.deepEqual(googleOutput('antigravity', 'PreToolUse', output), { decision: 'allow' });
   }
 });
@@ -227,7 +228,7 @@ test('Antigravity timestamped receipts persist execution intervals and credit ch
 });
 
 
-test('Antigravity valid disabled and non-deny tool calls defer to native policy', async () => {
+test('Antigravity valid disabled and context-only tool calls defer to native policy', async () => {
   for (const disabled of ['', '1']) {
     const home = mkdtempSync(join(tmpdir(), 'jevis-google-policy-'));
     const output = await runAntigravity(home, 'PreToolUse', {

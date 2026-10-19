@@ -18,7 +18,7 @@ const round = (n) => Math.round(n * 1000) / 1000;
 /** An entry's `unless` question: asked apart from `ask`, because Jev reads one literal condition better than a compound one. */
 export const unlessKey = (id) => `${id}#unless`;
 
-export async function evaluate({ event, state, tool = null, model = null, harness = null, sessionId = null, timeoutMs = 3000, record = true, wiki = loadWiki(), axes = true, codeOnly = false }) {
+export async function evaluate({ event, state, tool = null, model = null, harness = null, sessionId = null, timeoutMs = 3000, record = true, wiki = loadWiki(), axes = true, codeOnly = false, local = false }) {
   // Every caller (the hook, replay, `jevis ask`, the batteries) sees the same code facts about a tool call;
   // a caller's own marks (the hook's ran_before) win, and a mark it leaves out is still computed, never undefined.
   if (event === "tool") state = { ...state, marks: { ...inputMarks(state.input, { tool }), ...state.marks } };
@@ -34,6 +34,12 @@ export async function evaluate({ event, state, tool = null, model = null, harnes
   }
   // codeOnly: an entry code cannot settle is dropped, never sent to the model.
   if (codeOnly) pool = pool.filter((e) => e.id in code);
+  // local (worker sessions): no model call at all. Only entries code settles
+  // outright run; one with an `unless` stands down rather than asking Jev.
+  if (local) {
+    pool = pool.filter((e) => e.id in code && !e.unless);
+    axes = false;
+  }
   const questions = {};
   // Preserve the diagnostic profile on model-reviewed events, but don't call
   // Jev solely to log axes when code has settled every lesson and its gates.
@@ -48,7 +54,7 @@ export async function evaluate({ event, state, tool = null, model = null, harnes
   const started = Date.now();
   let jevQuestions = Object.keys(questions).length;
   const { answers, ms, error, errorClass } = jevQuestions ? await askJev({ state, questions, event, sessionId, harness, model, timeoutMs, record }) : { answers: {}, ms: 0 };
-  // An unavailable exception must never turn a code match into a refusal.
+  // An unavailable exception must never turn a code match into an action.
   if (!answers) return { error, errorClass, profile: {}, scores: {}, unless: {}, fired: [], ms, code, jevQuestions };
   const value = (a) => (typeof a?.noul === "number" ? a.noul : null);
   const profile = {};

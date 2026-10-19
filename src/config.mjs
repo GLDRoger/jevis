@@ -28,6 +28,7 @@ const httpUrl = (v) => typeof v === "string" && /^https?:\/\/[^\s'"`$;&|<>]+$/.t
 /** Each setting: how to check a value, how to write it as the environment reads it, and what it does. */
 export const SETTINGS = {
   JEVIS_MODE: { ok: oneOf("live", "shadow"), help: "live, or shadow: log what Jevis would do and change nothing" },
+  JEVIS_WORKER_MARKER: { ok: text, help: "the phrase that marks a session started by another agent" },
   JEVIS_NUDGES: { ok: oneOf("on", "off"), help: "off stops every nudge" },
   JEVIS_DISABLE: { ok: oneOf(true, false, "1", "0"), env: (v) => (v === true || v === "1" ? "1" : null), help: "true turns every hook off" },
   JEVIS_SCOPE: { ok: list, env: (v) => [v].flat().join(delimiter), help: `folders Jevis acts in (a list, or ${process.platform === "win32" ? "semicolon" : "colon"}-separated)` },

@@ -23,7 +23,7 @@ const put = (id, text) => {
 };
 const PAGE = (ask) => `---\nevent: prompt\nask: ${ask}\naction: context\ntitle: Pages\nsource: test\nmin: 0.75\n---\nBody.\n`;
 put("t/page", PAGE("Does `request` ask for a page?"));
-put("t/push", "---\nevent: tool\ntools: [Bash]\nask: Does `input` force push?\nunless: Did `request` ask to force push?\naction: deny\ntitle: Force push\nsource: test\nmin: 0.8\nwhen: { marks.plain_read: false }\n---\nBody.\n");
+put("t/push", "---\nevent: tool\ntools: [Bash]\nask: Does `input` force push?\nunless: Did `request` ask to force push?\naction: context\ntitle: Force push\nsource: test\nmin: 0.8\nwhen: { marks.plain_read: false }\n---\nBody.\n");
 
 setJevTransport(async ({ state, questions }) => {
   const text = `${state.request ?? ""} ${state.input ?? ""}`;
@@ -90,7 +90,7 @@ test("stats --near: each entry's fires, near misses, and stand-downs under today
   writeFileSync(legacyFile, [0.1, 0.9, 0.9].map((u) => JSON.stringify({ event: "tool", version: "v1", state: { tool: "Bash", input: "git push -f origin main" }, answers: { [e.id]: 0.95, [`${e.id}#unless`]: u } })).join("\n") + "\n");
   const historical = tune([e], { file: legacyFile, questionsDir: legacy });
   const row = historical.entries[0];
-  assert.deepEqual({ asked: row.asked, fires: row.fires, stoodDown: row.stoodDown }, { asked: 3, fires: 1, stoodDown: 2 }, "the user's own request stood the deny down twice");
+  assert.deepEqual({ asked: row.asked, fires: row.fires, stoodDown: row.stoodDown }, { asked: 3, fires: 1, stoodDown: 2 }, "the user's own request stood the note down twice");
   assert.match(formatTune(historical), /t\/push\s+3\s+1\s+0\s+2\s+0\.95/);
 
   put("t/page", PAGE("Does `request` ask for a web page?"));
@@ -107,7 +107,7 @@ test("stats --near: judged as the engine would today, not as the record says", (
   const home = mkdtempSync(join(tmpdir(), "jevis-records-raw-"));
   const qdir = join(home, "questions");
   mkdirSync(qdir);
-  const entry = (id, extra = {}) => ({ id, event: "tool", action: "deny", min: 0.8, unless_max: 0.5, ask: `Does \`input\` do ${id}?`, when: { "marks.plain_read": false }, tools: ["Bash"], ...extra });
+  const entry = (id, extra = {}) => ({ id, event: "tool", action: "context", min: 0.8, unless_max: 0.5, ask: `Does \`input\` do ${id}?`, when: { "marks.plain_read": false }, tools: ["Bash"], ...extra });
   const gated = entry("t/gated");
   const reworded = entry("t/reworded", { unless: "Did `request` ask for it, in so many words?" });
   const plain = entry("t/plain", { when: undefined });
@@ -155,12 +155,12 @@ test("export: rows in Laya's format, split by whole sessions, repeats dropped, f
   for (const [s, splits] of Object.entries(bySession)) assert.equal(splits.size, 1, `${s} is wholly in one split`);
   assert.equal(exportDataset({ out, events: ["tool"], testShare: 0 }).test, 0);
 
-  // A record written before a masking rule existed is masked on the way out.
+  // Export preserves original recorded data.
   const calls = join(process.env.JEVIS_HOME, "jev", "calls.jsonl");
-  const version = JSON.parse(readFileSync(calls, "utf8").split("\n")[0]).version;
+  const version = readFileSync(calls, "utf8").trim().split("\n").map(JSON.parse).find((row) => row.answers?.["t/push"] !== undefined).version;
   appendFileSync(calls, `${JSON.stringify({ at: new Date().toISOString(), event: "tool", version, sessionId: "old", state: { request: "x", tool: "Bash", input: 'aws configure set aws_secret_access_key "private phrase for test"' }, answers: { "t/push": 0.1 } })}\n`);
   const again = exportDataset({ out, testShare: 0 });
-  assert.ok(!gunzipSync(readFileSync(again.files.train)).toString().includes("private phrase for test"));
+  assert.ok(gunzipSync(readFileSync(again.files.train)).toString().includes("private phrase for test"));
 });
 
 test("tune: thresholds are judged only on the active decider's records", async () => {

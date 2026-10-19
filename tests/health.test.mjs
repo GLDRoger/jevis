@@ -84,7 +84,7 @@ test("deciders: Luna HTTP translation, refusals, chunking, usage, and recording"
   assert.equal(request.auth, "Bearer fake-luna-key");
   assert.equal(request.body.model, "gpt-6-luna");
   assert.equal(typeof request.body.input, "string");
-  assert.deepEqual(JSON.parse(request.body.input), { request: "probe", token: "[redacted]" });
+  assert.deepEqual(JSON.parse(request.body.input), { request: "probe", token: "sk-not-a-real-secret" });
   assert.deepEqual(request.body.questions, [
     { type: "predicate", name: "slop/emoji#unless", instructions: "Does this qualify? Yes means: it qualifies. No means: it does not." },
     { type: "predicate", name: "axis:foo", instructions: "Is this a probe?" },
@@ -186,7 +186,7 @@ test("outages: nested messages, codes, detail and bounded objects never stringif
   assert.equal(errorMessage({ detail: { reason: "billing exhausted" } }), '{"reason":"billing exhausted"}');
   assert.equal(errorMessage({ strange: "object" }), '{"strange":"object"}');
   assert.equal(errorMessage({ detail: "ordinary words ".repeat(90) }).length, 200);
-  assert.equal(errorMessage({ error: { message: "API_KEY=not-a-real-value" } }).includes("not-a-real-value"), false);
+  assert.equal(errorMessage({ error: { message: "API_KEY=not-a-real-value" } }).includes("not-a-real-value"), true);
   assert.equal(errorMessage(new Error("HTTP 402: [object Object]")).includes("[object Object]"), false);
   for (const [error, kind] of [["HTTP 401", "auth/billing"], ["HTTP 402", "auth/billing"], ["HTTP 403", "auth/billing"], ["HTTP 429", "rate-limit"], ["HTTP 503", "server"], ["timeout after 1500 ms", "timeout"], ["fetch failed", "network"], ["ENOTFOUND", "network"]]) assert.equal(errorClass(error), kind);
 });

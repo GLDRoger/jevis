@@ -116,16 +116,16 @@ export function googleInput(provider, event, raw, rows = []) {
 export function googleOutput(provider, event, output) {
   if (!output) return provider === 'antigravity' && event === 'PreToolUse' ? { decision: 'allow' } : {};
   const specific = output.hookSpecificOutput ?? {};
-  const deny = specific.permissionDecision === 'deny' || output.decision === 'block';
-  const reason = specific.permissionDecisionReason ?? output.reason;
+  const blocked = output.decision === 'block' && ['Stop', 'AfterAgent'].includes(event);
+  const reason = output.reason;
   if (provider === 'antigravity') {
-    if (deny) return { decision: event === 'Stop' ? 'continue' : 'deny', reason };
+    if (blocked) return { decision: 'continue', reason };
     if (specific.additionalContext && ['SessionStart', 'PreInvocation'].includes(event)) return { injectSteps: [{ ephemeralMessage: specific.additionalContext }] };
     // Antigravity PreToolUse has no context-injection output field. Notes have
     // already been selected by Jevis; the adapter runner queues them for the next invocation.
     return event === 'PreToolUse' ? { decision: 'allow' } : {};
   }
-  if (deny) return { decision: 'deny', reason };
+  if (blocked) return { decision: 'deny', reason };
   if (event === 'BeforeTool') return {}; // delivered by AfterTool, not ignored by Gemini
   return specific.additionalContext ? { hookSpecificOutput: { hookEventName: event, additionalContext: specific.additionalContext } } : {};
 }

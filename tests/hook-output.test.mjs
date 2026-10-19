@@ -76,7 +76,7 @@ test("hook stdout: HTTP failures stay in health and local logs, never native or 
   const { home, env } = fixture(t);
   const wiki = join(home, "wiki");
   mkdirSync(wiki);
-  writeFileSync(join(wiki, "fixture.md"), "---\nevent: tool\ntools: [Write]\nask: Does `input` match?\nunless: Does `request` ask for it?\naction: deny\ntitle: Fixture lesson\nsource: test\n---\nUse the alternative.\n");
+  writeFileSync(join(wiki, "fixture.md"), "---\nevent: tool\ntools: [Write]\nask: Does `input` match?\nunless: Does `request` ask for it?\naction: context\ntitle: Fixture lesson\nsource: test\n---\nUse the alternative.\n");
   const server = createServer((req, res) => {
     req.resume();
     res.writeHead(402, { "Content-Type": "application/json" });

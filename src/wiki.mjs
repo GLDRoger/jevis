@@ -23,7 +23,7 @@ import { insideFolder, isQualifiedPath, samePath, splitFolders } from "./paths.m
 
 export const WIKI_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "wiki");
 const EVENTS = ["prompt", "tool", "stop"];
-const ACTIONS = { prompt: ["context"], tool: ["context", "deny"], stop: ["block"] };
+const ACTIONS = { prompt: ["context"], tool: ["context"], stop: ["block"] };
 const REQUIRED = ["event", "ask", "action", "title", "source"];
 const KNOWN = new Set([...REQUIRED, "yes", "no", "min", "when", "tools", "family", "unless", "unless_max", "off", "decide"]);
 export const DEFAULT_UNLESS_MAX = 0.5;
@@ -124,7 +124,8 @@ export function validateEntry(e) {
   for (const k of REQUIRED) if (e[k] === undefined || e[k] === "") errors.push(`missing ${k}`);
   for (const k of Object.keys(e)) if (!["id", "body"].includes(k) && !KNOWN.has(k)) errors.push(`unknown field ${k}`);
   if (!EVENTS.includes(e.event)) errors.push(`event must be one of ${EVENTS.join(", ")}`);
-  else if (!ACTIONS[e.event].includes(e.action)) errors.push(`action on ${e.event} must be ${ACTIONS[e.event].join(" or ")}`);
+  if (e.action === "deny") errors.push("Jevis never refuses a call: use action: context");
+  else if (EVENTS.includes(e.event) && !ACTIONS[e.event].includes(e.action)) errors.push(`action on ${e.event} must be ${ACTIONS[e.event].join(" or ")}`);
   if (typeof e.min !== "number" || e.min <= 0 || e.min > 1) errors.push("min must be a number in (0, 1]");
   if (!e.body) errors.push("empty body");
   if (e.body && e.body.length > 900) errors.push(`body is ${e.body.length} characters; keep it under 900`);
@@ -141,7 +142,6 @@ export function validateEntry(e) {
   }
   if (typeof e.ask === "string" && !/`[\w.]+`/.test(e.ask)) errors.push("ask must name the state field it reads, in backticks");
   if (e.unless !== undefined && !/`[\w.]+`/.test(String(e.unless))) errors.push("unless must name the state field it reads, in backticks");
-  if (e.action === "deny" && !e.unless) errors.push("a deny needs an unless: the user's own request must be able to stand it down");
   if (e.unless_max !== undefined && (typeof e.unless_max !== "number" || e.unless_max <= 0 || e.unless_max > 1)) errors.push("unless_max must be a number in (0, 1]");
   return errors;
 }
@@ -198,7 +198,7 @@ export const projectContains = (real, parent, separator = sep) => real.startsWit
 /**
  * Project lessons: the nearest <folder>/.jevis/wiki at or above `cwd`, below
  * the home folder (whose .jevis is Jevis's own home). A project's lessons
- * are text the agent reads and can turn off shipped refusals, and a cloned
+ * are text the agent reads and can turn off shipped lessons, and a cloned
  * repository could ship either, so they load only once the user trusts them
  * with `jevis trust`. Trust is pinned to the files' contents: any change (a
  * pull, an edit) needs trusting again, as with direnv's `allow`.

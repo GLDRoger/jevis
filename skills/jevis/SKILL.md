@@ -1,6 +1,6 @@
 ---
 name: jevis
-description: Change what Jevis does for your coding agents. Add, tune, replace, or turn off a lesson, a design telltale (slop) refusal, a tool refusal, a stop check, or your design law, and prove the change works. Use when the user wants Jevis to notice, say, refuse, or check something new, or to stop doing something.
+description: Change what Jevis does for your coding agents. Add, tune, replace, or turn off a lesson, a design tip, the code-decided Stop check, or your design law, and prove the change works. Use when the user wants Jevis to notice, say, or check something new, or to stop doing something.
 ---
 
 # Changing Jevis
@@ -18,17 +18,15 @@ When this skill comes from an installed plugin, that location is the plugin root
 
 ## 1. Pin down the behavior
 
-Restate the user's wish as one sentence: "At <moment>, when <something visible in the state>, Jevis should <tell the agent | refuse | send it back>." If the user gave a vague wish ("stop Codex making cheap-looking buttons"), name the concrete pattern and one example that must *not* trigger it, and confirm both with the user when the boundary is unclear.
+Restate the user's wish as one sentence: "At <moment>, when <something visible in the state>, Jevis should <tell the agent | send it back at Stop>." If the user gave a vague wish ("stop Codex making cheap-looking buttons"), name the concrete pattern and one example that must *not* trigger it, and confirm both with the user when the boundary is unclear.
 
 Then find the row:
 
 | The user wants Jevis to… | Change | Where |
 |---|---|---|
-| tell the agent something when a kind of request arrives | a `prompt` entry, `action: context` | `~/.jevis/wiki/<area>/<name>.md` |
+| give a fixed tip when a request arrives | a `hook: prompt` nudge (prompt wiki entries are ignored) | `~/.jevis/nudges/<name>.md` |
 | remind the agent of something as it runs a command or edits | a `tool` entry, `action: context` | `~/.jevis/wiki/<area>/<name>.md` |
-| refuse a command (destructive, outward, wasteful) | a `tool` entry, `action: deny` | `~/.jevis/wiki/<area>/<name>.md` |
-| refuse an edit that adds a design telltale | a `tool` entry, `action: deny` | `~/.jevis/wiki/slop/<name>.md` |
-| keep the agent from finishing until it has checked, tested, or finished the list | a `stop` entry, `action: block` | `~/.jevis/wiki/<area>/<name>.md` |
+| catch a pass claim contradicted by exit codes at Stop | the existing code-decided `stop` entry, `action: block` | `~/.jevis/wiki/<area>/<name>.md` |
 | design to the user's own rules | the design law file | `~/.jevis/design-law.md` |
 | soften, retarget, or rewrite a shipped lesson | a copy with the same id | `~/.jevis/wiki/<same id>.md` |
 | drop a shipped lesson | a file whose frontmatter is only `off: true` | `~/.jevis/wiki/<same id>.md` |
@@ -53,11 +51,11 @@ Read `WIKI.md` in full first. It defines every field, the state each moment sees
 2. **Choose the moment by where the evidence is.** A `prompt` entry sees the request. A `tool` entry sees the command, or only the lines an edit adds. A `stop` entry sees the final message and facts about what the turn did (`evidence.*`).
 3. **Ask one literal question.** Name the state field in backticks. Describe the pattern the way code or a command would spell it (`background-clip: text`, `git push --force`), because the model answers the words, not the intent. Put boundary cases in `yes:` and `no:`. Leave arithmetic to code, as a fact.
 4. **Gate with `when`,** using axes (`visual: ">=0.6"`) or facts (`"evidence.edited": true`), instead of folding those conditions into the question. A `tool` entry that applies to `Bash` and is about what a command writes, runs, or opens takes `marks.plain_read: false`, so `ls`, `rg`, and `git log` skip it without a call.
-5. **Refusals need extra care.** `deny` and `block` take `min: 0.85` or higher, and an `unless` that asks whether the user asked for exactly this. A wrong refusal costs more than a missed note. When the harm isn't concrete, use `context`.
+5. **Jevis is not a gate.** Tool lessons only add context; never refuse calls, manage permissions, or filter data. The code-decided pass-claim Stop check and opt-in design review are the only send-backs.
 6. **Write the body for a capable colleague.** Name the failure in a sentence or two, then write `Instead:` and the concrete alternative. Give the reason, because agents rightly distrust unexplained instructions injected mid-session. Keep it under 900 characters.
 7. **Cite the source:** the user's own words, the date, the session or incident. An entry without evidence is an opinion.
 
-A design telltale, in the shape every shipped `slop/` entry uses:
+A custom tool context tip (shipped design tips live in `nudges/*-ui-edit.md`):
 
 ```markdown
 ---
@@ -69,7 +67,7 @@ yes: <what counts>
 no: <look-alikes that must pass>. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.
 unless: Does `request` explicitly ask for <the pattern>?
 min: 0.85
-action: deny
+action: context
 title: <a few words>
 source: <where it came from>
 ---
@@ -78,9 +76,9 @@ source: <where it came from>
 Instead: <the concrete alternative.>
 ```
 
-A `slop/` entry also teaches the design review: its title and first body line join the list of telltales the reviewer flags.
+Retired design checks are archived and do not teach the critic. Use the design law for review guidance.
 
-**The design law** is a different tool. It is a free-form Markdown file of the user's rules, as long as they like. When it exists, agents are told to read it before visual work, and the end-of-turn reviewer judges against it. It advises and never refuses. For the few rules worth refusing at the edit, also write a `slop/` entry.
+**The design law** is a different tool. It is a free-form Markdown file of the user's rules, as long as they like. When it exists, agents are told to read it before visual work, and the end-of-turn reviewer judges against it. It advises and never refuses. Edits are never refused; use a context tip for edit-time guidance.
 
 ## 3. Prove it
 
@@ -103,9 +101,9 @@ The change is live on the next hook call. Nothing needs reinstalling.
 3. Replay real history when the user has it: `jevis replay <session file or id>` on a session where the failure happened and on one where it didn't.
    When you change an existing lesson, `jevis stats --near` shows it against every recorded answer to its current question: how often it would fire today, how often it landed within 0.1 of `min`, and how often `unless` or `when` stood it down. A reworded `ask` starts from zero there, since the old answers were to a different question.
 4. For code changes, add a test beside the existing ones and run `npm test`. Document any new fact or axis in `WIKI.md`.
-5. For a contribution to the shipped `slop/` area, add a telltale case and its look-alikes to `eval/slop-cases.mjs`, then run `node eval/slop.mjs`. Every case must stay right.
+5. For a design tip, verify its context appears at the first UI edit without changing the call.
 
-`jevis ask` calls the configured decision model, so it needs a TypeSafe key, an OpenAI key with `JEVIS_DECIDER=luna`, or a running self-hosted server. Thresholds were tuned on Jev: when the user runs Luna, test with `JEVIS_DECIDER=luna jevis ask ...` too, and report both probabilities. If it reports an error, say the change is untested rather than implying it works. If Jevis itself seems not to run, `jevis doctor` checks the installation end to end. For a new `deny` or `block`, suggest the user run Jevis in shadow mode (`node bin/install.mjs --shadow`, then `--live`) for a few days and read `jevis stats`.
+`jevis ask` calls the configured decision model, so it needs a TypeSafe key, an OpenAI key with `JEVIS_DECIDER=luna`, or a running self-hosted server. Thresholds were tuned on Jev: when the user runs Luna, test with `JEVIS_DECIDER=luna jevis ask ...` too, and report both probabilities. If it reports an error, say the change is untested rather than implying it works. If Jevis itself seems not to run, `jevis doctor` checks the installation end to end. For changes to the Stop check, suggest the user run Jevis in shadow mode (`node bin/install.mjs --shadow`, then `--live`) for a few days and read `jevis stats`.
 
 ## 4. Report back
 

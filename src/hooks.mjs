@@ -1,7 +1,6 @@
-import { attachmentNames, clip, commandKey, harnessOf, harnessWritten, hookItem, inputMarks, lastAgentMessage, lastUserMessageAt, mergeToolResults, museTool, originOf, requestText, sessionItems, TEST_PATH, toolInput, transcriptSize, turnEvidence, turnTexts, UI_FILE, withTouched, workspaceOf } from "./context.mjs";
+import { clip, commandKey, harnessOf, harnessWritten, hookItem, inputMarks, isWorkerPrompt, lastAgentMessage, lastUserMessageAt, mergeToolResults, museTool, originOf, requestText, sessionItems, TEST_PATH, toolInput, transcriptSize, turnEvidence, turnTexts, UI_FILE, withTouched, workspaceOf } from "./context.mjs";
 import { evaluate } from "./engine.mjs";
-import { redact, redactDeep } from "./redact.mjs";
-import { criticBackend, designLaw, formatReview, review, roundsFor } from "./review.mjs";
+import { criticBackend, formatReview, review, roundsFor } from "./review.mjs";
 import { loadSession, log, saveSession } from "./state.mjs";
 import { wikiFor } from "./wiki.mjs";
 import { insideFolder, splitFolders } from "./paths.mjs";
@@ -11,7 +10,8 @@ import { nudgeText } from "./nudges.mjs";
 
 /**
  * The hooks. Every one fails open: no Jev, no key, a timeout, or a bug
- * means the agent carries on untouched.
+ * means the agent carries on untouched. Tool hooks only add context;
+ * the code-decided Stop check and optional design review can send work back.
  *
  * Limits learned from an earlier hook system, which once held a session for hours over one wrong block:
  * - a context note is given once per session (again after the context is compacted);
@@ -22,7 +22,6 @@ import { nudgeText } from "./nudges.mjs";
 export const MAX_NOTES = 4;
 export const NOTE_BUDGET = 3000;
 export const MAX_STOP_BLOCKS = 2;
-export const MAX_DENIES = 3;
 /** The model name used for Claude Code before its transcript names one: in the claude family. */
 export const CLAUDE_UNKNOWN = "claude-unknown";
 /** How many distinct commands a session remembers for marks.ran_before. */
@@ -101,18 +100,6 @@ function pickNotes(fired, session, limit = MAX_NOTES) {
 const formatNotes = (notes, lead) => [lead, ...notes.map((e) => `**${e.title}.** ${e.body}`)].join("\n\n");
 
 /**
- * A brief, explicit reply to the immediately preceding turn's refusals. No model call.
- * The approval phrase leads, and at most four words follow it ("go ahead and open it"),
- * so "go back to the old design" or "continue with the headless run" lift nothing.
- */
-const APPROVAL = /^(?:go ahead|go for it|do it|yes|yep|yeah|y|ok|okay|sure|proceed|run it|approved|approve|allowed|that's fine|thats fine|fine|please do|you can|it's fine|its fine)\b(.*)$/;
-export function isApproval(text) {
-  const request = text.trim().toLowerCase().replaceAll("’", "'").replace(/[\s\p{P}\p{S}\p{M}\u200d]+$/gu, "");
-  const m = request.length <= 60 && !/\b(?:no|don't|dont|not|stop|wait|never|but|instead)\b/.test(request) && APPROVAL.exec(request);
-  return Boolean(m) && m[1].replace(/^[\s,.!]+/, "").split(/\s+/).filter(Boolean).length <= 4;
-}
-
-/**
  * Short feedback that says something missed without saying what: "not good",
  * "try again", "doesn't fit what I had in mind". Code only; every match is
  * logged as a feedback nudge, so misses and false matches show up in review.
@@ -130,14 +117,11 @@ export async function onPrompt(input) {
   const { harness, model } = harnessOf(input);
   const session = loadSession(sessionId);
   const outage = sessionOutage(session);
-  // Stored masked: session files sit on disk, and everything downstream reads the request from here.
-  const request = clip(redact(requestText(prompt)), 2000);
-  const lifted = session.denied?.turn === session.turn && isApproval(request) ? session.denied.ids : [];
-  if (lifted.length) session.allowed = [...new Set([...(session.allowed ?? []), ...lifted])];
-  session.denied = null;
+  const request = clip(requestText(prompt), 2000);
+  if ((session.turn === 0 && isWorkerPrompt(prompt)) || originOf("", process.env) === "agent") session.worker = true;
   Object.assign(session, {
     previousRequest: session.request,
-    // Permission given a few messages back ("commit whenever it makes sense") still holds: tool checks read these.
+    // Tool notes can read the recent conversation, not just its latest request.
     earlierRequests: session.request ? [...(session.earlierRequests ?? []), clip(session.request, EARLIER_CLIP)].slice(-EARLIER_MEMORY) : session.earlierRequests ?? [],
     request,
     // The design review judges a follow-up against what the conversation set out to build.
@@ -155,43 +139,34 @@ export async function onPrompt(input) {
     model: model ?? session.model ?? (harness === "Claude Code" ? CLAUDE_UNKNOWN : null),
   });
   if (!saveSession(sessionId, session)) return null;
-  if (lifted.length) log({ event: "approve", sessionId, harness, turn: session.turn, lifted, request: clip(request, 200) });
   // v2: no lesson notes and no decision-model call on prompts. A month of
   // real use (Sep 28 - Oct 18 2026) showed 0 of 60 sampled notes changed an
   // outcome the agent's own instruction files would not have produced; the
   // place for a standing lesson is AGENTS.md / CLAUDE.md, not a runtime note.
   // The hook stays for the session bookkeeping the tool and stop hooks read.
-  log({ event: "prompt", sessionId, harness, model: session.model, origin: originOf(prompt), turn: session.turn, cwd, request: clip(session.request, 200), acted: [], mode: shadow() ? "shadow" : "live" });
+  log({ event: "prompt", worker: session.worker || undefined, sessionId, harness, model: session.model, origin: originOf(prompt), turn: session.turn, cwd, request: clip(session.request, 200), acted: [], mode: shadow() ? "shadow" : "live" });
   if (shadow()) return null;
   // Vague feedback after an agent turn: the first gets the feedback tip, later ones in the session the stronger one.
   let feedback = "";
-  if (session.turn > 1 && isVagueFeedback(request)) {
+  if (!session.worker && session.turn > 1 && isVagueFeedback(request)) {
     const seen = session.vagueFeedback ?? 0;
     feedback = nudgeContext(seen ? "feedback-repeat" : "feedback", sessionId, harness, session.model, session);
     const now = loadSession(sessionId);
     now.vagueFeedback = seen + 1;
     saveSession(sessionId, now);
   }
-  const additionalContext = [outage, nudgeContext("prompt", sessionId, harness, session.model, session), feedback].filter(Boolean).join("\n\n");
+  const additionalContext = [outage, session.worker ? "" : nudgeContext("prompt", sessionId, harness, session.model, session), feedback].filter(Boolean).join("\n\n");
   return additionalContext ? { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext } } : null;
 }
 
-function denyReason(denies) {
-  const lines = denies.length === 1
-    ? [`Jevis stopped this call. ${denies[0].title}: ${denies[0].body}`]
-    : ["Jevis stopped this call:", ...denies.map((e) => `- ${e.title}: ${e.body}`)];
-  lines.push('Redo the call without this. If the user explicitly asked for exactly this, tell them why Jevis stopped it; if they reply with a short approval such as "go ahead", Jevis allows this check\'s calls for the rest of the session.');
-  return lines.join("\n");
-}
-
-/** Pre-tool hooks know permission, not execution success. Keep only allowed
- * calls as fallback evidence; redact before bounding, independently of RECORD.
+/** Pre-tool hooks record attempts, not execution success. Keep bounded
+ * calls as fallback evidence, independently of RECORD.
  */
-function rememberAllowedTool(input, tool, rawInput, key) {
+function rememberTool(input, tool, rawInput, key) {
   const now = loadSession(input.session_id);
   let changed = false;
   if (!input.transcript_path) {
-    const item = redactDeep(hookItem(tool, rawInput ?? {}));
+    const item = hookItem(tool, rawInput ?? {});
     if (item) {
       if (item.type === "CommandExecution") item.command = clip(item.command, HOOK_ITEM_CLIP);
       if (item.type === "FileChange") item.changes = item.changes.slice(0, 20).map((c) => ({ path: clip(c.path, 200) }));
@@ -230,7 +205,7 @@ export function onPost(input) {
   return null;
 }
 
-/** PreToolUse: refuse a call a deny entry matches; otherwise add a note the first time one applies. */
+/** PreToolUse: add a matching context note or a design tip, never change the call. */
 export async function onTool(input) {
   const { session_id: sessionId, cwd } = input;
   const { harness } = harnessOf(input, { withModel: false });
@@ -241,29 +216,20 @@ export async function onTool(input) {
   const key = tool === "Bash" ? commandKey(shown) : null;
   const commands = session.commands ?? [];
   const state = { request: session.request ?? "", earlier_requests: session.earlierRequests ?? [], tool, input: shown, marks: inputMarks(shown, { tool, ranBefore: key !== null && commands.includes(key) }), workspace: workspaceOf(cwd) };
-  const lifted = new Set(session.allowed ?? []);
-  const wiki = wikiFor(cwd);
-  const scoped = lifted.size ? { ...wiki, entries: wiki.entries.filter((e) => !lifted.has(e.id)) } : wiki;
-  const result = await evaluate({ event: "tool", state, tool, model: session.model, harness, sessionId, timeoutMs: timeout("tool"), wiki: scoped });
+  const result = session.worker
+    ? { skipped: "worker", fired: [] }
+    : await evaluate({ event: "tool", state, tool, model: session.model, harness, sessionId, timeoutMs: timeout("tool"), wiki: wikiFor(cwd) });
   if (result.skipped) {
     // Logged without the input: a skipped call is counted by `jevis stats`, not judged.
-    log({ event: "tool", sessionId, harness, turn: session.turn, tool, skipped: result.skipped, plain_read: state.marks.plain_read || undefined });
+    log({ event: "tool", worker: session.worker || undefined, sessionId, harness, turn: session.turn, tool, skipped: result.skipped, plain_read: state.marks.plain_read || undefined });
   }
-  // Every matching deny goes back at once: an edit with three slop patterns should be fixed in one retry, not three.
-  const denies = result.fired.filter((e) => e.action === "deny").slice(0, MAX_DENIES);
-  const notes = denies.length ? [] : pickNotes(result.fired, session, 2);
-  if (!result.skipped) log({ event: "tool", sessionId, harness, turn: session.turn, tool, input: clip(state.input, 200), subagent: input.agent_id ? true : undefined, ...summary(result), acted: denies.length ? denies.map((e) => e.id) : notes.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
+  const notes = pickNotes(result.fired, session, 2);
+  if (!result.skipped) log({ event: "tool", worker: session.worker || undefined, sessionId, harness, turn: session.turn, tool, input: clip(state.input, 200), subagent: input.agent_id ? true : undefined, ...summary(result), acted: notes.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
   if (shadow()) {
-    rememberAllowedTool(input, tool, rawInput, key);
+    rememberTool(input, tool, rawInput, key);
     return null;
   }
-  if (denies.length) {
-    const now = loadSession(sessionId);
-    now.denied = { turn: session.turn, ids: [...new Set([...(now.denied?.turn === session.turn ? now.denied.ids : []), ...denies.map((e) => e.id)])] };
-    saveSession(sessionId, now);
-    return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: denyReason(denies) } };
-  }
-  rememberAllowedTool(input, tool, rawInput, key);
+  rememberTool(input, tool, rawInput, key);
   if (notes.length) {
     // Re-read before writing: other hooks of this session (parallel tool calls, subagents) may have saved while Jev answered.
     const now = loadSession(sessionId);
@@ -295,11 +261,11 @@ export async function onStop(input) {
   // caught 4 real problems in a month against 54 harmful blocks (audit,
   // Oct 18 2026). The decision model is asked only for the review's axes,
   // and only when a review could run at all.
-  const reviewPossible = criticBackend() !== "off" && session.stop.reviews < roundsFor(session) && (state.evidence.ui_files_changed.length > 0 || state.evidence.files_changed_count > 0);
-  const result = await evaluate({ event: "stop", state, model: session.model, harness, sessionId, timeoutMs: timeout("stop"), wiki: wikiFor(cwd), codeOnly: true, axes: reviewPossible });
+  const reviewPossible = !session.worker && criticBackend() !== "off" && session.stop.reviews < roundsFor(session) && (state.evidence.ui_files_changed.length > 0 || state.evidence.files_changed_count > 0);
+  const result = await evaluate({ event: "stop", state, model: session.model, harness, sessionId, timeoutMs: timeout("stop"), wiki: wikiFor(cwd), codeOnly: true, axes: reviewPossible, local: Boolean(session.worker) });
   const blocks = wikiSpent ? [] : result.fired.filter((e) => e.action === "block" && !session.stop.blocked.includes(e.id)).slice(0, MAX_STOP_BLOCKS - session.stop.blocked.length);
-  log({ event: "stop", sessionId, harness, turn: session.turn, final: clip(final, 200), evidence: { edited: state.evidence.edited, files: state.evidence.files_changed_count, ui_files: state.evidence.ui_files_changed.length, after: state.evidence.actions_after_last_edit.length }, ...summary(result), acted: blocks.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
-  if (!blocks.length) return reviewTurn({ input, session, sessionId, cwd, harness, state, profile: result.profile, items, since, final });
+  log({ event: "stop", worker: session.worker || undefined, sessionId, harness, turn: session.turn, final: clip(final, 200), evidence: { edited: state.evidence.edited, files: state.evidence.files_changed_count, ui_files: state.evidence.ui_files_changed.length, after: state.evidence.actions_after_last_edit.length }, ...summary(result), acted: blocks.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
+  if (!blocks.length) return session.worker ? null : reviewTurn({ input, session, sessionId, cwd, harness, state, profile: result.profile, items, since, final });
   if (shadow()) return null;
   session.stop.blocked.push(...blocks.map((e) => e.id));
   const now = loadSession(sessionId);
@@ -373,8 +339,6 @@ export function onSession(input) {
   if (source === "compact" || source === "clear") {
     session.shown = {};
     if (source === "clear") {
-      session.allowed = [];
-      session.denied = null;
       session.vagueFeedback = 0;
     }
     log({ event: "session", sessionId, source, reset: true });

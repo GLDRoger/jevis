@@ -97,7 +97,7 @@ test("post: a command-written file invalidates checks before its mtime", () => {
   assert.deepEqual(evidence.actions_after_last_edit, ["exit 1: npm run lint"]);
 });
 
-test("post: no network, bounded/redacted private state, turn isolation and disk fail-open", () => {
+test("post: no network, bounded unchanged private state, turn isolation and disk fail-open", () => {
   setJevTransport(() => assert.fail("post must never call Jev"));
   const secret = "private-probe-only-value";
   const started = performance.now();
@@ -105,7 +105,7 @@ test("post: no network, bounded/redacted private state, turn isolation and disk 
   const ms = performance.now() - started;
   assert.ok(ms < 50, `local post handler ${ms.toFixed(2)} ms`);
   const disk = readFileSync(join(process.env.JEVIS_HOME, "sessions", "privacy.json"), "utf8");
-  assert.equal(disk.includes(secret), false);
+  assert.equal(disk.includes(secret), true);
   assert.ok(loadSession("privacy").hookResults[0].it.command.length <= RESULT_CLIP + 1);
   for (let i = 0; i <= RESULT_MEMORY; i++) onPost({ ...base, ...codex, session_id: "bounded", tool_use_id: `t${i}`, tool_response: { exit_code: 0 } });
   assert.equal(loadSession("bounded").hookResults.length, RESULT_MEMORY);

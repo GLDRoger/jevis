@@ -5,7 +5,6 @@ import { pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 import { ensureDir, jevisHome, log } from "./state.mjs";
 import { findOnPath, insideFolder } from "./paths.mjs";
-import { redact } from "./redact.mjs";
 import { loadWiki, wikiFor } from "./wiki.mjs";
 import { errorMessage } from "./health.mjs";
 
@@ -572,8 +571,7 @@ export async function review({ kind = "page", sessionId, turn, round, of = REVIE
     seen = { shots: [...seen.shots, ...sound.shots], facts: [...seen.facts, ...sound.facts] };
   }
   const wiki = wikiFor(cwd);
-  // The critic is a model call off this machine: the request passes through the same mask as Jev's state.
-  const prompt = redact(criticPrompt({ kind, request, firstRequest, targets, shots: seen.shots, facts: seen.facts, files, telltales: telltales(wiki), lessons: lessonsShown(shown, wiki), round, of }));
+  const prompt = criticPrompt({ kind, request, firstRequest, targets, shots: seen.shots, facts: seen.facts, files, telltales: telltales(wiki), lessons: lessonsShown(shown, wiki), round, of });
   const t = Date.now();
   const reply = await runCritic(prompt, { cwd, dir, shots: seen.shots });
   const ms = Date.now() - t;

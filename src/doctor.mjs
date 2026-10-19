@@ -6,7 +6,6 @@ import { readConfig, settingSources } from "./config.mjs";
 import { askJev, decider, jevModel, jevUrl, lunaKey, lunaModel, LUNA_URL, TYPESAFE_URL } from "./jev.mjs";
 import { jevisHome } from "./state.mjs";
 import { eachJsonl } from "./transcript.mjs";
-import { redact } from "./redact.mjs";
 import { projectStatus, wikiFor } from "./wiki.mjs";
 import { isQualifiedPath, samePath, splitFolders } from "./paths.mjs";
 import { errorClass } from "./health.mjs";
@@ -36,8 +35,6 @@ const skip = check("skip");
 
 const modeOf = (path) => statSync(path).mode & 0o777;
 const ago = (ms) => (ms < 90_000 ? "just now" : ms < 90 * 60_000 ? `${Math.round(ms / 60_000)} min ago` : `${Math.round(ms / 3_600_000)} h ago`);
-/** A setting safe to print: passwords, tokens, and signed-URL parameters masked as everywhere else. */
-const shown = (value) => redact(String(value));
 
 export function nodeCheck(version = process.versions.node) {
   const major = Number(version.split(".")[0]);
@@ -103,7 +100,7 @@ export function settingsChecks(env = process.env) {
   const config = readConfig();
   for (const e of config.errors) out.push(fail("settings", `${config.file}: ${e}`, config.raw === null ? `fix or remove ${config.file}; until then hooks ignore it` : `edit ${config.file}`));
   const set = settingSources(env).filter((s) => s.source !== "default");
-  out.push(info("settings", set.length ? set.map((s) => `${s.key}=${shown(s.value)} (${s.source})`).join(", ") : `all defaults${config.exists ? "" : "; no config.json yet"}`));
+  out.push(info("settings", set.length ? set.map((s) => `${s.key}=${String(s.value)} (${s.source})`).join(", ") : `all defaults${config.exists ? "" : "; no config.json yet"}`));
   if (env.JEVIS_DISABLE) out.push(warn("mode", "JEVIS_DISABLE is set: every hook is off", "unset it, or remove it from config.json"));
   else if (env.JEVIS_MODE === "shadow") out.push(info("mode", "shadow: Jevis logs what it would do and changes nothing", "node bin/install.mjs --live to switch it on"));
   else out.push(ok("mode", "live"));
@@ -123,7 +120,7 @@ export async function jevChecks({ env = process.env, offline = false, timeoutMs 
   const luna = decider(env) === "luna";
   const url = luna ? LUNA_URL : jevUrl();
   const typesafe = url === TYPESAFE_URL;
-  const label = luna ? `GPT-6 Luna (${lunaModel(env)})` : `Jev${jevModel() ? ` (${jevModel()})` : ""} at ${shown(url)}`;
+  const label = luna ? `GPT-6 Luna (${lunaModel(env)})` : `Jev${jevModel() ? ` (${jevModel()})` : ""} at ${url}`;
   const out = [];
   if (env.JEVIS_JEV === "off") return [warn("decision model", "JEVIS_JEV=off: no calls are made", "unset JEVIS_JEV")];
   const source = luna ? lunaKey(env)?.source : keySource(env);

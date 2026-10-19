@@ -1,7 +1,6 @@
 import { appendFileSync, chmodSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { redactDeep } from "./redact.mjs";
 import { eachJsonl } from "./transcript.mjs";
 
 /** Where Jevis keeps session memory, its decision log, and the Jev call record. Private to this user: it holds prompts. */
@@ -68,11 +67,11 @@ export function saveSession(id, state, { platform = process.platform, rename = r
   }
 }
 
-export const freshSession = () => ({ turn: 0, request: null, previousRequest: null, earlierRequests: [], firstRequest: null, turnStartedAt: null, model: null, shown: {}, allowed: [], denied: null, stop: { turn: -1, blocked: [], reviews: 0 } });
+export const freshSession = () => ({ turn: 0, request: null, previousRequest: null, earlierRequests: [], firstRequest: null, turnStartedAt: null, model: null, shown: {}, stop: { turn: -1, blocked: [], reviews: 0 } });
 
 export function log(event) {
   try {
-    appendFileSync(join(ensureDir(), "log.jsonl"), `${JSON.stringify(redactDeep({ at: new Date().toISOString(), ...event }))}\n`, { mode: 0o600 });
+    appendFileSync(join(ensureDir(), "log.jsonl"), `${JSON.stringify({ at: new Date().toISOString(), ...event })}\n`, { mode: 0o600 });
   } catch {
     /* logging never breaks a hook */
   }

@@ -21,10 +21,10 @@ This guide replaced `jevis mine`. That command read a model score the prompt hoo
 
 | Path | What it holds | Size |
 |---|---|---|
-| `~/.jevis/log.jsonl` | One row per hook decision: `prompt`, `tool`, `stop`, `review`, `session`, `approve`, `hook-error` | tens of MB |
+| `~/.jevis/log.jsonl` | One row per hook decision: `prompt`, `tool`, `stop`, `review`, `session`, `hook-error` | tens of MB |
 | `~/.jevis/jev/calls.jsonl` | One row per decision-model call: full state, answers, token `usage`, `ms`. Missing when `JEVIS_RECORD=off` | hundreds of MB |
 | `~/.jevis/jev/questions/<hash>.json` | The question sets those calls asked, keyed by hash | small |
-| `~/.jevis/sessions/<id>.json` | Per-session memory: current request, turn, notes shown, denies, lifted checks (`allowed`) | small each |
+| `~/.jevis/sessions/<id>.json` | Per-session memory: current request, turn, notes shown, worker status | small each |
 | `~/.jevis/reviews/<session>/turn<N>-round<M>/` | Design-review renders and verdicts | images |
 | `~/.jevis/wiki/` | The user's own lessons, which override the shipped `wiki/` by id | small |
 | `<repo>/nudges/`, `~/.jevis/nudges/` | Tips: fixed lines of context, one Markdown file each; a user file replaces the shipped one with the same name | small |
@@ -45,9 +45,10 @@ The instruction files that steer the user's agents, which your proposals target:
 - `tool`: `sessionId, harness, turn, tool, input` (clipped to 200 characters), `ms`, `pool` (entries asked), `fired[{id,p}]`, `acted[ids]`, `mode`. A row with `skipped` made no model call.
 - `stop`: `final` (clipped), `evidence{edited,files,ui_files,after}`, `fired`, `acted` (checks that blocked).
 - `prompt`: `request` (clipped), `origin` (`person` or an agent), `turn`. Since v2 it makes no model call.
-- `approve`: `lifted[ids]`, `request`. The user said "go ahead" after a deny, so those checks are off for the rest of that session.
 - `review`: `verdict`, `items`, `ms`, `error`.
 - `nudge`: `hook` (`session`, `prompt`, `feedback`, `feedback-repeat`, `ui-edit`), `ids` (the tip files sent), `model`, `turn`. A tip from `nudges/` was added to the agent's context. No model call.
+
+Worker sessions carry `worker: true` on prompt, tool and Stop rows. Their tool rows have `skipped: "worker"`; they make no decision-model or critic calls.
 
 A `calls.jsonl` row has `at, event, sessionId, harness, model, decider, deciderModel, ms, state, answers, usage{input_tokens,output_tokens}, error`.
 
@@ -55,7 +56,7 @@ A `calls.jsonl` row has `at, event, sessionId, harness, model, decider, deciderM
 
 - **Keep commands bounded.** These files are large. Stream them: use `rg '"event":"tool"' file | jq …`, `tail -n`, or `--since`. Never `cat` them or load them whole. Pipe to `head`, or summarise with `sort | uniq -c`.
 - **Don't spend money to measure.** `jevis ask` and `jevis replay` call the decision model, so run them only if the user asks. Everything below reads what is already recorded.
-- **Treat it as private.** Quote at most a sentence of any prompt, mask anything that looks like a key or token, and keep the report under `~/.jevis/`, never in a repository.
+- **Treat it as private.** Quote at most a sentence of any prompt, keep the report under `~/.jevis/`, never in a repository.
 - **Count before you conclude.** Every claim in the report carries its number and date range, and every example carries its session id and timestamp.
 
 ## 1. Cost
@@ -83,8 +84,8 @@ rg '"acted":\["' ~/.jevis/log.jsonl | jq -r 'select(.mode=="live") | "\(.at[0:10
 
 For each check that acted, sample up to 10 cases. Open the session's transcript around that timestamp and judge each case:
 
-- **Helped:** the agent changed course, and the user never pushed back. For example, it ran headless instead of headed, or fixed a failing test before claiming success.
-- **Harmed:** the user overrode it, repeated the request, or said it was wrong. An `approve` row right after a deny is a direct harm signal. So is a deny of something the user explicitly asked for.
+- **Helped:** the agent changed course, and the user never pushed back. For example, it fixed a failing test before claiming success.
+- **Harmed:** the user overrode it, repeated the request, or said it was wrong.
 - **Neutral:** nothing changed, or the agent would have done the same anyway because its instruction files already say so.
 
 Also check what never acted:
@@ -119,7 +120,7 @@ Look for corrections: "no", "that's not what I asked", "stop doing X", "I told y
 Decide where each fix belongs, cheapest first:
 
 1. **An instruction-file line** (CLAUDE.md, AGENTS.md). It costs nothing at runtime, and every agent reads it. This is the default.
-2. **A code-decided Jevis check** (`decide:` in `src/rules.mjs`). Use it when a pattern is mechanically detectable and costly enough to refuse, such as a destructive command. There's no model call.
+2. **A code-decided Jevis check** (`decide:` in `src/rules.mjs`). Keep the code-decided pass-claim Stop check precise; tool checks can only add context. There's no model call.
 3. **A model-judged Jevis check.** Use it only with evidence that the first two can't catch the problem and that it happened often enough to pay for a call on every matching tool use. Estimate that cost from section 1.
 
 ## 4. Write the proposal

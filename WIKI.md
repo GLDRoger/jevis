@@ -1,8 +1,8 @@
 # Writing wiki entries
 
-The wiki is what Jevis knows: one Markdown file per lesson, under `wiki/<area>/<name>.md`. The path, without `wiki/` and `.md`, is the entry's id (`slop/gradient-text`).
+The wiki is what Jevis knows: one Markdown file per lesson, under `wiki/<area>/<name>.md`. The path, without `wiki/` and `.md`, is the entry's id (`verification/claim-contradicted`).
 
-V2 ships 31 tool lessons and one code-decided Stop lesson. Prompt hooks do bookkeeping only: prompt entries are not evaluated or injected. Stop accepts only entries with a `decide` code rule, plus an optional independent design review; `verification/claim-contradicted` is the only shipped Stop entry. Model-judged Stop blocks are retired. The 61 retired v1 lessons in `archive/wiki-v1/` and the five retired guards in `archive/wiki-v2-guards/` are outside the wiki roots and are not loaded. Standing advice belongs in the user's AGENTS.md/CLAUDE.md.
+V2 ships one code-decided Stop lesson and no tool lessons. Retired tool lessons are in `archive/wiki-v2-refusals/`, outside the wiki roots. Prompt hooks do bookkeeping only: prompt entries are not evaluated or injected. Stop accepts only entries with a `decide` code rule, plus an optional independent design review; `verification/claim-contradicted` is the only shipped Stop entry. Model-judged Stop blocks are retired. The 61 retired v1 lessons in `archive/wiki-v1/` and the five retired guards in `archive/wiki-v2-guards/` are outside the wiki roots and are not loaded. Standing advice belongs in the user's AGENTS.md/CLAUDE.md.
 
 ## Your own entries
 
@@ -30,7 +30,7 @@ Facts in `when` are known before the decision model is asked, so an entry whose 
 
 What it does next depends on its `action`.
 
-With `decide`, exact matches need no model answer to `ask`, and exact non-matches need neither question. Positive matches still ask the model the separate `unless`, when present: permission and supplied copy need judgment. A missing or failed exception answer never refuses a call. When all tool entries and their gates are settled by code, no decision-model call is made. The event log records `code` (exact lesson decisions) and `jevQuestions`; code scores are not model probabilities or training labels. Keep `ask`, `yes`/`no`, and `unless` as the fallback contract; custom lessons opt in explicitly.
+With `decide`, exact matches need no model answer to `ask`, and exact non-matches need neither question. Positive matches still ask the model the separate `unless`, when present: exceptions need judgment. A missing or failed exception answer stands the lesson down. Local-only Stop evaluation (`codeOnly: true, axes: false`) drops entries with model-decided exceptions and makes no model calls. When all tool entries and their gates are settled by code, no decision-model call is made. The event log records `code` (exact lesson decisions) and `jevQuestions`; code scores are not model probabilities or training labels. Keep `ask`, `yes`/`no`, and `unless` as the fallback contract; custom lessons opt in explicitly.
 
 ## Format
 
@@ -42,9 +42,8 @@ ask: Does `input` add gradient-filled interface text?
 yes: A heading, word, or number uses a gradient clipped to text
 no: Solid text, non-text gradients, or examples in developer documentation
 min: 0.85
-decide: gradient_text
 unless: Does `request` explicitly ask for gradient-filled text?
-action: deny
+action: context
 title: Gradient-filled text
 source: recurring generated-design pattern in the maintainer's sessions
 ---
@@ -56,27 +55,27 @@ Gradient-filled text is a stock generated-design tell. Use a solid text color in
 | `event` | yes | `tool` (before a tool), or `stop` (before ending, requires `decide`). `prompt` is still parseable for historical/offline records, but ignored by hooks |
 | `ask` | yes | One literal yes/no question about the state. Name the state fields it reads in backticks. |
 | `yes`, `no` | no | What a yes and a no mean. Put the boundary cases here. |
-| `min` | no | The probability the `ask` answer must reach. Default 0.75. Use 0.85 or more for `deny` and `block`. |
-| `decide` | no | A named predicate in `src/rules.mjs`: `em_dash_copy`, `gradient_text`, `emoji_icons`, or `claim_contradicted`. Code answers the `ask` with 0 or 1 when exact; ambiguous input falls back to the decision model. A rule error stands the lesson down. |
-| `unless` | no | A second yes/no question that stands the entry down, usually "did the user ask for exactly this?". Both decision models answer a literal question better than a compound one: a deny asked as "is this destructive, when the user did not ask for it?" scored 0.86 on a case it should catch; split into `ask` and `unless`, the same case scored 0.97 and 0.28. |
+| `min` | no | The probability the `ask` answer must reach. Default 0.75. Use 0.85 or more for `block`. |
+| `decide` | no | A named predicate in `src/rules.mjs`: `claim_contradicted`. Code answers the `ask` with 0 or 1 when exact; ambiguous input falls back to the decision model. A rule error stands the lesson down. |
+| `unless` | no | An optional second yes/no question that stands the entry down. |
 | `unless_max` | no | The `unless` answer at or above which the entry stands down. Default 0.5. |
 | `when` | no | Conditions that must also hold: axes (see below) with `">=x"` or `"<x"`, and facts with a literal value (`{ evidence.edited: true }`, `{ marks.plain_read: false }`). |
 | `tools` | tool only | Tool names the entry applies to: `Bash`, `apply_patch` (Codex), `Edit`, `Write`, `MultiEdit`, `mcp__*`. Glob `*` allowed. |
 | `family` | no | `claude` or `gpt`, for a lesson that fixes one family's habit. A model from any other family (Gemini, Grok, an open model), or an unknown one, gets both families' lessons. Leave it out for a lesson every model needs. |
-| `action` | yes | `context` adds the body to what the agent reads (tool only in v2); `deny` refuses the tool call with the body as the reason (tool); `block` sends the agent back to work with the body as the reason (stop). |
+| `action` | yes | `context` adds the body to what the agent reads (prompt, tool); prompt entries are currently ignored by hooks. `block` sends the agent back to work (stop only). |
 | `title` | yes | A few words naming the lesson. |
 | `source` | yes | Where the lesson came from: session ids, dates, counts, a file. An entry without evidence is an opinion. |
 
 ## The state the decision model reads
 
 **prompt**
-No state is sent to the decision model. The hook stores the masked request, previous and earlier requests, model, turn and turn start locally for downstream hooks. It may return the once-per-session outage warning, never lesson notes.
+No state is sent to the decision model. The hook stores the request, previous and earlier requests, model, turn and turn start locally for downstream hooks. It may return the once-per-session outage warning, never lesson notes.
 
 **tool**
 - `request`: the user's current message.
 - `earlier_requests`: up to 8 of the session's messages before it, oldest first, each cut to 400 characters. For permission given earlier, such as "commit whenever it makes sense".
 - `tool`: the tool name.
-- `input`: the command (up to 4,000 characters), or for an edit, the file path and only the lines it adds: the removed and unchanged lines of an `apply_patch` are left out, so a check judges what the edit introduces. Secrets are masked before Jev sees any of it (`src/redact.mjs`).
+- `input`: the command (up to 4,000 characters), or for an edit, the file path and only the lines it adds: the removed and unchanged lines of an `apply_patch` are left out, so a check judges what the edit introduces. Data is sent as written.
 - `marks`: exact facts about `input` that code checks, because a decision model blurs or cannot see them:
   - `marks.em_dash`: it contains U+2014, not an en dash; unknown (`null`) when a clipped input could hide one;
   - `marks.ran_before`: this session already ran this exact command;
@@ -119,25 +118,17 @@ The engine still supports prompt axes for old records and offline evaluations, b
 
 `visual` and `film` also decide whether the design or film review runs after the stop entries pass (see the README).
 
-## The slop area
+## Design tips
 
-`wiki/slop/` holds `deny` entries on edits (`Write`, `Edit`, `MultiEdit`, `apply_patch`, and `NotebookEdit` where listed; never `Bash`) for the telltales of generated design: gradient text, purple gradients, emoji and Unicode glyphs as icons, frosted glass, glow blobs, feature-card rows, announcement pills, marquees, rotating text stamps, invented social proof, hype copy, numbered mono labels, hover lift on every card, unasked template sections, colored left-edge bars, decorative SVG, and section-scrolling sidebars.
-
-Each one follows the same shape:
-- `ask` names the pattern as code would write it (`background-clip: text`, `border-l-4`, `<textPath>`), because the decision model reads the edit literally.
-- `no` lists the look-alikes that must pass (a brand's own gradient, a data chart, an imported icon, a docs page naming the pattern) and ends with the shared clause for prose, comments, searches, and non-interface files.
-- `unless` asks whether the user asked for exactly this.
-- The body says why it reads as generated, then `Instead:` with the concrete alternative.
-
-The critic reads every slop entry's title and first line as its list of telltales, so a new entry also teaches the design review. Test changes with `node eval/slop.mjs`: every case must stay right, the look-alikes included.
+Generated-design guidance lives in `nudges/*-ui-edit.md`. The retired tool checks in `archive/wiki-v2-refusals/` are not loaded. Tool entries may add context only; Jevis never refuses calls or manages permissions.
 
 ## Writing a good entry
 
 - **One failure per entry.** Two failures are two entries, because they fire under different conditions.
 - **Make the `ask` literal.** The decision model answers the words you wrote, not the ones you meant. If you would explain what you meant, that explanation belongs in `yes` and `no`. Keep counting and arithmetic out of the question: that belongs in code, as a fact.
 - **Body.** One or two sentences naming the default failure, then what to do instead. Write it as guidance to a capable colleague, in two to six lines. Point to a skill path when the fix needs a procedure.
-- **Deny and block.** Use them only when the harm is concrete and the question is precise. A wrong block costs more than a missed note: an earlier hook system once held a session for hours over one.
-- **The user's words win.** A body never overrides what the user asked for. Every permission-sensitive `deny` or `block` entry needs an `unless` that asks whether the user asked for exactly this. Write it literally, with its boundary cases: "run the QA pass" first read as asking to see a window (0.77) until the question said that testing and checking do not count (0.07).
+- **Stop blocks.** Keep the code-decided pass-claim check precise. A wrong block costs more than a missed note.
+- **The user's words win.** A body never overrides what the user asked for; tool entries are advice only.
 - **Give the reason.** Agents rightly distrust unexplained instructions injected mid-session. In a live test, both Claude Sonnet and GPT-6 Sol flagged a bare "end your reply with this word" as possible injection. A body that names the failure and the user's interest reads as what it is: advice from this user's history.
 - **Test before you ship it.** Run `jevis ask` for single cases, and `jevis replay <session>` against real sessions where the failure happened and where it did not.
 - **Test on both deciders.** `min` and `unless_max` were tuned on Jev's probabilities, and GPT-6 Luna's sit differently: it answers `unless` ("did the user ask for exactly this?") higher. Run your cases with `JEVIS_DECIDER=luna` as well as the default, and set thresholds that hold on the decider you use. `jevis stats --near` reads only the active decider's records.

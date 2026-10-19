@@ -52,7 +52,6 @@ const nudgeRows = (sessionId) => readLog().filter((r) => r.event === "nudge" && 
 function lesson(id, action) {
   return put(process.env.JEVIS_WIKI, id, [
     "event: tool", "tools: [Write]", "ask: Does `input` edit a file?", `action: ${action}`,
-    ...(action === "deny" ? ["unless: Did `request` explicitly ask for this?"] : []),
     "title: Fixture lesson", "source: test",
   ].join("\n"), "Existing lesson text.");
 }
@@ -124,12 +123,12 @@ test("nudges: per-file text has a strict 1500-character cap", () => {
   assert.equal(nudges.find((n) => n.id === "exact").text, "y".repeat(1500));
 });
 
-test("nudges: prompts inject for GPT person and agent requests, never call Jev, and log metadata", async () => {
+test("nudges: prompts inject for GPT person requests, not worker requests, never call Jev, and log metadata", async () => {
   fixtures();
   const output = await prompt("gpt");
   assert.equal(output.hookSpecificOutput.hookEventName, "UserPromptSubmit");
   assert.equal(context(output), "Understand the intent.");
-  assert.equal(context(await prompt("agent", "gpt-6.1-sol", "[agent] Build the screen.")), "Understand the intent.");
+  assert.equal(await prompt("agent", "gpt-6.1-sol", "[agent] Build the screen."), null);
   assert.equal(await prompt("claude", "claude-opus-5-5"), null);
   assert.equal(await prompt("unknown", "gemini-3"), null);
   assert.deepEqual(calls, []);
@@ -223,18 +222,7 @@ test("nudges: edit tools, path aliases, patch headers, and Muse equivalents all 
   assert.deepEqual(calls, []);
 });
 
-test("nudges: denies win and do not consume the turn's UI nudge", async () => {
-  fixtures();
-  const file = lesson("deny", "deny");
-  await prompt("denied");
-  const result = await tool("denied");
-  assert.equal(result.hookSpecificOutput.permissionDecision, "deny");
-  assert.equal(context(result), undefined);
-  assert.equal(loadSession("denied").nudged, undefined);
-  assert.equal(nudgeRows("denied").filter((r) => r.hook === "ui-edit").length, 0);
-  rmSync(file);
-  assert.equal(context(await tool("denied")), "Avoid default design habits.");
-});
+
 
 test("nudges: append after existing wiki notes without losing shown state or tool evidence", async () => {
   fixtures();

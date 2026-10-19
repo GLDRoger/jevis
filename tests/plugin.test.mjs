@@ -58,7 +58,7 @@ test("plugin: bundled hooks run from a spaced installed path with isolated state
   mkdirSync(wiki);
   const fields = {
     prompt: "action: context\nask: Does `request` ask about the fixture?",
-    tool: "action: deny\ntools: [Bash]\nwhen: { marks.plain_read: false }\nask: Does `input` delete the fixture?\nunless: Does `request` explicitly authorize deletion?",
+    tool: "action: context\ntools: [Bash]\nwhen: { marks.plain_read: false }\nask: Does `input` delete the fixture?\nunless: Does `request` explicitly authorize deletion?",
     stop: "action: block\nask: Does `final_message` claim success?\nunless: Does `request` ask to skip verification?",
   };
   for (const [event, extra] of Object.entries(fields)) writeFileSync(join(wiki, `${event}.md`), `---\nevent: ${event}\n${extra}\nmin: 0.85\ntitle: Plugin ${event} fixture\nsource: offline plugin test\n---\nCheck the fictional fixture.\n`);
@@ -93,7 +93,7 @@ test("plugin: bundled hooks run from a spaced installed path with isolated state
       child.on("close", (code, signal) => code === 0 && !signal ? resolve(stdout) : reject(new Error(`${event}: ${code}, ${signal}, ${stderr}`)));
       child.stdin.end(JSON.stringify({ session_id: "plugin-fixture", model: "gpt-test", cwd: scratch, hook_event_name: event, ...payload }));
     });
-    if (event === "PreToolUse") assert.equal(JSON.parse(output).hookSpecificOutput.permissionDecision, "deny");
+    if (event === "PreToolUse") assert.match(JSON.parse(output).hookSpecificOutput.additionalContext, /Plugin tool fixture/);
     else {
       assert.equal(output, "");
       assert.equal(requests.length, before, "only the tool hook calls the decision model");

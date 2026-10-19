@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { redactDeep } from "./redact.mjs";
 import { ensureDir, jevisHome } from "./state.mjs";
 import { errorClass, errorMessage, recordHealth } from "./health.mjs";
 
@@ -194,14 +193,13 @@ export async function askJev({ state, questions, event, sessionId = null, harnes
   if (!Object.keys(questions).length) return { answers: {}, ms: 0, error: null };
   if (!jevAvailable()) return { answers: null, ms: 0, error: "jev unavailable" };
   const started = Date.now();
-  const clean = redactDeep(state);
   const provider = decider();
   const decisionModel = provider === "luna" ? lunaModel() : jevModel();
   let answers = null;
   let error = null;
   let usage = { input_tokens: 0, output_tokens: 0 };
   try {
-    const responses = await Promise.all(chunks(questions).map((qs) => hedged(transport ?? (provider === "luna" ? lunaTransport : httpTransport), { state: clean, ...(decisionModel ? { model: decisionModel } : {}), questions: qs }, timeoutMs, transport || !needsKey() ? [] : HEDGES)));
+    const responses = await Promise.all(chunks(questions).map((qs) => hedged(transport ?? (provider === "luna" ? lunaTransport : httpTransport), { state, ...(decisionModel ? { model: decisionModel } : {}), questions: qs }, timeoutMs, transport || !needsKey() ? [] : HEDGES)));
     answers = {};
     for (const r of responses) {
       if (!r?.answers) throw new Error(errorMessage(r?.error, "no answers"));
@@ -217,6 +215,6 @@ export async function askJev({ state, questions, event, sessionId = null, harnes
   const version = questionsVersion(questions);
   const failureClass = error ? errorClass(error) : null;
   if (keep) recordHealth(error);
-  if (keep && recording()) record({ at: new Date(started).toISOString(), event, version, sessionId, harness, model, decider: provider, deciderModel: decisionModel ?? null, ms, state: clean, answers: compactAnswers(answers), usage, error, errorClass: failureClass }, questions);
+  if (keep && recording()) record({ at: new Date(started).toISOString(), event, version, sessionId, harness, model, decider: provider, deciderModel: decisionModel ?? null, ms, state, answers: compactAnswers(answers), usage, error, errorClass: failureClass }, questions);
   return { answers, ms, error, errorClass: failureClass };
 }

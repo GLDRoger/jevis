@@ -135,10 +135,10 @@ async function checkInstalledHooks(t, { nodeWithSpaces = false, selectedEvents =
     throw error;
   }
 
-  const titles = { prompt: "Installed prompt lesson", tool: "Installed tool refusal", stop: "Installed stop check" };
+  const titles = { prompt: "Installed prompt lesson", tool: "Installed tool context", stop: "Installed stop check" };
   const lessons = {
     prompt: ["ask: Does `request` ask to update the fixture?", "action: context"],
-    tool: ["tools: [Bash]", "ask: Does `input` run fixture-delete?", "unless: Does `request` explicitly ask to run fixture-delete?", "when: { marks.plain_read: false }", "action: deny"],
+    tool: ["tools: [Bash]", "ask: Does `input` run fixture-delete?", "unless: Does `request` explicitly ask to run fixture-delete?", "when: { marks.plain_read: false }", "action: context"],
     stop: ["ask: Does `final_message` claim the fixture is finished?", "unless: Does `request` explicitly ask to skip checking the fixture?", "action: block"],
   };
   for (const [event, fields] of Object.entries(lessons)) writeFileSync(join(wiki, `${event}.md`), ["---", `event: ${event}`, ...fields, "min: 0.85", `title: ${titles[event]}`, "source: installed hook shell regression fixture", "---", "Check the fixture before proceeding so unfinished work does not reach the user.", ""].join("\n"));
@@ -207,8 +207,8 @@ async function checkInstalledHooks(t, { nodeWithSpaces = false, selectedEvents =
               if (kind !== "stop") assert.ok(existsSync(join(home, ".jevis", "sessions", `${sessionId}.json`)), "local hook must retain its session");
             } else {
               const output = JSON.parse(result.stdout);
-              assert.equal(output.hookSpecificOutput?.permissionDecision, "deny");
-              assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes(titles.tool));
+              assert.deepEqual(Object.keys(output.hookSpecificOutput).sort(), ["additionalContext", "hookEventName"]);
+              assert.ok(output.hookSpecificOutput.additionalContext.includes(titles.tool));
               assert.ok(requests.slice(before).some((body) => kind in body.questions), "installed hook must reach the configured stub");
             }
             if (["prompt", "tool", "stop"].includes(kind)) assert.ok(logRows(logFile).some((row) => row.sessionId === sessionId && row.event === kind && row.harness === (harness === "codex" ? "Codex" : "Claude Code")), "hook must recognize the harness input");
