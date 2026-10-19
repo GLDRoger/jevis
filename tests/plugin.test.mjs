@@ -35,8 +35,8 @@ test("plugin: package contains a runnable source, excludes local state, and refu
   const out = join(scratch, "plugin with spaces");
   const builder = join(root, "bin/package-plugin.mjs");
   execFileSync(process.execPath, [builder, "--out", out]);
-  for (const file of ["plugin.json", "hooks/hooks.json", "skills/jevis/SKILL.md", "src/hooks.mjs", "bin/jevis.mjs", "bin/install.mjs", "package-lock.json", "WIKI.md", ".agents/plugins/marketplace.json"]) assert.ok(existsSync(join(out, file)), file);
-  for (const file of [".git", ".jevis", "node_modules", "eval", "tests", "docs", ".agents/skills"]) assert.equal(existsSync(join(out, file)), false, file);
+  for (const file of ["plugin.json", "hooks/hooks.json", "skills/jevis/SKILL.md", "src/hooks.mjs", "bin/jevis.mjs", "bin/install.mjs", "package-lock.json", "WIKI.md", "nudges/base-session.md", "docs/tips.md", "docs/harnesses.md", ".agents/plugins/marketplace.json"]) assert.ok(existsSync(join(out, file)), file);
+  for (const file of [".git", ".jevis", "node_modules", "eval", "tests", "docs/media", "docs/index.html", ".agents/skills"]) assert.equal(existsSync(join(out, file)), false, file);
   const readme = readFileSync(join(out, "README.md"), "utf8");
   assert.equal(readme.includes('src="docs/media/'), false);
   assert.equal(readme.includes("](docs/media/"), false);
@@ -47,6 +47,8 @@ test("plugin: package contains a runnable source, excludes local state, and refu
   const output = execFileSync(process.execPath, [join(out, "bin/jevis.mjs"), "hook", "prompt"], { env, input: JSON.stringify({ session_id: "package", cwd: scratch, prompt: "Inspect the fictional fixture." }), encoding: "utf8" });
   assert.equal(output, "");
   assert.equal(existsSync(home), false, "a disabled packaged prompt hook must not create state");
+  const session = execFileSync(process.execPath, [join(out, "bin/jevis.mjs"), "hook", "session"], { env: { ...env, JEVIS_DISABLE: "" }, input: JSON.stringify({ session_id: "package-tips", cwd: scratch, source: "startup" }), encoding: "utf8" });
+  assert.match(session, /How to work in this session/, "the packaged plugin carries the tips");
   assert.throws(() => execFileSync(process.execPath, [builder, "--out", out], { stdio: "pipe" }), /Output already exists/);
 });
 
@@ -95,7 +97,10 @@ test("plugin: bundled hooks run from a spaced installed path with isolated state
     });
     if (event === "PreToolUse") assert.match(JSON.parse(output).hookSpecificOutput.additionalContext, /Plugin tool fixture/);
     else {
-      assert.equal(output, "");
+      // The packaged tips reach the agent; everything else stays quiet.
+      if (event === "SessionStart") assert.match(JSON.parse(output).hookSpecificOutput.additionalContext, /How to work in this session/);
+      else if (event === "UserPromptSubmit") assert.match(JSON.parse(output).hookSpecificOutput.additionalContext, /^Reminder:/);
+      else assert.equal(output, "");
       assert.equal(requests.length, before, "only the tool hook calls the decision model");
     }
     if (event === "UserPromptSubmit") {

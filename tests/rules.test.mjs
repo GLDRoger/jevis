@@ -202,6 +202,24 @@ test("claim_contradicted: a pass claim against a failed latest check, decided by
   }
 });
 
+test("engine: a code-decided stop check still acts when the review's axes call fails", async () => {
+  const claim = loadWiki().entries.find((e) => e.id === "verification/claim-contradicted");
+  const failed = { request: "fix it", final_message: "All tests pass.", evidence: { edited: true, checks_after_last_edit: [{ command: "npm test", success: false, exit_code: 1 }] } };
+  setJevTransport(async () => { throw new Error("jev unavailable"); });
+  try {
+    const r = await evaluate({ event: "stop", state: failed, wiki: { entries: [claim] }, codeOnly: true, axes: true, record: false });
+    assert.ok(r.error, "the failure is still reported");
+    assert.deepEqual(r.profile, {}, "no axes without answers, so no review");
+    assert.deepEqual(r.fired.map((e) => e.id), [claim.id]);
+    const model = { ...entry("fixture/model"), decide: undefined };
+    const t = await run(write("<p>Clay classes</p>"), [model]);
+    assert.ok(t.error);
+    assert.equal(t.fired.length, 0, "a lesson that needed the model stands down");
+  } finally {
+    setJevTransport(null);
+  }
+});
+
 test("records: exact code scores never enter model answers or exported labels", async () => {
   calls = []; transport();
   const e = entry("fixture/claim");

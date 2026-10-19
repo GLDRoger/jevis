@@ -220,9 +220,9 @@ function main(argv) {
   })]));
   const luna = decider({ ...settings, ...process.env }) === "luna";
   const usesTypeSafe = !luna && !process.env.JEVIS_JEV_URL && !settings.JEVIS_JEV_URL;
-  if (!opts.uninstall && luna && !lunaKey()) console.log("No OpenAI key in JEVIS_LUNA_KEY, OPENAI_API_KEY, or ~/.jevis/secrets/openai_api_key: Jevis will install but do nothing until one is there (mode 600 for the file).");
+  if (!opts.uninstall && luna && !lunaKey()) console.log("No OpenAI key in JEVIS_LUNA_KEY, OPENAI_API_KEY, or ~/.jevis/secrets/openai_api_key: tips work, but the design review and any lessons you add stay off until one is there (mode 600 for the file).");
   if (!opts.uninstall && usesTypeSafe && !existsSync(join(jevisHome(), "secrets", "typesafe_api_key")) && !process.env.TYPESAFE_API_KEY && !process.env.JEVIS_JEV_KEY) {
-    console.log("No TypeSafe key in ~/.jevis/secrets/typesafe_api_key: Jevis will install but do nothing until one is there (mode 600), or reinstall with --jev-url for a Laya server.");
+    console.log("No TypeSafe key in ~/.jevis/secrets/typesafe_api_key: tips work, but the design review and any lessons you add stay off until one is there (mode 600), or reinstall with --jev-url for a self-hosted server.");
   }
   if (Object.keys(changes).length) {
     console.log(`\nsettings: ${configFile()}`);
