@@ -108,16 +108,15 @@ test("safe tool negatives exclude secret reads, destructive git and arbitrary ex
   assert.equal(labelTool({ ...row("git commit -m test"), state: { input: "git commit -m test", request: "Do not commit or push." } })[0], "should-act");
 });
 
-test("tool fingerprint covers lessons, when facts, gate code and enabled configuration", () => {
+test("tool fingerprint covers lessons, when facts, gate code", () => {
   const entry = { id: "synthetic/tool", event: "tool", when: { "marks.git_write": true } };
-  const options = { wiki: { entries: [entry, { id: "synthetic/stop", event: "stop" }] }, source: () => "original", enable: "" };
+  const options = { wiki: { entries: [entry, { id: "synthetic/stop", event: "stop" }] }, source: () => "original" };
   const initial = toolFingerprint(options);
   for (const file of ["bash-facts.mjs", "rules.mjs", "context.mjs", "shell.mjs", "wiki.mjs", "engine.mjs", "axes.mjs"]) {
     assert.notEqual(toolFingerprint({ ...options, source: (name) => (name === file ? "changed" : "original") }), initial, file);
   }
   assert.notEqual(toolFingerprint({ ...options, wiki: { entries: [{ ...entry, min: 0.9 }] } }), initial);
   assert.notEqual(toolFingerprint({ ...options, wiki: { entries: [{ ...entry, when: { "marks.git_write": false } }] } }), initial);
-  assert.notEqual(toolFingerprint({ ...options, enable: "all" }), initial);
 });
 
 test("tool test repeats and changed gates require a recorded override, preserving stop guard", () => {

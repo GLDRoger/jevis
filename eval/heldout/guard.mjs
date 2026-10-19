@@ -12,19 +12,17 @@ export const lessonDigest = () =>
   );
 
 /** Tool gates depend on the full lesson definitions (including when), the
- * fact producers, code predicates, gate evaluation and enabled configuration.
+ * fact producers, code predicates, gate evaluation.
  */
 export function toolFingerprint({
   wiki = loadWiki(),
   source = (name) => readFileSync(new URL(`../../src/${name}`, import.meta.url)),
-  enable = process.env.JEVIS_ENABLE ?? "",
 } = {}) {
   const files = ["bash-facts.mjs", "rules.mjs", "context.mjs", "shell.mjs", "wiki.mjs", "engine.mjs", "axes.mjs"];
   return hash(
     JSON.stringify({
       lessons: wiki.entries.filter((entry) => entry.event === "tool").sort((a, b) => a.id.localeCompare(b.id)),
       gateCode: Object.fromEntries(files.map((name) => [name, hash(source(name))])),
-      enable,
     }),
   );
 }

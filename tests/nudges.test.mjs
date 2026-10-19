@@ -165,8 +165,8 @@ test("nudges: SessionStart sources inject using input or stored model, PostCompa
 test("nudges: session and prompt combine outage first, then a blank line and nudge", async () => {
   fixtures();
   for (let i = 0; i < 3; i++) recordHealth("HTTP 402 billing");
-  assert.match(context(await prompt("outage-prompt")), /^Jevis: Jev unavailable[^]*\n\nUnderstand the intent\.$/);
-  assert.match(context(onSession({ session_id: "outage-session", cwd, source: "startup", model: "gpt-6.1-sol" })), /^Jevis: Jev unavailable[^]*\n\nSession context\.$/);
+  assert.equal(context(await prompt("outage-prompt")), "Jevis is unavailable right now.\n\nUnderstand the intent.");
+  assert.equal(context(onSession({ session_id: "outage-session", cwd, source: "startup", model: "gpt-6.1-sol" })), "Jevis is unavailable right now.\n\nSession context.");
   assert.equal(context(await prompt("outage-prompt")), "Understand the intent.", "outage is still once per session");
 });
 

@@ -11,7 +11,7 @@ import { setJevTransport } from "../src/jev.mjs";
 import { conditionsHold, factsHold, loadWiki, WIKI_ROOT } from "../src/wiki.mjs";
 
 process.env.JEVIS_HOME = mkdtempSync(join(tmpdir(), "jevis-gates-"));
-for (const key of ["JEVIS_ENABLE", "JEVIS_WIKI", "JEVIS_JEV"]) delete process.env[key];
+for (const key of ["JEVIS_WIKI", "JEVIS_JEV"]) delete process.env[key];
 const marks = (text) => inputMarks(text, { tool: "Bash" });
 const wiki = loadWiki([WIKI_ROOT]);
 
@@ -55,29 +55,25 @@ test("Bash facts: unknown effects keep gates open except strict writes_file", ()
   assert.equal(factsHold({ "evidence.edited": true }, { event: "stop", state: {} }), false, "ordinary missing facts stay strict");
 });
 
-test("Bash gates: empty pool makes no Jev call; sensitive/unknown code still gets judged", async () => {
+test("Bash gates: shipped lessons never judge shell commands", async () => {
   let calls = 0;
-  setJevTransport(async (body) => { calls++; return { answers: Object.fromEntries(Object.keys(body.questions).map((id) => [id, { noul: 0.05 }])) }; });
-  const judge = (input) => evaluate({ event: "tool", state: { input }, tool: "Bash", wiki, record: false });
-  assert.equal((await judge("mkdir -p build")).skipped, "no entries");
+  setJevTransport(async () => { calls++; throw new Error("unexpected model call"); });
+  for (const input of ["mkdir -p build", "python3 script.py", "cat .env", "open -a Safari", "rm -rf user-data", "git push --force origin main"]) {
+    const result = await evaluate({ event: "tool", state: { input }, tool: "Bash", wiki, record: false });
+    assert.equal(result.skipped, "no entries", input);
+    assert.deepEqual(result.fired, []);
+  }
   assert.equal(calls, 0);
-  await judge("python3 script.py");
-  assert.equal(calls, 1);
-  await judge("cat .env");
-  assert.equal(calls, 1, "the retired credential advisory no longer judges file reads");
-  await judge("open -a Safari");
-  assert.equal(calls, 2);
-  process.env.JEVIS_ENABLE = "safety";
-  try {
-    await judge("rm -rf user-data");
-    assert.equal(calls, 3, "destructive safety lessons retain model review");
-  } finally { delete process.env.JEVIS_ENABLE; }
 });
 
-test("gate replay: clipped inputs are unknown, optional fires audited and time reconciled", () => {
+test("gate replay: clipped inputs are unknown, fixture fires audited and time reconciled", () => {
+  const root = mkdtempSync(join(tmpdir(), "jevis-replay-wiki-"));
+  for (const [id, fact] of [["opener", "opens_app"], ["git", "git_write"]]) writeFileSync(join(root, `${id}.md`), `---\nevent: tool\ntools: [Bash]\nask: Does \`input\` match?\naction: context\nwhen: { marks.${fact}: true }\ntitle: Fixture ${id}\nsource: test\n---\nCheck the fixture.\n`);
+  const wiki = loadWiki([root]);
+  assert.deepEqual(wiki.broken, []);
   const file = join(process.env.JEVIS_HOME, "replay.jsonl");
   const row = (input, more = {}) => ({ event: "tool", tool: "Bash", input, ms: 500, ...more });
-  writeFileSync(file, [row("mkdir -p output"), row("open -a Safari", { fired: [{ id: "workspace/visible-window-or-sound" }], acted: ["workspace/visible-window-or-sound"] }), row("git reset --hard HEAD", { fired: [{ id: "safety/force-push" }] }), row("cat > x <<'EOF'…", { fired: [{ id: "slop/em-dash-copy" }] }), row("ls", { skipped: "no entries" }), { event: "prompt" }].map(JSON.stringify).join("\n") + "\n");
+  writeFileSync(file, [row("mkdir -p output"), row("open -a Safari", { fired: [{ id: "opener" }], acted: ["opener"] }), row("git reset --hard HEAD", { fired: [{ id: "git" }] }), row("cat > x <<'EOF'…", { fired: [{ id: "slop/em-dash-copy" }] }), row("ls", { skipped: "no entries" }), { event: "prompt" }].map(JSON.stringify).join("\n") + "\n");
   const r = gateReplay({ file, wiki, recover: null });
   assert.equal(r.judged, 4);
   assert.equal(r.clipped, 1);
@@ -91,7 +87,7 @@ test("gate replay: clipped inputs are unknown, optional fires audited and time r
   assert.equal(r.lostFires, 0);
   assert.match(formatGateReplay(r), /Would skip: 1\/4 \(25% overall/);
   assert.match(formatGateReplay(r), /Lost fires: 0/);
-  const tightened = { entries: wiki.entries.map((e) => e.id === "workspace/visible-window-or-sound" ? { ...e, when: { "marks.writes_file": true } } : e) };
+  const tightened = { entries: wiki.entries.map((e) => e.id === "opener" ? { ...e, when: { "marks.writes_file": true } } : e) };
   assert.equal(gateReplay({ file, wiki: tightened, recover: null }).lostFires, 1, "the report catches a real lost fire without double-counting acted");
 });
 
@@ -129,7 +125,7 @@ test("gate replay: recover full Claude and Codex inputs by session, timestamp an
   writeFileSync(join(codex, "rollout-synthetic-call.jsonl"), JSON.stringify({ type: "response_item", timestamp: at, payload: { type: "function_call", name: "functions.exec_command", arguments: JSON.stringify({ cmd: input }) } }) + "\n");
   const file = join(root, "log.jsonl");
   const row = (sessionId, extra = {}) => ({ event: "tool", tool: "Bash", sessionId, at, input: input.slice(0, 200) + "…", ms: 100, ...extra });
-  writeFileSync(file, [row("synthetic-claude"), row("synthetic-codex"), row("synthetic-call"), row("synthetic-missing", { fired: ["safety/borrowed-credentials"] }), row("synthetic-claude", { at: "2000-01-02T00:00:00Z" })].map(JSON.stringify).join("\n") + "\n");
+  writeFileSync(file, [row("synthetic-claude"), row("synthetic-codex"), row("synthetic-call"), row("synthetic-missing", { fired: ["fixture/removed"] }), row("synthetic-claude", { at: "2000-01-02T00:00:00Z" })].map(JSON.stringify).join("\n") + "\n");
   const report = gateReplay({ file, wiki, recovery: { roots: [claude, codex] } });
   assert.equal(report.recovered, 3);
   assert.equal(report.assessable, 3);

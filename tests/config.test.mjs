@@ -28,9 +28,9 @@ test("settings: decider selection and Luna model are valid, API keys are refused
 
 test("settings: valid values are read as the environment spells them; problems are named, never thrown", () => {
   const file = join(process.env.JEVIS_HOME, "config.json");
-  writeFileSync(file, JSON.stringify({ JEVIS_MODE: "shadow", JEVIS_ENABLE: ["safety", "slop/marquee"], JEVIS_SCOPE: ["/a", "/b"], JEVIS_DISABLE: false, JEVIS_RECORD: false, JEVIS_TIMEOUT_MS: 2500, JEVIS_CRITIC: "gemini", JEVIS_HOME: "/x", TYPESAFE_API_KEY: "k", NOPE: 1 }));
+  writeFileSync(file, JSON.stringify({ JEVIS_MODE: "shadow", JEVIS_SCOPE: ["/a", "/b"], JEVIS_DISABLE: false, JEVIS_RECORD: false, JEVIS_TIMEOUT_MS: 2500, JEVIS_CRITIC: "gemini", JEVIS_HOME: "/x", TYPESAFE_API_KEY: "k", NOPE: 1 }));
   const c = readConfig(file);
-  assert.deepEqual(c.values, { JEVIS_MODE: "shadow", JEVIS_ENABLE: "safety,slop/marquee", JEVIS_SCOPE: ["/a", "/b"].join(delimiter), JEVIS_RECORD: "off", JEVIS_TIMEOUT_MS: "2500" });
+  assert.deepEqual(c.values, { JEVIS_MODE: "shadow", JEVIS_SCOPE: ["/a", "/b"].join(delimiter), JEVIS_RECORD: "off", JEVIS_TIMEOUT_MS: "2500" });
   assert.equal(c.errors.length, 4);
   assert.ok(c.errors.some((e) => /JEVIS_CRITIC: "gemini" is not valid/.test(e)));
   assert.ok(c.errors.some((e) => /API key belongs in ~\/\.jevis\/secrets/.test(e)), "a key in the settings file is refused");

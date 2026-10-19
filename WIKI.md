@@ -2,7 +2,7 @@
 
 The wiki is what Jevis knows: one Markdown file per lesson, under `wiki/<area>/<name>.md`. The path, without `wiki/` and `.md`, is the entry's id (`slop/gradient-text`).
 
-V2 ships 36 tool lessons. Prompt hooks do bookkeeping only: prompt entries are not evaluated or injected. Stop accepts only entries with a `decide` code rule, plus an optional independent design review; no Stop entries currently ship. Model-judged Stop blocks are retired. The 61 retired v1 lessons in `archive/wiki-v1/` are not loaded. Standing advice belongs in the user's AGENTS.md/CLAUDE.md.
+V2 ships 31 tool lessons and one code-decided Stop lesson. Prompt hooks do bookkeeping only: prompt entries are not evaluated or injected. Stop accepts only entries with a `decide` code rule, plus an optional independent design review; `verification/claim-contradicted` is the only shipped Stop entry. Model-judged Stop blocks are retired. The 61 retired v1 lessons in `archive/wiki-v1/` and the five retired guards in `archive/wiki-v2-guards/` are outside the wiki roots and are not loaded. Standing advice belongs in the user's AGENTS.md/CLAUDE.md.
 
 ## Your own entries
 
@@ -19,7 +19,7 @@ Jevis loads the shipped `wiki/` in this repo, then yours in `~/.jevis/wiki/` (un
 
 `node bin/jevis.mjs lint` lists what yours replaced and turned off. A broken replacement leaves the shipped entry in force until lint passes. `JEVIS_WIKI` (colon-separated folders, later ones winning) replaces all the defaults.
 
-A repository's `.jevis/wiki/` works the same way, for everyone who works in it, with two differences. It loads only after `jevis trust <repo>`, and only as its files were when trusted: any change needs trusting again. And it can't turn off or replace a `safety/` entry: lint reports such a file as broken, and the safety entry stays in force. Run `lint` from inside the repository to check its lessons, trusted or not.
+A repository's `.jevis/wiki/` works the same way, for everyone who works in it, with one difference. It loads only after `jevis trust <repo>`, and only as its files were when trusted: any change needs trusting again. Trusted lessons can replace or turn off any earlier entry. Run `lint` from inside the repository to check its lessons, trusted or not.
 
 On tool events, Jevis sends the decision model (Jev or GPT-6 Luna, whichever `JEVIS_DECIDER` selects) unresolved `ask` questions and any needed axes. Prompt hooks never call it. Stop requests review axes only when an enabled critic has rounds left and edits exist; only `decide` entries can otherwise participate. Model-decided entries ask `unless` in a second call only after clearing `min` and `when`; code-decided positive matches include `unless` in the first call. Both phases share one deadline. A failed second call stands down only entries awaiting exceptions. An entry can opt into a code rule with `decide` (below). Questions within each call are answered in parallel. An entry fires when three things hold:
 - its `ask` answer clears `min`;
@@ -57,13 +57,12 @@ Gradient-filled text is a stock generated-design tell. Use a solid text color in
 | `ask` | yes | One literal yes/no question about the state. Name the state fields it reads in backticks. |
 | `yes`, `no` | no | What a yes and a no mean. Put the boundary cases here. |
 | `min` | no | The probability the `ask` answer must reach. Default 0.75. Use 0.85 or more for `deny` and `block`. |
-| `decide` | no | A named predicate in `src/rules.mjs`: `destructive_git`, `em_dash_copy`, `gradient_text`, or `emoji_icons`. Code answers the `ask` with 0 or 1 when exact; ambiguous input falls back to the decision model. A rule error stands the lesson down. |
+| `decide` | no | A named predicate in `src/rules.mjs`: `em_dash_copy`, `gradient_text`, `emoji_icons`, or `claim_contradicted`. Code answers the `ask` with 0 or 1 when exact; ambiguous input falls back to the decision model. A rule error stands the lesson down. |
 | `unless` | no | A second yes/no question that stands the entry down, usually "did the user ask for exactly this?". Both decision models answer a literal question better than a compound one: a deny asked as "is this destructive, when the user did not ask for it?" scored 0.86 on a case it should catch; split into `ask` and `unless`, the same case scored 0.97 and 0.28. |
 | `unless_max` | no | The `unless` answer at or above which the entry stands down. Default 0.5. |
 | `when` | no | Conditions that must also hold: axes (see below) with `">=x"` or `"<x"`, and facts with a literal value (`{ evidence.edited: true }`, `{ marks.plain_read: false }`). |
 | `tools` | tool only | Tool names the entry applies to: `Bash`, `apply_patch` (Codex), `Edit`, `Write`, `MultiEdit`, `mcp__*`. Glob `*` allowed. |
 | `family` | no | `claude` or `gpt`, for a lesson that fixes one family's habit. A model from any other family (Gemini, Grok, an open model), or an unknown one, gets both families' lessons. Leave it out for a lesson every model needs. |
-| `optional` | no | `true` keeps the entry off until `JEVIS_ENABLE` names its id, its area, or `all`. For rules the harness already covers. |
 | `action` | yes | `context` adds the body to what the agent reads (tool only in v2); `deny` refuses the tool call with the body as the reason (tool); `block` sends the agent back to work with the body as the reason (stop). |
 | `title` | yes | A few words naming the lesson. |
 | `source` | yes | Where the lesson came from: session ids, dates, counts, a file. An entry without evidence is an opinion. |
@@ -81,7 +80,7 @@ No state is sent to the decision model. The hook stores the masked request, prev
 - `marks`: exact facts about `input` that code checks, because a decision model blurs or cannot see them:
   - `marks.em_dash`: it contains U+2014, not an en dash; unknown (`null`) when a clipped input could hide one;
   - `marks.ran_before`: this session already ran this exact command;
-  - Bash effects: `marks.git_write`, `marks.writes_file`, `marks.runs_tests`, `marks.opens_app`. They are `true` for explicit operations, `false` only for proven irrelevance, and `null` (unknown) for scripts, expansions, parse failures, or clipped inputs. `when: { marks.writes_file: true }` requires a proven write: false and unknown both remove the lesson. The other Bash effects and `marks.em_dash` keep their gates open on null. On other tools, writes are true for edit/patch tools and the remaining effects are unknown. `marks.uses_credentials` is false only for plain reads or a small set of local utilities that cannot consume or set credentials; safety lessons otherwise stay judged.
+  - Bash effects: `marks.git_write`, `marks.writes_file`, `marks.runs_tests`, `marks.opens_app`. They are `true` for explicit operations, `false` only for proven irrelevance, and `null` (unknown) for scripts, expansions, parse failures, or clipped inputs. `when: { marks.writes_file: true }` requires a proven write: false and unknown both remove the lesson. The other Bash effects and `marks.em_dash` keep their gates open on null. On other tools, writes are true for edit/patch tools and the remaining effects are unknown. `marks.uses_credentials` is false only for plain reads or a small set of local utilities that cannot consume or set credentials; other cases remain unknown.
   - `marks.plain_read`: a shell command that provably only reads, such as `ls`, `rg -n x src | head`, `sed -n 1,80p f`, `git log`, or `gh pr view`. Jevis's own read-only commands (`jevis ask`, `lint`, `stats`, `replay` without `--record`, `doctor`, `cost`) count too: the sample they judge is test data. It is false for any redirect into a file, substitution, variable expansion, heredoc, unknown program, or anything that names a credential (`src/shell.mjs`), and for every tool but `Bash`.
 
   An entry about what a command writes, runs, opens, deletes, or which credential it touches adds `when: { marks.plain_read: false }`. A plain read then asks it nothing, and when every entry is gated that way, the call is skipped. Leave the gate off only for a lesson about reads themselves, such as rereading a file. `jevis lint` notes each Bash entry without it.

@@ -8,11 +8,12 @@ const root = mkdtempSync(join(tmpdir(), "jevis-approve-"));
 for (const key of Object.keys(process.env)) if (key.startsWith("JEVIS_")) delete process.env[key];
 process.env.JEVIS_HOME = join(root, "home");
 process.env.JEVIS_WIKI = join(root, "wiki");
+process.env.JEVIS_NUDGES = "off";
 mkdirSync(process.env.JEVIS_WIKI);
 after(() => rmSync(root, { recursive: true, force: true }));
 for (const id of ["visible", "other", "code"]) writeFileSync(join(process.env.JEVIS_WIKI, `${id}.md`), [
-  "---", "event: tool", "tools: [Bash]", `ask: Does \`input\` run ${id}?`, "unless: Did `request` explicitly ask for this call?",
-  ...(id === "code" ? ["decide: destructive_git"] : []),
+  "---", "event: tool", `tools: [${id === "code" ? "Write" : "Bash"}]`, `ask: Does \`input\` run ${id}?`, "unless: Did `request` explicitly ask for this call?",
+  ...(id === "code" ? ["decide: em_dash_copy"] : []),
   "action: deny", `title: ${id}`, "source: test", "min: 0.8", "---", "Check this call.",
 ].join("\n"));
 
@@ -28,6 +29,7 @@ setJevTransport(async ({ questions, state }) => {
 });
 const prompt = (id, text) => onPrompt({ session_id: id, cwd: root, prompt: text });
 const tool = (id, command = "launch-visible") => onTool({ session_id: id, cwd: root, tool_name: "Bash", tool_input: { command } });
+const codeTool = (id) => onTool({ session_id: id, cwd: root, tool_name: "Write", tool_input: { file_path: "index.html", content: "<p>One — two</p>" } });
 const denied = (result) => result?.hookSpecificOutput?.permissionDecision === "deny";
 
 test("approval: short affirmative phrases, punctuation and emoji; never negations or long requests", () => {
@@ -92,16 +94,16 @@ test("approval: same-turn denies accumulate without duplicates; compact keeps li
 });
 
 test("approval: code-decided denies are lifted, and an empty pool costs no model call", async () => {
-  await prompt("code", "adjust the branch");
-  assert.ok(denied(await tool("code", "git reset --hard")));
+  await prompt("code", "write the page");
+  assert.ok(denied(await codeTool("code")));
   await prompt("code", "go ahead");
-  assert.ok(!denied(await tool("code", "git reset --hard")));
+  assert.ok(!denied(await codeTool("code")));
   assert.ok(!evaluated.at(-1).includes("code"));
   // Lift the two model lessons too: no candidates remain, so evaluate skips Jev entirely.
   assert.ok(denied(await tool("code", "launch-visible launch-other")));
   await prompt("code", "sure");
   const before = evaluated.length;
-  assert.equal(await tool("code", "git reset --hard"), null);
+  assert.equal(await codeTool("code"), null);
   assert.equal(evaluated.length, before);
   assert.equal(readLog().at(-1).skipped, "no entries");
 });

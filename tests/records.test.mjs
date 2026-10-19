@@ -9,7 +9,7 @@ import { gunzipSync } from "node:zlib";
 process.env.JEVIS_HOME = mkdtempSync(join(tmpdir(), "jevis-records-"));
 const wikiDir = mkdtempSync(join(tmpdir(), "jevis-records-wiki-"));
 process.env.JEVIS_WIKI = wikiDir;
-for (const k of ["JEVIS_RECORD", "JEVIS_ENABLE", "JEVIS_MODE"]) delete process.env[k];
+for (const k of ["JEVIS_RECORD", "JEVIS_MODE"]) delete process.env[k];
 const { setJevTransport } = await import("../src/jev.mjs");
 const { evaluate } = await import("../src/engine.mjs");
 const { loadWiki } = await import("../src/wiki.mjs");
@@ -103,26 +103,23 @@ test("stats --near: each entry's fires, near misses, and stand-downs under today
 });
 
 test("stats --near: judged as the engine would today, not as the record says", () => {
-  // One hand-written record: an old classifier's marks, a reworded unless, and an optional entry.
+  // One hand-written record: an old classifier's marks, a reworded unless.
   const home = mkdtempSync(join(tmpdir(), "jevis-records-raw-"));
   const qdir = join(home, "questions");
   mkdirSync(qdir);
   const entry = (id, extra = {}) => ({ id, event: "tool", action: "deny", min: 0.8, unless_max: 0.5, ask: `Does \`input\` do ${id}?`, when: { "marks.plain_read": false }, tools: ["Bash"], ...extra });
   const gated = entry("t/gated");
   const reworded = entry("t/reworded", { unless: "Did `request` ask for it, in so many words?" });
-  const optional = entry("t/optional", { optional: true });
   const plain = entry("t/plain", { when: undefined });
   const q = (e) => ({ type: "noul", instructions: e.ask });
-  writeFileSync(join(qdir, "v1.json"), JSON.stringify({ "t/gated": q(gated), "t/reworded": q(reworded), "t/reworded#unless": { type: "noul", instructions: "Did `request` ask for it?" }, "t/optional": q(optional), "t/plain": q(plain) }));
-  const record = (input) => JSON.stringify({ at: "2026-09-29T10:00:00Z", event: "tool", version: "v1", sessionId: "r", state: { request: "x", tool: "Bash", input, marks: { plain_read: false, ran_before: false } }, answers: { "t/gated": 0.9, "t/reworded": 0.9, "t/reworded#unless": 0.1, "t/optional": 0.9, "t/plain": 0.9 } });
+  writeFileSync(join(qdir, "v1.json"), JSON.stringify({ "t/gated": q(gated), "t/reworded": q(reworded), "t/reworded#unless": { type: "noul", instructions: "Did `request` ask for it?" }, "t/plain": q(plain) }));
+  const record = (input) => JSON.stringify({ at: "2026-09-29T10:00:00Z", event: "tool", version: "v1", sessionId: "r", state: { request: "x", tool: "Bash", input, marks: { plain_read: false, ran_before: false } }, answers: { "t/gated": 0.9, "t/reworded": 0.9, "t/reworded#unless": 0.1, "t/plain": 0.9 } });
   writeFileSync(join(home, "calls.jsonl"), `${record("ls -la")}\n${record("git push -f")}\n`);
-  const r = tune([gated, reworded, optional, plain], { file: join(home, "calls.jsonl"), questionsDir: qdir });
+  const r = tune([gated, reworded, plain], { file: join(home, "calls.jsonl"), questionsDir: qdir });
   const by = Object.fromEntries(r.entries.map((e) => [e.id, e]));
   assert.equal(by["t/gated"].asked, 1, "today's classifier calls ls a plain read, whatever the record's marks say");
   assert.equal(by["t/plain"].asked, 2);
   assert.deepEqual({ asked: by["t/reworded"].asked, stale: by["t/reworded"].stale }, { asked: 0, stale: 1 }, "a reworded unless makes the answer stale, not a stand-down");
-  assert.equal(by["t/optional"], undefined, "an optional entry that is off cannot fire");
-  assert.deepEqual(r.off, ["t/optional"]);
 });
 
 test("export: rows in Laya's format, split by whole sessions, repeats dropped, files private", () => {

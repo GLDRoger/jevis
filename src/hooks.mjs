@@ -5,7 +5,7 @@ import { criticBackend, designLaw, formatReview, review, roundsFor } from "./rev
 import { loadSession, log, saveSession } from "./state.mjs";
 import { wikiFor } from "./wiki.mjs";
 import { insideFolder, splitFolders } from "./paths.mjs";
-import { outageLine } from "./health.mjs";
+import { errorMessage, outageLine } from "./health.mjs";
 import { RESULT_MEMORY, toolResult } from "./post.mjs";
 import { nudgeText } from "./nudges.mjs";
 
@@ -351,7 +351,7 @@ async function reviewTurn({ input, session, sessionId, cwd, harness, state, prof
   try {
     r = await review({ kind: film ? "film" : "page", sessionId, turn: session.turn, round, of: rounds, cwd, request: session.request ?? "", firstRequest: session.firstRequest !== session.request ? session.firstRequest : null, files: state.evidence.files_changed, texts: [...turnTexts(items ?? [], { since }), final], shown: session.shown });
   } catch (e) {
-    r = { error: e.message.slice(0, 200) };
+    r = { error: errorMessage(e) };
   }
   log({ ...base, kind: r.kind, targets: r.targets, ms: r.ms, verdict: r.verdict?.verdict, items: r.verdict?.must_fix?.length, skipped: r.skipped, error: r.error, facts: r.facts });
   // A round counts once it rendered something, so a broken critic cannot hold the turn forever.

@@ -4,7 +4,7 @@ Every good role-playing game teaches you how to play it while you play: a tip wh
 
 Tips never take the controller away. They add a line of context and the agent carries on. Only the design-pattern checks refuse anything: file edits that add telltale generated-design patterns. When the agent tells you why it was stopped and you reply "go ahead", that check stands down for the rest of the session.
 
-> **Jevis is not a safety tool.** It does not protect your machine, data, repositories, or accounts, and its authors accept no liability for what your agents do while it runs. You are responsible for how you use your agents. If you need protection from destructive or outward-facing actions, use your coding tool's own permission modes (manual or automatic review) rather than full-access or bypass-permissions mode. Jevis ships a few optional guards (force pushes, machine-wide Docker deletes, browser security flags, wide deletes); they are off by default and are a convenience, not a safeguard.
+> **Jevis is not a safety tool.** It does not protect your machine, data, repositories, or accounts, and its authors accept no liability for what your agents do while it runs. You are responsible for how you use your agents. If you need protection from destructive or outward-facing actions, use your coding tool's own permission modes (manual or automatic review) rather than full-access or bypass-permissions mode. Jevis ships no guards against destructive or outward actions, and never will.
 
 It's built to be hackable. Every tip is a short Markdown file you can read, edit, or switch off. Everything Jevis does is logged as plain JSON lines on your machine. `jevis cost` shows what the hooks cost from day one, and [`skills/jevis-improve`](skills/jevis-improve/SKILL.md) is a guide any agent can follow to review that history and propose changes for you to approve.
 
@@ -47,9 +47,9 @@ Every model gets the base tips (`base-*.md`): how to work in a session, what to 
 
 A tip earns its place only if it teaches the model something it doesn't already do, at the moment it matters. Generic advice repeated on every message changed nothing in a month of real use. That is why v1's 38 prompt-time notes were retired. Check each tip against your own logs (`jevis-improve` shows how), and cut the ones that change nothing.
 
-### Guards
+### Checks
 
-The shipped `wiki/` has **36 tool lessons**: 30 design-pattern refusals on file edits, 4 optional guards that are off unless `JEVIS_ENABLE` turns them on, the visible-window/sound guard, and the weakened-tests advisory. Exact code rules settle supported cases; ambiguous inputs and permission exceptions may still need the decision model. The 61 retired v1 lessons (38 prompt, 15 Stop, 8 tool notes) live in `archive/wiki-v1/` and are not loaded.
+The shipped `wiki/` has **32 lessons**: 30 design-pattern refusals on file edits, the weakened-tests advisory, and the Stop check for a final message that claims checks pass when the last run after an edit failed. Exact code rules settle supported cases; ambiguous inputs and permission exceptions may still need the decision model. The 61 retired v1 lessons (38 prompt, 15 Stop, 8 tool notes) live in `archive/wiki-v1/`, and the removed guards (force pushes, machine-wide Docker deletes, browser security flags, wide deletes, visible windows and sound) in `archive/wiki-v2-guards/`. Neither is loaded.
 
 Jevis always fails open. With no key, a timeout, an error, or the decision model down, the agent carries on as if Jevis weren't there.
 
@@ -97,7 +97,7 @@ More detail, and how to rerun everything, is in [Evaluating it yourself](#evalua
 Read these before you install.
 
 - **It takes longer, mostly on design.** A median 1.56× the bare agent's time: 2.2 to 2.6× on design and 1.3× on engineering. That time is the agent checking and revising, not Jevis processing (see [Where the extra time goes](#results)). If you want speed over polish, install with `--critic off`: that removes the design review and most of the extra time (see [The design review](#the-design-review)).
-- **It can't give a model taste it doesn't have.** Guards can refuse specific patterns and the critic can request revisions, but neither gives the builder new instincts. The v1 creative-direction tests still left Codex behind Claude.
+- **It can't give a model taste it doesn't have.** Design-pattern checks can refuse specific patterns and the critic can request revisions, but neither gives the builder new instincts. The v1 creative-direction tests still left Codex behind Claude.
 - **The shipped wiki is one person's standards.** The lessons were mined from about 660 Codex and 130 Claude Code sessions of one heavy user: their corrections, rejected designs, and false "done"s. Many will fit you, but some are taste. Turn off what isn't yours and add your own in `~/.jevis/wiki/` (see [Making it yours](#making-it-yours)).
 - **The evaluation is small, and there are no public benchmark numbers.** 36 pairs in the confirmation round, one seed of most tasks, one film brief, and a model as the judge. The judge showed a 5–1 lean on pairs where Jevis did nothing, so single-pair results are noise. The aggregate, and the zero hidden-check regressions, are the signal. We haven't run Jevis against popular coding benchmarks such as SWE-bench or Terminal-Bench: that takes time and model usage we haven't had yet. The best test is your own work, so try it in shadow mode first (see [Install](#install)).
 - **Family scopes support only Claude and GPT.** The remaining narrowest-delete advisory targets GPT; other shipped lessons are unscoped. Models outside those families receive both scopes when custom lessons use them, but nobody has measured the benefit.
@@ -247,7 +247,7 @@ Every hook, setting, installer option, `doctor` check, outage note, call record,
 | | Jev 1.14 | GPT-6 Luna |
 |---|---|---|
 | Design battery (`eval/slop.mjs`) | 66 to 69 of 70 | 59 of 70 |
-| Tool battery (`eval/tools.mjs`) | 30 of 34 | 24 of 34 |
+| Tool battery (guard checks, since retired to `archive/wiki-v2-guards/`) | 30 of 34 | 24 of 34 |
 | Real turn endings it would send back (`eval/stops.mjs`, 406 turns) | 2.0% | 12.1% |
 | Median / slowest call, 66 questions, 10 runs | 357 ms / 390 ms | 383 ms / 1,574 ms |
 | Input price per million tokens (output free) | $0.042 | $0.10 |
@@ -329,7 +329,7 @@ As shipped, then, Laya-backed Jevis mostly does nothing. Two things would change
 Every setting below can live in `~/.jevis/config.json`, keyed by its variable name. The installer's options write there, and you can edit it by hand:
 
 ```json
-{ "JEVIS_MODE": "shadow", "JEVIS_CRITIC": "codex", "JEVIS_ENABLE": ["safety"] }
+{ "JEVIS_MODE": "shadow", "JEVIS_CRITIC": "codex" }
 ```
 
 The environment wins over the file, so `JEVIS_DISABLE=1` in one terminal still turns Jevis off for that session. The file can't hold `JEVIS_HOME` (the file lives there) or the API key (it belongs in `~/.jevis/secrets/`, where no settings listing prints it). A file with a mistake is ignored rather than breaking your hooks; `node bin/jevis.mjs doctor` names the mistake and shows each setting in effect with where it came from.
@@ -348,7 +348,6 @@ The environment wins over the file, so `JEVIS_DISABLE=1` in one terminal still t
 | `JEVIS_MODE=shadow` | off | Log what would have happened and change nothing |
 | `JEVIS_DISABLE=1` | off | Turn Jevis off (for one session, if set there) |
 | `JEVIS_SCOPE` | everywhere | Folders separated by `:` on macOS/Linux or `;` on Windows; Jevis only acts inside them |
-| `JEVIS_ENABLE` | none | Turn on optional entries: `safety`, `all`, or entry ids. Off by default: force pushes, machine-wide Docker deletes, browser security flags, wide deletes. Jevis is not a safety tool; the harnesses' permission modes are the real guard. |
 | `JEVIS_CRITIC` | `claude` | Who reviews visual work: `claude`, `codex`, or `off`. The installer's `--critic` sets it. |
 | `JEVIS_CRITIC_MODEL` | the CLI's default | The model the critic uses |
 | `JEVIS_DESIGN_LAW` | `~/.jevis/design-law.md`, else `~/.claude/slop.md` or `~/.codex/slop.md`, if present | A Markdown file of your own design rules. When it exists, the critic judges against it; add any instruction to read it to your AGENTS.md/CLAUDE.md. |
@@ -387,7 +386,7 @@ The entries the installer writes, if you'd rather edit your config by hand:
 
 Both harnesses register `PostCompact` to reset shown lessons after compaction. `SessionStart` with source `compact` also resets them; neither path resets the once-per-session outage warning. See the [Claude hook reference](https://code.claude.com/docs/en/hooks) and [Codex hook reference](https://learn.chatgpt.com/docs/hooks).
 
-After three consecutive decision-model failures within ten minutes, the next session start or prompt adds one short outage note (never in shadow mode). A successful call clears the streak; `jevis doctor` reports failure classes and streak windows from the recent log. Log and session/state writes are best-effort.
+After three consecutive decision-model failures within ten minutes, the next session start or prompt adds exactly one line, "Jevis is unavailable right now.", once per session (never in shadow mode). Errors, statuses and stack traces never reach the agent; they stay in the local log and `jevis doctor`. A successful call clears the streak; `jevis doctor` reports failure classes and streak windows from the recent log. Log and session/state writes are best-effort.
 
 `jevis gate-replay [--file ~/.jevis/log.jsonl] [--json]` audits Bash gates offline: judged/skipped counts, lost historical fires, and summed hook wait saved. Clipped inputs remain unknown, and historical optional lesson fires are audited even when disabled today. This estimates cumulative wait, not elapsed session wall time.
 
@@ -485,7 +484,7 @@ node bin/jevis.mjs trust ~/code/app            # lists what the lessons add, rep
 node bin/jevis.mjs trust --remove ~/code/app   # stop loading them
 ```
 
-A cloned repository could otherwise slip text into your agent's context or switch off a refusal, so trust is pinned to the files' contents: after a pull or an edit changes any of them (even only their line endings), they stop loading until you trust them again. Until you trust a folder, Jevis doesn't read it at all, and it never follows a symlink out of one. A project's lessons can turn off or replace any shipped lesson except the safety ones (force pushes, machine-wide deletes); that stays your call, in `~/.jevis/wiki/`. Run `lint` inside the repository to check its lessons before you trust them. `doctor` tells you when the folder you're in has lessons you haven't trusted.
+A cloned repository could otherwise slip text into your agent's context or switch off a refusal, so trust is pinned to the files' contents: after a pull or an edit changes any of them (even only their line endings), they stop loading until you trust them again. Until you trust a folder, Jevis doesn't read it at all, and it never follows a symlink out of one. A project's lessons can turn off or replace any shipped lesson. Run `lint` inside the repository to check its lessons before you trust them. `doctor` tells you when the folder you're in has lessons you haven't trusted.
 
 For a style guide of your own, too long and too nuanced for yes/no questions, write it as Markdown in `~/.jevis/design-law.md`. The design review judges against it. Put an instruction to read it before visual work in your AGENTS.md/CLAUDE.md.
 
@@ -515,7 +514,6 @@ The best lessons come from your own sessions:
 ```sh
 npm test                                    # offline, scripted decision model
 node bin/jevis.mjs lint                     # every wiki entry against the guide
-node eval/tools.mjs                         # tool-call battery: refusals and look-alikes (live)
 node eval/slop.mjs [name]                   # design battery: 35 telltales refused, 35 look-alikes allowed (live)
 node eval/sim.mjs [scenario ...]            # simulated conversations with and without Jevis (uses real Codex and Claude usage)
 node eval/sim-report.mjs <summary.json ...> # the gates: no harm, net good, no losing slice, time, errors

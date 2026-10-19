@@ -71,7 +71,7 @@ const commands = {
       const output = run ? await run(input) : null;
       if (output) process.stdout.write(JSON.stringify(output));
     } catch (error) {
-      log({ event: "hook-error", hook: kind, sessionId: input.session_id, error: String(error?.stack ?? error).slice(0, 1000) });
+      log({ event: "hook-error", hook: kind, sessionId: input?.session_id, error: String(error?.stack ?? error).slice(0, 1000) });
     }
   },
 

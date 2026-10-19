@@ -170,13 +170,13 @@ test("deciders: Luna key precedence, trimming, and availability", (t) => {
   assert.equal(jevAvailable(), false);
 });
 
-test("outages: Luna uses its own name with the unchanged outage wording", (t) => {
+test("outages: all deciders use the same detail-free outage wording", (t) => {
   providerEnv(t, { JEVIS_DECIDER: "luna" });
   const now = Date.parse("2026-10-15T12:00:00Z");
   for (let i = 0; i < 3; i++) recordHealth("HTTP 401: bad key", { now });
-  assert.equal(outageLine({ now }), "Jevis: GPT-6 Luna unavailable since 12:00 UTC (HTTP 401 auth/billing). Hooks are passing everything through.");
+  assert.equal(outageLine({ now }), "Jevis is unavailable right now.");
   delete process.env.JEVIS_DECIDER;
-  assert.equal(outageLine({ now }), "Jevis: Jev unavailable since 12:00 UTC (HTTP 401 auth/billing). Hooks are passing everything through.");
+  assert.equal(outageLine({ now }), "Jevis is unavailable right now.");
   recordHealth(null);
 });
 
@@ -225,7 +225,7 @@ test("outages: client tracks failures/recovery even with call recording off", as
   try {
     setJevTransport(async () => { throw new Error("HTTP 402: billing"); });
     for (let i = 0; i < 3; i++) await askJev({ state: {}, questions: question, event: "tool" });
-    assert.match(outageLine(), /HTTP 402 billing/);
+    assert.equal(outageLine(), "Jevis is unavailable right now.");
     setJevTransport(good);
     await askJev({ state: {}, questions: question, event: "tool" });
     assert.equal(outageLine(), null);
@@ -236,11 +236,11 @@ test("outages: a short once-per-session note, never in shadow/off; recovers and 
   const now = Date.now();
   for (let i = 0; i < 3; i++) recordHealth("HTTP 402: billing", { now: now - 3000 + i });
   const start = { session_id: "warning", hook_event_name: "SessionStart", source: "startup" };
-  assert.match(onSession(start).hookSpecificOutput.additionalContext, /Jev unavailable since \d\d:\d\d UTC \(HTTP 402 billing\).*passing everything through/);
+  assert.equal(onSession(start).hookSpecificOutput.additionalContext, "Jevis is unavailable right now.");
   assert.equal(onSession(start), null, "startup before the first prompt must not reset the warning flag");
   setJevTransport(async () => { throw new Error("HTTP 402: billing"); });
   assert.equal(await onPrompt({ ...start, prompt: "hello" }), null, "not twice in a session");
-  assert.match((await onPrompt({ session_id: "prompt-only", prompt: "hello" })).hookSpecificOutput.additionalContext, /Jevis: Jev unavailable/);
+  assert.equal((await onPrompt({ session_id: "prompt-only", prompt: "hello" })).hookSpecificOutput.additionalContext, "Jevis is unavailable right now.");
   assert.equal(await onPrompt({ session_id: "prompt-only", prompt: "hello again" }), null);
   process.env.JEVIS_MODE = "shadow";
   assert.equal(onSession({ ...start, session_id: "shadow-warning" }), null);

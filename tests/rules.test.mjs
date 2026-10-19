@@ -7,7 +7,6 @@ import { gunzipSync } from "node:zlib";
 
 process.env.JEVIS_HOME = mkdtempSync(join(tmpdir(), "jevis-rules-"));
 delete process.env.JEVIS_JEV;
-delete process.env.JEVIS_ENABLE;
 const { codeDecision, RULES: ALL_RULES } = await import("../src/rules.mjs");
 // Tool-input rules; claim_contradicted reads Stop state and has its own test.
 const RULES = ALL_RULES.filter((r) => r !== "claim_contradicted");
@@ -20,30 +19,6 @@ const { loadWiki, parseEntry, validateEntry, WIKI_ROOT } = await import("../src/
 
 const bash = (input) => ({ tool: "Bash", input, request: "fix the bug" });
 const write = (content, path = "index.html", request = "build the page") => ({ tool: "Write", input: toolInput("Write", { file_path: path, content }), request });
-
-for (const command of [
-  "git reset --hard HEAD~2", "git -C /repo reset --hard", "git clean -fd", "git clean -fdx && npm test",
-  "git push --force origin main", "git push -f origin feature/x", "git push --force-with-lease origin main",
-  "git push --force-with-lease origin HEAD:refs/heads/master", "git push origin +HEAD:main",
-  "git checkout -- .", "git checkout -- src/a.ts", "git restore .", "git restore --staged --worktree .",
-  "git checkout -f feature/x", "git switch --discard-changes main",
-  "git branch -D feature/x", "git branch --delete --force feature/x", "git branch -df feature/x", "git stash drop", "git stash clear",
-]) test(`code destructive_git: ${command}`, () => assert.equal(codeDecision("destructive_git", bash(command)), true));
-
-for (const command of [
-  "git clean -ndf", "git clean --dry-run -fd",
-  "git push origin main", "git push --force --dry-run origin main",
-  "git switch feature/x", "git restore --staged .", "git restore -S .",
-  "git branch -d feature/x", "git branch --list -- '-D'", "git stash", "git stash pop",
-  "git add src/a.ts && git commit -m 'fix: guard null' && git push origin main",
-  "echo 'git reset --hard'", "printf '%s' 'git clean -fd'", "git reset --help --hard",
-]) test(`code destructive_git near miss: ${command}`, () => assert.equal(codeDecision("destructive_git", bash(command)), false));
-
-test("code destructive_git: unknown shell syntax and published-history judgments stay on Jev", () => {
-  for (const command of ["git clean -d", "git reset --hard $REF", "git reset --soft HEAD~2", "git reset --mixed HEAD", "git checkout feature/x", "git checkout HEAD~2 src/a.ts", "git commit --amend", "git clean -fd -e '*'", "git rebase origin/main", "git filter-branch --all", "git push --delete origin main", "git push --force-with-lease", "git push --force-with-lease origin feature/x", "sudo git reset --hard", "git -c alias.wipe='reset --hard' wipe", "node delete-history.js", "git reset --hard…", "false && git reset --hard", "exit 0; git reset --hard"]) {
-    assert.equal(codeDecision("destructive_git", bash(command)), null, command);
-  }
-});
 
 test("code em_dash_copy: literal visible prose and accessible labels", () => {
   for (const text of ["<p>Classes — all clay included.</p>", '<img alt="Hands — shaping clay"/>', '<button aria-label="Next — booking">Next</button>']) {
@@ -99,31 +74,11 @@ test("code emoji_icons: user emoji, messages, ordinary text, comments and doc ex
 });
 
 test("code rules: shell writes, clipped edits, malformed shapes fall back; thrown rules ask Jev", () => {
-  for (const name of RULES.filter((r) => r !== "destructive_git")) {
+  for (const name of RULES) {
     const input = "<p>Fast — 🚀</p><h1 class='bg-clip-text text-transparent bg-gradient-to-r'>Title</h1>";
     assert.equal(codeDecision(name, bash(`cat > index.html <<'EOF'\n${input}\nEOF`)), null);
     assert.equal(codeDecision(name, { tool: "Edit", input: "Edit index.html\n" + input + "…" }), null);
     assert.equal(codeDecision(name, { get input() { throw new Error("broken rule input"); } }), null);
-  }
-});
-
-test("code destructive_git: every unsupported option and history form goes to Jev", () => {
-  for (const input of [
-    "git push --force -onotification origin main", "git clean -n --no-dry-run -fd",
-    "git restore --pathspec-from-file=paths.txt", "git push origin :main",
-    "git branch -f main HEAD~2", "git branch --force main HEAD~2", "git update-ref refs/heads/main HEAD~2",
-    "git reflog expire --expire=now --all", "git gc --prune=now", "git push -ofoo origin main",
-    "git push -o notification origin main", "git push --push-option notification origin main",
-    "git push --push-option=notification --force origin main", "git push --force -o notification origin main",
-    "git push --force --no-force origin main", "git push --force --mystery origin main",
-    "git clean -fd --no-force", "git clean -fd --exclude=keep", "git restore --pathspec-from-file paths.txt",
-    "git restore -S --source=HEAD~2 .", "git switch --force --unknown main", "git branch -D --unknown feature",
-    "git add --unknown .", "git commit --unknown", "git stash pop --unknown", "git fetch --unknown",
-    "git -C * reset --hard", "git -C --no-pager reset --hard", "git push --force-with-lease=main origin main",
-    "git push --dry-run origin :main", "git push", "git push origin", "git push 'ext::git reset --hard' main", "git reset --hard && git push --mystery", "git -C", "git", "", "printf -v value '%s' 'git reset --hard'",
-  ]) assert.equal(codeDecision("destructive_git", bash(input)), null, input);
-  for (const input of ["git push origin main", "git clean -nfd", "git restore --staged -- .", "git branch new-feature HEAD", "git branch --list", "git commit -m '--amend'", "git commit --message='--amend'", "git commit -mfix"]) {
-    assert.equal(codeDecision("destructive_git", bash(input)), false, input);
   }
 });
 
@@ -133,7 +88,7 @@ test("code rules: errors in every rule defer to Jev, not a false score", () => {
 
 test("code edit rules: fragments never prove their surrounding lexical context", () => {
   const examples = ["<p>One — two</p>", '<h1 class="bg-gradient-to-r bg-clip-text text-transparent">One</h1>', "<span>🚀</span><h3>Fast</h3>"];
-  for (const [i, name] of RULES.slice(1).entries()) {
+  for (const [i, name] of RULES.entries()) {
     const content = examples[i];
     for (const tool of ["Edit", "MultiEdit"]) {
       const input = toolInput(tool, { file_path: "src/Page.tsx", new_string: content });
@@ -222,19 +177,6 @@ test("engine code: exact positive asks only permission, which can stand it down"
     assert.deepEqual(Object.keys(calls[0].questions), [unlessKey("slop/em-dash-copy")]);
     assert.equal(r.fired.length, permission < 0.5 ? 1 : 0);
   }
-});
-test("engine code: safety respects opt-in and explicit destructive permission", async () => {
-  process.env.JEVIS_ENABLE = "all";
-  for (const permission of [0.1, 0.9]) {
-    calls = []; transport(permission);
-    const r = await run(bash("git clean -fd"), [entry("safety/force-push")], { axes: false });
-    assert.equal(calls.length, 1);
-    assert.equal(r.code["safety/force-push"], true);
-    assert.deepEqual(Object.keys(calls[0].questions), [unlessKey("safety/force-push")]);
-    assert.equal(r.fired.length, permission < 0.5 ? 1 : 0);
-  }
-  delete process.env.JEVIS_ENABLE;
-  assert.equal((await run(bash("git clean -fd"), [entry("safety/force-push")])).skipped, "no entries");
 });
 test("engine code: ambiguous input asks only main below min; failures/missing exceptions fail open", async () => {
   calls = []; transport();

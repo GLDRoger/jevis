@@ -34,7 +34,6 @@ Then find the row:
 | drop a shipped lesson | a file whose frontmatter is only `off: true` | `~/.jevis/wiki/<same id>.md` |
 | give everyone working in one repository a lesson | an entry in the repository's lessons; the user then runs `jevis trust <repo>` | `<repo>/.jevis/wiki/<area>/<name>.md` |
 | make a lesson fire more or less often | its `ask`, `yes`, and `no` wording first, `min` second | the entry; measure with `jevis stats --near` |
-| turn on the shipped optional safety entries | configuration | `JEVIS_ENABLE` in `~/.jevis/config.json` (README, Configuration) |
 | use another decision model, act only in some folders, go quiet, change the reviewer | configuration | `~/.jevis/config.json` (README, Configuration) |
 | judge a fact the state doesn't carry, such as a count or an exact character | code: compute it as a fact | `src/context.mjs` or `src/hooks.mjs`, then WIKI.md, "The state the decision model reads" |
 | gate many entries on one new shared question | code: a new axis | `src/axes.mjs`, then WIKI.md, "Axes" |
@@ -42,7 +41,7 @@ Then find the row:
 
 `~/.jevis/wiki/` is the user's own wiki. It loads after the shipped `wiki/`, survives `git pull`, and wins on a shared id. Edit the repo's `wiki/` only when the change is meant for every Jevis user, as a contribution.
 
-A repository's `.jevis/wiki/` loads last, only inside that repository, and only after the user runs `jevis trust <repo>`. Trusting is the user's decision, since it lets the repository's text into every session there: write the entry, lint it from inside the repository, and ask the user to run `trust` once they have read it. A repository's lessons can't turn off or replace a `safety/` entry; that change belongs in `~/.jevis/wiki/`.
+A repository's `.jevis/wiki/` loads last, only inside that repository, and only after the user runs `jevis trust <repo>`. Trusting is the user's decision, since it lets the repository's text into every session there: write the entry, lint it from inside the repository, and ask the user to run `trust` once they have read it. Trusted repository lessons can replace or turn off any earlier entry.
 
 **When the user asks for lessons from their own history**, or whether Jevis is worth its cost, follow `skills/jevis-improve/SKILL.md` instead. It reads the records and transcripts and writes proposals for the user to review. A habit that repeats across sessions usually belongs in the user's AGENTS.md or CLAUDE.md, which costs nothing at runtime, rather than in a new lesson.
 

@@ -32,7 +32,7 @@ test("muse: recorded calls give the Stop hook its evidence", () => {
 });
 
 // Exercise the real hook with private on-disk state, never the user's sessions.
-const { mkdtempSync, readFileSync } = await import("node:fs");
+const { mkdtempSync, readFileSync, writeFileSync } = await import("node:fs");
 const { tmpdir } = await import("node:os");
 const { join } = await import("node:path");
 process.env.JEVIS_HOME = mkdtempSync(join(tmpdir(), "jevis-muse-"));
@@ -95,16 +95,20 @@ test("muse hook: skipped and failed-open allowed calls are recorded, but denied 
   const session_id = "permission-memory";
   await onTool({ ...base, session_id, tool_name: "bash", tool_input: { command: "echo ready" } });
   assert.equal(loadSession(session_id).hookItems.length, 1, "plain read is skipped but allowed");
-  process.env.JEVIS_ENABLE = "all";
+  const wiki = mkdtempSync(join(tmpdir(), "jevis-muse-wiki-"));
+  writeFileSync(join(wiki, "command.md"), "---\nevent: tool\ntools: [Bash]\nask: Does `input` invoke the fixture?\nunless: Does `request` ask for this?\naction: deny\ntitle: Fixture command\nsource: test\n---\nUse the fixture alternative.\n");
+  process.env.JEVIS_WIKI = wiki;
+  scripted((key) => key === "command" ? 0.99 : 0.05);
   try {
     const result = await onTool({ ...base, session_id, tool_name: "bash", tool_input: { command: "git clean -fd" } });
     assert.equal(result.hookSpecificOutput.permissionDecision, "deny");
     assert.equal(loadSession(session_id).hookItems.length, 1);
     assert.equal(loadSession(session_id).commands.length, 1);
+    delete process.env.JEVIS_WIKI;
     setJevTransport(async () => { throw new Error("Jev unavailable"); });
     await onTool({ ...base, session_id, tool_name: "write_file", tool_input: { path: "src/FailOpen.html", content: "<p>One — two</p>" } });
     assert.equal(loadSession(session_id).hookItems.length, 2);
-  } finally { delete process.env.JEVIS_ENABLE; scripted(); }
+  } finally { delete process.env.JEVIS_WIKI; scripted(); }
 });
 
 test("muse hook: recording after a model answer retains concurrently saved session items", async () => {
@@ -114,6 +118,6 @@ test("muse hook: recording after a model answer retains concurrently saved sessi
     now.hookItems = [{ t: 1, it: hookItem("Write", { file_path: "src/Other.html" }) }];
     saveSession(session_id, now);
   });
-  await onTool({ ...base, session_id, tool_name: "bash", tool_input: { command: "npm test" } });
+  await onTool({ ...base, session_id, tool_name: "write_file", tool_input: { path: "src/Current.html", content: "<p>Ready</p>" } });
   assert.equal(loadSession(session_id).hookItems.length, 2);
 });

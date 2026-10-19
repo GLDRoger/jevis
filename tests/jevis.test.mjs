@@ -18,7 +18,7 @@ delete process.env.BROKER_DEPTH;
 
 const { setJevTransport, questionsVersion, hedged } = await import("../src/jev.mjs");
 const { redact } = await import("../src/redact.mjs");
-const { parseEntry, validateEntry, conditionsHold, candidates, enabled, loadWiki, wikiRoots, WIKI_ROOT } = await import("../src/wiki.mjs");
+const { parseEntry, validateEntry, conditionsHold, candidates, loadWiki, wikiRoots, WIKI_ROOT } = await import("../src/wiki.mjs");
 const { evaluate } = await import("../src/engine.mjs");
 const { onPrompt, onTool, onStop, onSession, inScope, MAX_STOP_BLOCKS } = await import("../src/hooks.mjs");
 const { setStopFired, stopEvaluations, stopHooks } = await import("./helpers/stop-fixture.mjs");
@@ -38,7 +38,7 @@ function entry(id, front, body = "Do the better thing instead.") {
 entry("design/open-page", { event: "prompt", ask: "Does `request` ask for a new page with its look left open?", when: '{ wants_change: ">=0.6" }', action: "context", title: "Open page", source: "test" }, "Pick a concept first.");
 entry("design/claude-only", { event: "prompt", ask: "Does `request` ask for a page?", family: "claude", action: "context", title: "Claude only", source: "test" });
 entry("design/gpt-only", { event: "prompt", ask: "Does `request` ask for anything?", family: "gpt", action: "context", title: "GPT only", source: "test" });
-entry("safety/force", { event: "tool", ask: "Does `input` force-push?", unless: "Does `request` ask for a force push?", tools: "[Bash]", min: 0.85, action: "deny", title: "Force push", source: "test" }, "Use a new commit.");
+entry("fixture/deny", { event: "tool", ask: "Does `input` force-push?", unless: "Does `request` ask for a force push?", tools: "[Bash]", min: 0.85, action: "deny", title: "Force push", source: "test" }, "Use a new commit.");
 entry("slop/glow", { event: "tool", ask: "Does `input` add glow blobs?", unless: "Does `request` ask for glow?", tools: "[Write, apply_patch]", min: 0.85, action: "deny", title: "Glow blobs", source: "test" }, "Show the product instead.");
 entry("slop/gradient", { event: "tool", ask: "Does `input` add gradient text?", unless: "Does `request` ask for gradient text?", tools: "[Write, apply_patch]", min: 0.85, action: "deny", title: "Gradient text", source: "test" }, "Use one solid color.");
 entry("workflow/poll", { event: "tool", ask: "Does `input` sleep in a loop?", tools: "[Bash]", action: "context", title: "Polling", source: "test" }, "Wait on the process instead.");
@@ -112,16 +112,17 @@ test("v2 shipped wiki loads only retained tool lessons, not the archive", () => 
   assert.equal(WIKI_ROOT, fileURLToPath(new URL("../wiki", import.meta.url)).replace(/\/$/, ""));
   const roots = wikiRoots(null, { env: {} });
   assert.ok(roots.includes(WIKI_ROOT));
-  assert.ok(roots.every((root) => !root.includes("wiki-v1")));
+  assert.ok(roots.every((root) => !root.includes("archive")));
   const { entries } = loadWiki(roots);
-  assert.equal(entries.length, 37);
+  assert.equal(entries.length, 32);
   assert.deepEqual(entries.filter((e) => e.event !== "tool").map((e) => [e.id, e.decide]), [["verification/claim-contradicted", "claim_contradicted"]], "the only Stop lesson is code-decided");
   const slop = entries.filter((e) => e.id.startsWith("slop/"));
   assert.equal(slop.length, 30);
   assert.ok(slop.every((e) => e.action === "deny" && !e.tools.includes("Bash")));
-  for (const id of ["engineering/weakened-tests", "workspace/visible-window-or-sound", "safety/force-push", "safety/docker-machine-wide-destruction", "safety/browser-security-settings", "safety/narrowest-delete"]) {
-    assert.ok(entries.some((e) => e.id === id), `${id} remains active`);
-  }
+  assert.ok(entries.some((e) => e.id === "engineering/weakened-tests"));
+  const archived = loadWiki([fileURLToPath(new URL("../archive/wiki-v2-guards", import.meta.url))]);
+  assert.ok(archived.entries.length + archived.broken.length >= 5, "the retired files still exist outside the roots");
+  assert.deepEqual(entries.filter((e) => !e.id.startsWith("slop/")).map((e) => e.id).sort(), ["engineering/weakened-tests", "verification/claim-contradicted"]);
 });
 
 test("your wiki adds entries, replaces a shipped id, and turns one off; a broken replacement leaves the shipped one", () => {
@@ -183,15 +184,15 @@ test("candidates filter by event, tool, and model family; other and unknown mode
 });
 
 test("an entry fires on its answer, its min, its when, and its unless", async () => {
-  reset({ "safety/force": 0.95, "safety/force#unless": 0.1 });
+  reset({ "fixture/deny": 0.95, "fixture/deny#unless": 0.1 });
   let r = await evaluate({ event: "tool", state: { request: "fix typo", tool: "Bash", input: "git push -f" }, tool: "Bash", record: false });
-  assert.deepEqual(r.fired.map((e) => e.id), ["safety/force"]);
+  assert.deepEqual(r.fired.map((e) => e.id), ["fixture/deny"]);
   // The user asked for it: the unless answer stands the entry down.
-  reset({ "safety/force": 0.95, "safety/force#unless": 0.9 });
+  reset({ "fixture/deny": 0.95, "fixture/deny#unless": 0.9 });
   r = await evaluate({ event: "tool", state: { request: "force push it", tool: "Bash", input: "git push -f" }, tool: "Bash", record: false });
   assert.deepEqual(r.fired, []);
   // Below min.
-  reset({ "safety/force": 0.8, "safety/force#unless": 0.1 });
+  reset({ "fixture/deny": 0.8, "fixture/deny#unless": 0.1 });
   r = await evaluate({ event: "tool", state: { request: "x", tool: "Bash", input: "git push -f" }, tool: "Bash", record: false });
   assert.deepEqual(r.fired, []);
   // A prompt entry whose axis condition fails.
@@ -358,7 +359,7 @@ test("prompt: Claude and Codex first turns record model identity without evaluat
 
 test("tool: a deny entry refuses the call with its reason, and reads the user's current request", async () => {
   const id = newSession();
-  reset((key, body) => (key === "safety/force" ? 0.97 : key === "safety/force#unless" ? (/force push/.test(body.state.request) ? 0.95 : 0.05) : 0.02));
+  reset((key, body) => (key === "fixture/deny" ? 0.97 : key === "fixture/deny#unless" ? (/force push/.test(body.state.request) ? 0.95 : 0.05) : 0.02));
   await onPrompt({ session_id: id, cwd: tmpdir(), prompt: "fix the typo and push", model: "gpt-6-sol" });
   const denied = await onTool({ session_id: id, cwd: tmpdir(), tool_name: "Bash", tool_input: { command: "git push --force origin main" } });
   assert.equal(denied.hookSpecificOutput.permissionDecision, "deny");
@@ -541,17 +542,6 @@ test("replay: a Claude prompt with an image keeps its words and names the image,
   const text = items[0].it.content[0].text;
   assert.equal(text, "[Image #1]\nboxes getting these colored left edges are slop too");
   assert.deepEqual(attachmentNames(text), ["Image #1"]);
-});
-
-test("optional entries are off until JEVIS_ENABLE names their id, their area, or all", () => {
-  const e = { id: "safety/force-push", optional: true };
-  assert.equal(enabled(e, ""), false);
-  assert.equal(enabled(e, "safety/force-push"), true);
-  assert.equal(enabled(e, "design, safety"), true);
-  assert.equal(enabled(e, "all"), true);
-  assert.equal(enabled({ id: "workspace/visible-window-or-sound" }, ""), true, "entries without optional are always on");
-  const shipped = loadWiki([WIKI_ROOT]).entries.filter((x) => x.optional).map((x) => x.id).sort();
-  assert.deepEqual(shipped, ["safety/browser-security-settings", "safety/docker-machine-wide-destruction", "safety/force-push", "safety/narrowest-delete"]);
 });
 
 test("turn evidence: facts only, from items after the turn began", () => {

@@ -10,7 +10,7 @@ import { test } from "node:test";
 // A private home, a project folder, and a scripted Jev: no network, no real state.
 const base = realpathSync(mkdtempSync(join(tmpdir(), "jevis-project-")));
 process.env.JEVIS_HOME = join(base, ".jevis");
-for (const k of ["JEVIS_WIKI", "JEVIS_MODE", "JEVIS_SCOPE", "JEVIS_DISABLE", "JEVIS_ENABLE"]) delete process.env[k];
+for (const k of ["JEVIS_WIKI", "JEVIS_MODE", "JEVIS_SCOPE", "JEVIS_DISABLE"]) delete process.env[k];
 const { setJevTransport } = await import("../src/jev.mjs");
 const { loadWiki, projectLessons, projectStatus, projectWiki, setTrust, wikiDigest, wikiFor, wikiRoots, WIKI_ROOT } = await import("../src/wiki.mjs");
 const { onPrompt, onTool } = await import("../src/hooks.mjs");
@@ -23,8 +23,11 @@ const put = (id, text) => {
 };
 const TEAM = "---\nevent: tool\ntools: [Edit]\nask: Does `input` change the billing code?\naction: context\ntitle: Billing changes need a second reviewer\nsource: team rule\n---\nAsk for a second reviewer on billing changes.\n";
 put("team/billing", TEAM);
-put("slop/marquee", "---\noff: true\n---\n");
-put("safety/force-push", "---\noff: true\n---\n");
+const ownWiki = join(process.env.JEVIS_HOME, "wiki", "fixture");
+mkdirSync(ownWiki, { recursive: true });
+for (const name of ["off", "replace"]) writeFileSync(join(ownWiki, `${name}.md`), TEAM.replace("source: team rule", "source: fixture rule"));
+put("fixture/off", "---\noff: true\n---\n");
+put("fixture/replace", TEAM.replace("Billing changes need a second reviewer", "Project replacement"));
 mkdirSync(join(repo, "src", "deep"), { recursive: true });
 
 test("project lessons: the nearest .jevis/wiki is found from inside the repo, never Jevis's own home", () => {
@@ -43,17 +46,18 @@ test("project lessons: untrusted ones never load; trusted ones load until a file
 
   const l = projectLessons(lessons);
   assert.deepEqual(l.added.map((e) => e.id), ["team/billing"]);
-  assert.deepEqual(l.off, ["slop/marquee"]);
-  assert.deepEqual(l.broken.map((b) => b.id), ["safety/force-push"]);
+  assert.deepEqual(l.off, ["fixture/off"]);
+  assert.deepEqual(l.replaced.map((e) => e.id), ["fixture/replace"]);
+  assert.deepEqual(l.broken, []);
 
   setTrust(lessons);
   if (process.platform !== "win32") assert.equal(statSync(join(process.env.JEVIS_HOME, "trusted.json")).mode & 0o777, 0o600);
   const w = wikiFor(cwd);
   const ids = new Set(w.entries.map((e) => e.id));
   assert.ok(ids.has("team/billing"), "a trusted project adds its lessons");
-  assert.ok(!ids.has("slop/marquee"), "and can turn off a shipped one");
-  assert.ok(ids.has("safety/force-push"), "but not a safety one");
-  assert.match(w.broken.find((b) => b.id === "safety/force-push").errors[0], /cannot turn off or replace a safety entry/);
+  assert.ok(!ids.has("fixture/off"), "and can turn off an earlier lesson");
+  assert.equal(w.entries.find((e) => e.id === "fixture/replace").title, "Project replacement");
+  assert.deepEqual(w.broken, []);
 
   appendFileSync(join(lessons, "team", "billing.md"), "One more line.\n");
   assert.equal(projectStatus(cwd).changed, true);
@@ -66,8 +70,8 @@ test("project lessons: untrusted ones never load; trusted ones load until a file
 
 test("project lessons: a hostile repository can neither stall a hook nor get around trust", { timeout: 10_000 }, () => {
   const evil = join(base, "evil");
-  mkdirSync(join(evil, ".jevis", "wiki", "safety"), { recursive: true });
-  writeFileSync(join(evil, ".jevis", "wiki", "safety", "force-push.md"), "---\noff: true\n---\n");
+  mkdirSync(join(evil, ".jevis", "wiki"), { recursive: true });
+  writeFileSync(join(evil, ".jevis", "wiki", "hostile.md"), TEAM);
   // Windows has no FIFOs, and unprivileged symlinks need developer mode.
   if (process.platform !== "win32") {
     symlinkSync("/dev/urandom", join(evil, ".jevis", "wiki", "random.md"));
@@ -75,11 +79,12 @@ test("project lessons: a hostile repository can neither stall a hook nor get aro
   }
   // Never trusted: not read at all, so neither the device nor the pipe is opened.
   assert.equal(projectStatus(evil).trusted, false);
-  assert.ok(wikiFor(evil).entries.some((e) => e.id === "safety/force-push"));
-  // Trusted: the symlink and the pipe are still not lessons, and the safety entry still stands.
+  assert.ok(!wikiFor(evil).entries.some((e) => e.id === "hostile"));
+  // Trusted: the regular fixture loads, but the symlink and pipe remain excluded.
   setTrust(projectWiki(evil));
   assert.equal(projectStatus(evil).trusted, true);
-  assert.ok(wikiFor(evil).entries.some((e) => e.id === "safety/force-push"));
+  assert.ok(wikiFor(evil).entries.some((e) => e.id === "hostile"));
+  assert.deepEqual(loadWiki([projectWiki(evil)], { guarded: [projectWiki(evil)] }).entries.map((e) => e.id), ["hostile"]);
   setTrust(projectWiki(evil), { remove: true });
 
   // A relative JEVIS_WIKI would name every folder's .jevis/wiki: it is ignored.

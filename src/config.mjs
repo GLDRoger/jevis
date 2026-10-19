@@ -7,7 +7,7 @@ import { isQualifiedPath, splitFolders } from "./paths.mjs";
  * Settings: every setting in the README's Configuration table can live in
  * ~/.jevis/config.json, keyed by its environment variable name:
  *
- *   { "JEVIS_MODE": "shadow", "JEVIS_CRITIC": "codex", "JEVIS_ENABLE": ["safety"] }
+ *   { "JEVIS_MODE": "shadow", "JEVIS_CRITIC": "codex" }
  *
  * Hook commands then carry no NAME=value prefix, which cmd and PowerShell
  * cannot run, and an install keeps what an earlier one saved. The
@@ -31,7 +31,6 @@ export const SETTINGS = {
   JEVIS_NUDGES: { ok: oneOf("on", "off"), help: "off stops every nudge" },
   JEVIS_DISABLE: { ok: oneOf(true, false, "1", "0"), env: (v) => (v === true || v === "1" ? "1" : null), help: "true turns every hook off" },
   JEVIS_SCOPE: { ok: list, env: (v) => [v].flat().join(delimiter), help: `folders Jevis acts in (a list, or ${process.platform === "win32" ? "semicolon" : "colon"}-separated)` },
-  JEVIS_ENABLE: { ok: list, env: (v) => [v].flat().join(","), help: "optional entries to turn on: safety, all, or entry ids" },
   JEVIS_CRITIC: { ok: oneOf("claude", "codex", "off"), help: "who reviews visual work: claude, codex, or off" },
   JEVIS_CRITIC_MODEL: { ok: text, help: "the model the critic uses" },
   JEVIS_DESIGN_LAW: { ok: text, help: "a Markdown file of your own design rules" },

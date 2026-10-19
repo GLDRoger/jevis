@@ -1,11 +1,10 @@
 import { posix } from "node:path";
-import { segments } from "./shell.mjs";
 
 /** Closed, code-owned predicates: true/false is exact; null needs Jev.
  * Never execute input or decide permission. Unproven inputs and rule errors
  * go to Jev; a Jev failure still lets the agent carry on.
  */
-export const RULES = ["destructive_git", "em_dash_copy", "gradient_text", "emoji_icons", "claim_contradicted"];
+export const RULES = ["em_dash_copy", "gradient_text", "emoji_icons", "claim_contradicted"];
 export function codeDecision(name, state) {
   try {
     if (!RULES.includes(name)) return null;
@@ -13,163 +12,6 @@ export function codeDecision(name, state) {
   } catch {
     return null;
   }
-}
-
-const sharedBranch = (ref) => /^(?:main|master|trunk|develop|development|release(?:\/.*)?)$/.test(ref.replace(/^refs\/heads\//, ""));
-
-/** A deliberately small getopt grammar. Unknown flags, negations, abbreviations
- * and option operands are NOT positional arguments or short-flag bundles.
- * Only explicitly declared value options consume a following/attached value.
- */
-function gitArgs(args, flags = {}, values = {}) {
-  const opts = new Set();
-  const operands = [];
-  let ended = false;
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (!ended && arg === "--") { ended = true; continue; }
-    if (ended || !arg.startsWith("-")) { operands.push(arg); continue; }
-    if (Object.hasOwn(flags, arg)) { opts.add(flags[arg]); continue; }
-    const equal = arg.indexOf("=");
-    const key = equal < 0 ? arg : arg.slice(0, equal);
-    if (Object.hasOwn(values, key)) {
-      const value = equal < 0 ? args[++i] : arg.slice(equal + 1);
-      if (value === undefined || !value) return null;
-      opts.add(values[key]);
-      continue;
-    }
-    if (/^-[^-]/.test(arg)) {
-      const valueKey = arg.slice(0, 2);
-      if (Object.hasOwn(values, valueKey)) {
-        if (!arg.slice(2)) return null;
-        opts.add(values[valueKey]);
-        continue;
-      }
-      const short = [...arg.slice(1)].map((ch) => flags[`-${ch}`]);
-      if (short.length && short.every(Boolean)) { short.forEach((v) => opts.add(v)); continue; }
-    }
-    return null;
-  }
-  return { opts, operands, ended };
-}
-
-const QUIET = { "-q": "quiet", "--quiet": "quiet" };
-const FORCE = { "-f": "force", "--force": "force" };
-const DRY = { "-n": "dry", "--dry-run": "dry" };
-const HELP = { "-h": "help", "--help": "help" };
-const plainOperands = (xs) => xs.every((x) => x && !x.startsWith("-") && !/[*?\[\]{}]/.test(x));
-
-function gitCommand(words) {
-  let i = 1;
-  while (words[i] === "-C" || words[i] === "--no-pager") {
-    if (words[i++] === "-C") {
-      const folder = words[i++];
-      if (!folder || !plainOperands([folder])) return null;
-    }
-  }
-  const command = words[i];
-  const args = words.slice(i + 1);
-  let parsed;
-  switch (command) {
-    case "reset":
-      parsed = gitArgs(args, { ...HELP, "--hard": "hard", "--soft": "soft", "--mixed": "mixed" });
-      if (!parsed || !plainOperands(parsed.operands) || parsed.operands.length > 1 || parsed.ended) return null;
-      if (parsed.opts.has("help")) return false;
-      if (parsed.opts.size !== 1 || !parsed.opts.has("hard")) return null;
-      return true;
-    case "clean":
-      parsed = gitArgs(args, { ...HELP, ...QUIET, ...FORCE, ...DRY, "-d": "dirs", "-x": "ignored", "-X": "onlyIgnored" });
-      if (!parsed || !plainOperands(parsed.operands) || parsed.opts.has("ignored") && parsed.opts.has("onlyIgnored")) return null;
-      if (parsed.opts.has("help") || parsed.opts.has("dry")) return false;
-      // Without -f, clean.requireForce=false can still discard files.
-      return parsed.opts.has("force") ? true : null;
-    case "push": {
-      parsed = gitArgs(args, { ...HELP, ...QUIET, ...FORCE, ...DRY, "-v": "verbose", "--verbose": "verbose", "-u": "upstream", "--set-upstream": "upstream", "--force-with-lease": "lease" });
-      if (!parsed || !plainOperands(parsed.operands)) return null;
-      const [remote, ...refs] = parsed.operands;
-      // Empty-source refspecs delete refs. Unsupported refspec grammars and
-      // server push options stay with Jev, even alongside --force/-n.
-      if (remote?.startsWith("+") || remote?.startsWith(":")) return null;
-      if (remote && !/^[A-Za-z0-9][\w.-]*$/.test(remote)) return null;
-      if (refs.some((r) => !/^\+?[^:+\s]+(?::[^:+\s]+)?$/.test(r))) return null;
-      if (parsed.opts.has("help") || parsed.opts.has("dry")) return false;
-      if (parsed.opts.has("force") || refs.some((r) => r.startsWith("+"))) return true;
-      if (parsed.opts.has("lease")) return refs.some((r) => sharedBranch(r.split(":").at(-1))) ? true : null;
-      // Without an explicit refspec, remote.*.push can supply a forced one.
-      return refs.length ? false : null;
-    }
-    case "checkout":
-    case "switch":
-      parsed = gitArgs(args, { ...HELP, ...QUIET, ...FORCE, "--discard-changes": "force" });
-      if (!parsed || !plainOperands(parsed.operands)) return null;
-      if (parsed.opts.has("help")) return false;
-      if (command === "checkout" && parsed.ended && parsed.operands.length) return true;
-      if (parsed.operands.length !== 1) return null;
-      if (parsed.opts.has("force")) return true;
-      return command === "switch" ? false : parsed.operands[0] === "." ? true : null;
-    case "restore":
-      parsed = gitArgs(args, { ...HELP, ...QUIET, "-S": "staged", "--staged": "staged", "-W": "worktree", "--worktree": "worktree" });
-      if (!parsed || !plainOperands(parsed.operands)) return null;
-      if (parsed.opts.has("help")) return false;
-      if (!parsed.operands.length) return null;
-      return !parsed.opts.has("staged") || parsed.opts.has("worktree");
-    case "branch":
-      parsed = gitArgs(args, { ...HELP, ...QUIET, ...FORCE, "-d": "delete", "--delete": "delete", "-D": "forceDelete", "-l": "list", "--list": "list" });
-      if (!parsed || !parsed.opts.has("list") && !plainOperands(parsed.operands)) return null;
-      if (parsed.opts.has("help")) return false;
-      if (parsed.opts.has("list")) return parsed.opts.has("force") || parsed.opts.has("delete") || parsed.opts.has("forceDelete") ? null : false;
-      if (parsed.opts.has("forceDelete") || parsed.opts.has("delete") && parsed.opts.has("force")) return parsed.operands.length ? true : null;
-      if (parsed.opts.has("force")) return null; // May replace an existing branch's history.
-      if (parsed.opts.has("delete")) return parsed.operands.length ? false : null;
-      return parsed.operands.length <= 2 ? false : null;
-    case "stash": {
-      const action = args[0] ?? "push";
-      if (!args.length) return false;
-      if (action === "clear") return args.length === 1 ? true : null;
-      if (!["push", "pop", "apply", "drop", "list", "show"].includes(action)) return null;
-      parsed = gitArgs(args.slice(1), { ...QUIET });
-      if (!parsed || !plainOperands(parsed.operands) || parsed.operands.length > 1) return null;
-      return action === "drop" ? true : false;
-    }
-    case "add":
-      parsed = gitArgs(args, { ...HELP, "-A": "all", "--all": "all", "-u": "update", "--update": "update" });
-      return parsed && plainOperands(parsed.operands) ? false : null;
-    case "commit":
-      parsed = gitArgs(args, { ...HELP, ...QUIET, "-a": "all", "--all": "all", "--amend": "amend" }, { "-m": "message", "--message": "message" });
-      return parsed && plainOperands(parsed.operands) && !parsed.opts.has("amend") ? false : null;
-    case "status":
-    case "log":
-    case "diff":
-    case "show":
-    case "revert":
-      parsed = gitArgs(args, HELP);
-      return parsed && plainOperands(parsed.operands) ? false : null;
-    default:
-      return null;
-  }
-}
-
-function destructiveGit({ input, tool }) {
-  if (tool !== "Bash") return null;
-  const commands = segments(input);
-  if (!commands?.length || String(input).endsWith("…")) return null;
-  if (commands.some((words) => ["false", "exit", "return"].includes(words[0]))) return null;
-  let unknown = false;
-  let destructive = false;
-  let unknownGit = false;
-  for (const words of commands) {
-    let decision = null;
-    if (words[0] === "git") {
-      decision = gitCommand(words);
-      if (decision === null) unknownGit = true;
-    }
-    else if (words[0] === "echo" || words[0] === "true" && words.length === 1) decision = false;
-    else if (words[0] === "printf" && ["%s", "%s\\n"].includes(words[1])) decision = false;
-    else if (words[0] === "cd" && words.length === 2 && plainOperands(words.slice(1))) decision = false;
-    if (decision === true) destructive = true;
-    if (decision === null) unknown = true;
-  }
-  return unknownGit ? null : destructive ? true : unknown ? null : false;
 }
 
 const UI = /\.(?:html|jsx|tsx|vue|svelte|astro|css|scss)$/i;
@@ -394,4 +236,4 @@ function claimContradicted(state) {
   return [...latest.values()].some((ok) => ok === false);
 }
 
-const predicates = { destructive_git: destructiveGit, em_dash_copy: emDash, gradient_text: gradientText, emoji_icons: emojiIcons, claim_contradicted: claimContradicted };
+const predicates = { em_dash_copy: emDash, gradient_text: gradientText, emoji_icons: emojiIcons, claim_contradicted: claimContradicted };
