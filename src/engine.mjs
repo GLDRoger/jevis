@@ -53,9 +53,12 @@ export async function evaluate({ event, state, tool = null, model = null, harnes
   }
   const started = Date.now();
   let jevQuestions = Object.keys(questions).length;
-  const { answers, ms, error, errorClass } = jevQuestions ? await askJev({ state, questions, event, sessionId, harness, model, timeoutMs, record }) : { answers: {}, ms: 0 };
-  // An unavailable exception must never turn a code match into an action.
-  if (!answers) return { error, errorClass, profile: {}, scores: {}, unless: {}, fired: [], ms, code, jevQuestions };
+  const asked = jevQuestions ? await askJev({ state, questions, event, sessionId, harness, model, timeoutMs, record }) : { answers: {}, ms: 0 };
+  const { error, errorClass } = asked;
+  // A failed call stands down only what needed its answers: model-decided entries
+  // score nothing, a missing `unless` counts as applied, and a missing axis fails
+  // its condition. A code decision that needs none of them still acts.
+  const answers = asked.answers ?? {};
   const value = (a) => (typeof a?.noul === "number" ? a.noul : null);
   const profile = {};
   for (const id of Object.keys(AXES[event] ?? {})) {
@@ -87,5 +90,5 @@ export async function evaluate({ event, state, tool = null, model = null, harnes
   }
   const holds = (e) => (scores[e.id] ?? 0) >= e.min && (!e.unless || (unless[e.id] ?? 1) < e.unless_max) && conditionsHold(e.when, { profile, state });
   const fired = pool.filter(holds).sort((a, b) => scores[b.id] - scores[a.id]);
-  return { profile, scores, unless, fired, ms: jevQuestions ? Date.now() - started : 0, pool: pool.length, code, jevQuestions, unlessCalls };
+  return { ...(error ? { error, errorClass } : {}), profile, scores, unless, fired, ms: jevQuestions ? Date.now() - started : 0, pool: pool.length, code, jevQuestions, unlessCalls };
 }

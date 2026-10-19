@@ -1,134 +1,108 @@
-# Writing wiki entries
+# Writing lessons
 
-The wiki is what Jevis knows: one Markdown file per lesson, under `wiki/<area>/<name>.md`. The path, without `wiki/` and `.md`, is the entry's id (`verification/claim-contradicted`).
+A lesson is a check you add to Jevis: a yes/no question that a decision model (or code) answers about what the agent is doing, and what to do when the answer is yes. Use one when a fixed [tip](README.md#tips) isn't enough because whether it applies depends on the content of a command, an edit, or a final message.
 
-V2 ships one code-decided Stop lesson and no tool lessons. Retired tool lessons are in `archive/wiki-v2-refusals/`, outside the wiki roots. Prompt hooks do bookkeeping only: prompt entries are not evaluated or injected. Stop accepts only entries with a `decide` code rule, plus an optional independent design review; `verification/claim-contradicted` is the only shipped Stop entry. Model-judged Stop blocks are retired. The 61 retired v1 lessons in `archive/wiki-v1/` and the five retired guards in `archive/wiki-v2-guards/` are outside the wiki roots and are not loaded. Standing advice belongs in the user's AGENTS.md/CLAUDE.md.
+Each lesson is one Markdown file, `wiki/<area>/<name>.md`. Its id is the path without `wiki/` and `.md`, such as `verification/claim-contradicted`.
 
-## Your own entries
+Jevis ships one lesson: `verification/claim-contradicted`, decided in code, which sends the agent back when its final message says checks pass and the last check after an edit failed. Retired lessons live in `archive/` and are never loaded.
 
-Jevis loads the shipped `wiki/` in this repo, then yours in `~/.jevis/wiki/` (under `JEVIS_HOME` if you set it), then, inside a repository that has one and once you trust it, the repository's `.jevis/wiki/`. Put your entries in yours, so pulling a new version of Jevis never touches them.
+## Where lessons live
+
+Jevis loads three places in order, and a later one wins on the same id:
+
+1. `wiki/` in this repository (shipped).
+2. `~/.jevis/wiki/` (yours). `git pull` never touches it.
+3. A repository's `.jevis/wiki/`, only inside that repository and only after `jevis trust <repo>`. Any change to those files needs trusting again.
+
+In your own folder:
+
 - A new id adds a lesson.
-- The same id as a shipped entry replaces it. Copy the shipped file across and edit the copy.
-- A file with only `off: true` in its frontmatter turns the shipped entry with that id off:
+- The same id as a shipped lesson replaces it. Copy the shipped file across and edit the copy.
+- A file whose frontmatter is only `off: true` turns the shipped lesson with that id off.
 
-  ```markdown
-  ---
-  off: true
-  ---
-  ```
+`JEVIS_WIKI` replaces all three with your own list of absolute folder paths (`:`-separated; `;` on Windows). `node bin/jevis.mjs lint` checks every lesson and lists what yours replaced or turned off. A broken replacement leaves the shipped lesson in force.
 
-`node bin/jevis.mjs lint` lists what yours replaced and turned off. A broken replacement leaves the shipped entry in force until lint passes. `JEVIS_WIKI` (colon-separated folders, later ones winning) replaces all the defaults.
-
-A repository's `.jevis/wiki/` works the same way, for everyone who works in it, with one difference. It loads only after `jevis trust <repo>`, and only as its files were when trusted: any change needs trusting again. Trusted lessons can replace or turn off any earlier entry. Run `lint` from inside the repository to check its lessons, trusted or not.
-
-On tool events, Jevis sends the decision model (Jev or GPT-6 Luna, whichever `JEVIS_DECIDER` selects) unresolved `ask` questions and any needed axes. Prompt hooks never call it. Stop requests review axes only when an enabled critic has rounds left and edits exist; only `decide` entries can otherwise participate. Model-decided entries ask `unless` in a second call only after clearing `min` and `when`; code-decided positive matches include `unless` in the first call. Both phases share one deadline. A failed second call stands down only entries awaiting exceptions. An entry can opt into a code rule with `decide` (below). Questions within each call are answered in parallel. An entry fires when three things hold:
-- its `ask` answer clears `min`;
-- its `unless` answer stays under `unless_max`;
-- its `when` conditions hold.
-
-Facts in `when` are known before the decision model is asked, so an entry whose facts already fail is left out of the call. When that leaves a tool call with no entry at all, there is no call.
-
-What it does next depends on its `action`.
-
-With `decide`, exact matches need no model answer to `ask`, and exact non-matches need neither question. Positive matches still ask the model the separate `unless`, when present: exceptions need judgment. A missing or failed exception answer stands the lesson down. Local-only Stop evaluation (`codeOnly: true, axes: false`) drops entries with model-decided exceptions and makes no model calls. When all tool entries and their gates are settled by code, no decision-model call is made. The event log records `code` (exact lesson decisions) and `jevQuestions`; code scores are not model probabilities or training labels. Keep `ask`, `yes`/`no`, and `unless` as the fallback contract; custom lessons opt in explicitly.
-
-## Format
+## A lesson
 
 ```markdown
 ---
 event: tool
-tools: [Write, Edit, MultiEdit, apply_patch]
-ask: Does `input` add gradient-filled interface text?
-yes: A heading, word, or number uses a gradient clipped to text
-no: Solid text, non-text gradients, or examples in developer documentation
+tools: [Bash]
+when: { marks.plain_read: false }
+ask: Does `input` publish a package to a public registry (npm publish, cargo publish, twine upload)?
+yes: The command uploads a package release
+no: A dry run, a pack without upload, or a command that only mentions publishing
+unless: Does `request` ask to publish or release?
 min: 0.85
-unless: Does `request` explicitly ask for gradient-filled text?
 action: context
-title: Gradient-filled text
-source: recurring generated-design pattern in the maintainer's sessions
+title: Publishing a package
+source: <where it came from: dates, counts, the user's own words>
 ---
-Gradient-filled text is a stock generated-design tell. Use a solid text color instead.
+Publishing can't be undone: the version number is burned even if you unpublish. Confirm the version and changelog first, and say in your reply that you published.
 ```
+
+The body is what the agent reads when the lesson fires. Keep it under 900 characters: longer lessons fail lint and don't load.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `event` | yes | `tool` (before a tool), or `stop` (before ending, requires `decide`). `prompt` is still parseable for historical/offline records, but ignored by hooks |
-| `ask` | yes | One literal yes/no question about the state. Name the state fields it reads in backticks. |
-| `yes`, `no` | no | What a yes and a no mean. Put the boundary cases here. |
-| `min` | no | The probability the `ask` answer must reach. Default 0.75. Use 0.85 or more for `block`. |
-| `decide` | no | A named predicate in `src/rules.mjs`: `claim_contradicted`. Code answers the `ask` with 0 or 1 when exact; ambiguous input falls back to the decision model. A rule error stands the lesson down. |
-| `unless` | no | An optional second yes/no question that stands the entry down. |
-| `unless_max` | no | The `unless` answer at or above which the entry stands down. Default 0.5. |
-| `when` | no | Conditions that must also hold: axes (see below) with `">=x"` or `"<x"`, and facts with a literal value (`{ evidence.edited: true }`, `{ marks.plain_read: false }`). |
-| `tools` | tool only | Tool names the entry applies to: `Bash`, `apply_patch` (Codex), `Edit`, `Write`, `MultiEdit`, `mcp__*`. Glob `*` allowed. |
-| `family` | no | `claude` or `gpt`, for a lesson that fixes one family's habit. A model from any other family (Gemini, Grok, an open model), or an unknown one, gets both families' lessons. Leave it out for a lesson every model needs. |
-| `action` | yes | `context` adds the body to what the agent reads (prompt, tool); prompt entries are currently ignored by hooks. `block` sends the agent back to work (stop only). |
+| `event` | yes | `tool` (before a command or edit) or `stop` (before the agent ends its turn; needs `decide`). |
+| `ask` | yes | One literal yes/no question. Name the state fields it reads in backticks. |
+| `yes`, `no` | no | What counts as yes and no. Put the boundary cases here. |
+| `min` | no | The probability the answer must reach. Default 0.75. |
+| `unless` | no | A second question that stands the lesson down when the answer is yes. |
+| `unless_max` | no | The `unless` probability at or above which it stands down. Default 0.5. |
+| `when` | no | Conditions that must also hold: axes (`visual: ">=0.6"`) or facts (`{ evidence.edited: true }`). Facts are checked before any model call. A missing fact fails its condition; an unknown (`null`) Bash effect or `em_dash` passes it, except `writes_file`. |
+| `decide` | no | A code rule in `src/rules.mjs` that answers `ask` exactly. Today there is one: `claim_contradicted`. On a tool lesson, input the rule can't settle falls back to the model; on a stop lesson, it stands the lesson down. |
+| `tools` | tool only | Tool names: `Bash`, `Edit`, `Write`, `MultiEdit`, `apply_patch` (Codex), `mcp__*`. `*` globs work. |
+| `family` | no | `claude` or `gpt`, for a lesson about one family's habit. Models from other families get both. |
+| `action` | yes | `context` adds the body to what the agent reads (tool). `block` sends the agent back (stop). |
 | `title` | yes | A few words naming the lesson. |
-| `source` | yes | Where the lesson came from: session ids, dates, counts, a file. An entry without evidence is an opinion. |
+| `source` | yes | Where it came from: dates, counts, the user's words. A lesson without evidence is an opinion. |
 
-## The state the decision model reads
+## How a lesson is decided
 
-**prompt**
-No state is sent to the decision model. The hook stores the request, previous and earlier requests, model, turn and turn start locally for downstream hooks. It may return the once-per-session outage warning, never lesson notes.
+1. Lessons for the event and tool are collected, and any whose `when` facts already fail are dropped.
+2. If a lesson has `decide`, code answers it. Otherwise its `ask` goes to the decision model, in parallel with the others. Stop never asks the model a lesson's `ask`: a stop lesson code can't settle stands down. A tool call with no lessons left makes no call.
+3. A lesson fires when `ask` clears `min`, `unless` stays under `unless_max`, and every `when` condition holds. A model-decided lesson asks `unless` in a second call, only after clearing `min` and `when`; a code-decided match asks it in the first call.
+4. A tool lesson's body is shown at most once per session (again after compaction). A stop lesson sends the agent back at most once per turn.
+
+If the decision model fails or times out, every lesson that needed its answer stands down (a missing `unless` counts as applied). A code decision that needed nothing from it still acts. The agent is never held up by a failure.
+
+## What each event can read
 
 **tool**
-- `request`: the user's current message.
-- `earlier_requests`: up to 8 of the session's messages before it, oldest first, each cut to 400 characters. For permission given earlier, such as "commit whenever it makes sense".
-- `tool`: the tool name.
-- `input`: the command (up to 4,000 characters), or for an edit, the file path and only the lines it adds: the removed and unchanged lines of an `apply_patch` are left out, so a check judges what the edit introduces. Data is sent as written.
-- `marks`: exact facts about `input` that code checks, because a decision model blurs or cannot see them:
-  - `marks.em_dash`: it contains U+2014, not an en dash; unknown (`null`) when a clipped input could hide one;
-  - `marks.ran_before`: this session already ran this exact command;
-  - Bash effects: `marks.git_write`, `marks.writes_file`, `marks.runs_tests`, `marks.opens_app`. They are `true` for explicit operations, `false` only for proven irrelevance, and `null` (unknown) for scripts, expansions, parse failures, or clipped inputs. `when: { marks.writes_file: true }` requires a proven write: false and unknown both remove the lesson. The other Bash effects and `marks.em_dash` keep their gates open on null. On other tools, writes are true for edit/patch tools and the remaining effects are unknown. `marks.uses_credentials` is false only for plain reads or a small set of local utilities that cannot consume or set credentials; other cases remain unknown.
-  - `marks.plain_read`: a shell command that provably only reads, such as `ls`, `rg -n x src | head`, `sed -n 1,80p f`, `git log`, or `gh pr view`. Jevis's own read-only commands (`jevis ask`, `lint`, `stats`, `replay` without `--record`, `doctor`, `cost`) count too: the sample they judge is test data. It is false for any redirect into a file, substitution, variable expansion, heredoc, unknown program, or anything that names a credential (`src/shell.mjs`), and for every tool but `Bash`.
 
-  An entry about what a command writes, runs, opens, deletes, or which credential it touches adds `when: { marks.plain_read: false }`. A plain read then asks it nothing, and when every entry is gated that way, the call is skipped. Leave the gate off only for a lesson about reads themselves, such as rereading a file. `jevis lint` notes each Bash entry without it.
-- `workspace`: `git` (whether this is a repository), `files` (up to 40 top-level names), and `empty`.
+- `request`: the user's current message. `earlier_requests`: up to 8 earlier messages, each cut to 400 characters, for permission given earlier.
+- `tool`: the tool name.
+- `input`: the command (up to 4,000 characters), or for an edit, the file path and only the lines it adds.
+- `workspace`: `git` (is it a repository), `files` (up to 40 top-level names), `empty`.
+- `marks`, facts code computes about `input`:
+  - `plain_read`: a shell command that provably only reads (`ls`, `rg`, `sed -n`, `git log`, `gh pr view`), with no redirect, substitution, expansion, or credential. Gate every lesson about what a command does with `when: { marks.plain_read: false }`, so plain reads skip the model call. `lint` flags Bash lessons without it.
+  - `git_write`, `writes_file`, `runs_tests`, `opens_app`, `uses_credentials`: `true` when explicit, `false` when provably not, `null` when unknown (scripts, expansions, clipped input).
+  - `ran_before`: this session already ran this exact command.
+  - `em_dash`: the input contains U+2014.
 
 **stop**
-- `request`: the user's current message.
-- `final_message`: what the agent is about to end its turn with.
-- `evidence`, facts computed from the session log (subagents included) since the turn began:
-  - `edited` (boolean), `files_changed` (up to 20), `files_changed_count`, `ui_files_changed` (markup and style files, tests excluded);
-  - `actions_after_last_edit`: commands with exit codes (`exit 0: pnpm test`), tool calls with their title or code (`tool node_repl.js Check the form: await tab.goto(…)`), image views, and subagent runs;
-  - `recent_actions`: the turn's last 12 actions, edits included;
-  - `checks_after_last_edit`: explicit test/build/check commands after the last edit, with `success` (true/false/null) and `exit_code` when available. PostToolUse completions supplement transcript results and replace matching bare attempts. Unknown or still-running results never count as passing; failed edits do not count as changed files. Muse's fallback without results remains an attempt, not success.
-  - `commands_run`, `used_subagents`;
-  - `files_written_by_commands`: files under the project modified during the turn that no edit tool recorded (a heredoc, a script, a JavaScript exec). They are also counted in `files_changed` and `ui_files_changed`, and they set `edited`.
 
-  These facts support code checks and the optional review, not model-judged Stop lessons.
+- `request` and `final_message`.
+- `evidence`, computed from the session since the turn began (subagents included):
+  - `edited`, `files_changed` (up to 20), `files_changed_count`, `ui_files_changed`, `files_written_by_commands`;
+  - `checks_after_last_edit`: test, build, or check commands after the last edit, with `success` and `exit_code`. An unknown or still-running result never counts as passing;
+  - `actions_after_last_edit`, `recent_actions` (the last 12), `commands_run`, `used_subagents`.
 
 ## Axes
 
-Axes are shared model judgments defined in `src/axes.mjs`. Tool checks request them when needed. Stop requests its axes only for a possible design/film review; with the critic off and no applicable code entries it asks nothing.
+Axes are shared judgments, defined in `src/axes.mjs`, that a lesson can gate on with `when`.
 
-**prompt (historical/offline only)**
-The engine still supports prompt axes for old records and offline evaluations, but v2 hooks do not score them, including the `correction` axis used by historical mining.
+- **tool:** `destructive` (could lose what can't easily be recovered), `outward` (sends or publishes something off this machine).
+- **stop:** `work_requested`, `claims_done`, `claims_verified`, `visual`, `film`. These also decide whether the design review runs.
 
-**tool**
-- `destructive`: could delete or overwrite what cannot easily be recovered.
-- `outward`: sends or publishes something off this machine.
+## Writing a good lesson
 
-**stop**
-- `work_requested`: the request asked for work, not only an answer or a discussion.
-- `claims_done`: the final message says the work is complete.
-- `claims_verified`: it says something was tested or checked.
-- `visual`: the requested work is something people look at.
-- `film`: the request is a film or animated piece meant to be watched as it plays.
-
-`visual` and `film` also decide whether the design or film review runs after the stop entries pass (see the README).
-
-## Design tips
-
-Generated-design guidance lives in `nudges/design-*.md`, given at session start. The retired tool checks in `archive/wiki-v2-refusals/` are not loaded. Tool entries may add context only; Jevis never refuses calls or manages permissions.
-
-## Writing a good entry
-
-- **One failure per entry.** Two failures are two entries, because they fire under different conditions.
-- **Make the `ask` literal.** The decision model answers the words you wrote, not the ones you meant. If you would explain what you meant, that explanation belongs in `yes` and `no`. Keep counting and arithmetic out of the question: that belongs in code, as a fact.
-- **Body.** One or two sentences naming the default failure, then what to do instead. Write it as guidance to a capable colleague, in two to six lines. Point to a skill path when the fix needs a procedure.
-- **Stop blocks.** Keep the code-decided pass-claim check precise. A wrong block costs more than a missed note.
-- **The user's words win.** A body never overrides what the user asked for; tool entries are advice only.
-- **Give the reason.** Agents rightly distrust unexplained instructions injected mid-session. In a live test, both Claude Sonnet and GPT-6 Sol flagged a bare "end your reply with this word" as possible injection. A body that names the failure and the user's interest reads as what it is: advice from this user's history.
-- **Test before you ship it.** Run `jevis ask` for single cases, and `jevis replay <session>` against real sessions where the failure happened and where it did not.
-- **Test on both deciders.** `min` and `unless_max` were tuned on Jev's probabilities, and GPT-6 Luna's sit differently: it answers `unless` ("did the user ask for exactly this?") higher. Run your cases with `JEVIS_DECIDER=luna` as well as the default, and set thresholds that hold on the decider you use. `jevis stats --near` reads only the active decider's records.
+- **One failure per lesson.** Two failures fire under different conditions, so they're two lessons.
+- **Make `ask` literal.** The model answers the words you wrote, not the ones you meant. If you'd need to explain what you meant, put that in `yes` and `no`. Keep counting and arithmetic out of questions; compute them in code as a fact.
+- **Write the body for a capable colleague.** Name the failure, give the reason, say what to do instead, in two to six lines. Agents rightly distrust unexplained instructions injected mid-session.
+- **The user's words win.** A body never overrides what the user asked for.
+- **Keep stop lessons precise.** A wrong send-back costs more than a missed tip.
+- **Test it.** `jevis ask --event tool --tool Bash --request "..." "<command>"` for single cases: at least one that should fire and two look-alikes that shouldn't. Then `jevis replay <session>` on real sessions. The hit should clear `min` comfortably and the look-alikes should sit under 0.5; if one lands near the line, reword `ask`, `yes`, and `no` rather than moving `min`.
+- **Test on your decider.** Thresholds were tuned on Jev. GPT-6 Luna places the same case differently, so run your cases with `JEVIS_DECIDER=luna` if that's what you use. `jevis stats --near` shows how a lesson would have fired against every recorded answer.

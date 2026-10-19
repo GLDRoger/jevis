@@ -13,8 +13,6 @@ Jevis keeps everything it does on disk as plain JSON lines. Read those files dir
 
 You write **proposals only**. Never edit the user's instruction files, Jevis's config, or any wiki entry. Write a report and a diff; the user decides what to apply.
 
-This guide replaced `jevis mine`. That command read a model score the prompt hook no longer computes. Anything an agent can do with `rg` and `jq` doesn't need a dedicated command, so the guide explains where the data lives and leaves the analysis to you.
-
 ## Where the history lives
 
 `$JEVIS_HOME` defaults to `~/.jevis`. Everything there is private to the user and contains their prompts.
@@ -46,7 +44,7 @@ The instruction files that steer the user's agents, which your proposals target:
 - `stop`: `final` (clipped), `evidence{edited,files,ui_files,after}`, `fired`, `acted` (checks that blocked).
 - `prompt`: `request` (clipped), `origin` (`person` or an agent), `turn`. Since v2 it makes no model call.
 - `review`: `verdict`, `items`, `ms`, `error`.
-- `nudge`: `hook` (`session`, `prompt`, `feedback`, `feedback-repeat`, `ui-edit`, `worker`), `ids` (the tip files sent), `model`, `turn`. A tip from `nudges/` was added to the agent's context. No model call.
+- `nudge`: `hook` (any `hook:` value from the README's tip table, such as `session`, `prompt`, `feedback`, `repeat-failure`), `ids` (the tip files sent), `model`, `turn`. A tip from `nudges/` was added to the agent's context. No model call.
 
 Worker sessions carry `worker: true` on prompt, tool and Stop rows. Their tool rows have `skipped: "worker"`; they make no decision-model or critic calls.
 

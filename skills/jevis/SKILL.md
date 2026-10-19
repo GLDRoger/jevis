@@ -1,115 +1,97 @@
 ---
 name: jevis
-description: Change what Jevis does for your coding agents. Add, tune, replace, or turn off a lesson, a design tip, the code-decided Stop check, or your design law, and prove the change works. Use when the user wants Jevis to notice, say, or check something new, or to stop doing something.
+description: Change what Jevis does for your coding agents. Add, edit, or turn off a tip, a lesson, the Stop check, or the design rules the reviewer uses, and prove the change works. Use when the user wants Jevis to say, notice, or check something new, or to stop doing something.
 ---
 
 # Changing Jevis
 
-Jevis is a set of agent hooks. At three moments it asks a decision model (TypeSafe's Jev or OpenAI's GPT-6 Luna, set by `JEVIS_DECIDER`) yes/no questions about what is happening, then acts on the answers:
-- `prompt`: the user sent a message;
-- `tool`: the agent is about to run a command or make an edit;
-- `stop`: the agent is about to end its turn.
+Jevis is a set of agent hooks that give coding agents short tips at the right moment. Most of what it says is a **tip**: a Markdown file whose frontmatter says when it shows and for which model family. Tips are chosen by code and cost no model call. When whether something applies depends on the content of a command, an edit, or a final message, it needs a **lesson** instead: a yes/no question a decision model answers.
 
-Almost every behavior is a **wiki entry**: one Markdown file holding one question and what to do when the answer is yes. Reach for code only when no entry can express the change.
+Prefer a tip. Reach for a lesson only when a fixed moment can't express the change, and for code only when neither can.
 
-Paths below are relative to the Jevis repo, two folders above this file. `jevis` means `node bin/jevis.mjs`, run from the repo.
+Paths below are relative to the Jevis repo, two folders above this file. `jevis` means `node bin/jevis.mjs`, run from the repo. If this skill came from an installed plugin, that location is the plugin cache: treat its files as read-only, put the user's changes in `~/.jevis/`, and make contributions in their source checkout.
 
-When this skill comes from an installed plugin, that location is the plugin root, not the user's current project. Resolve it from this skill's full path, and invoke its CLI by absolute path while keeping the working directory in the target project. Treat the installed plugin's code and shipped `wiki/` as read-only: personal lessons belong in `~/.jevis/wiki/`, and project lessons belong in the target project's `.jevis/wiki/`. For a contribution to Jevis itself, work in the user's source checkout instead of its installed cache. Plugin hooks run only in a supported Codex runtime after the user reviews and trusts them; ordinary Chat does not run them. See the README's Native Codex plugin section for installation checks.
+## 1. Pin down the change
 
-## 1. Pin down the behavior
-
-Restate the user's wish as one sentence: "At <moment>, when <something visible in the state>, Jevis should <tell the agent | send it back at Stop>." If the user gave a vague wish ("stop Codex making cheap-looking buttons"), name the concrete pattern and one example that must *not* trigger it, and confirm both with the user when the boundary is unclear.
+Restate the wish as one sentence: "When <moment>, Jevis should tell the agent <what>." For a vague wish ("stop Codex making cheap-looking buttons"), name the concrete pattern and one example that must not trigger it. Check with the user only if the boundary is genuinely unclear.
 
 Then find the row:
 
 | The user wants Jevis to… | Change | Where |
 |---|---|---|
-| give a fixed tip when a request arrives | a `hook: prompt` nudge (prompt wiki entries are ignored) | `~/.jevis/nudges/<name>.md` |
-| remind the agent of something as it runs a command or edits | a `tool` entry, `action: context` | `~/.jevis/wiki/<area>/<name>.md` |
-| catch a pass claim contradicted by exit codes at Stop | the existing code-decided `stop` entry, `action: block` | `~/.jevis/wiki/<area>/<name>.md` |
-| design to the user's own rules | the design law file | `~/.jevis/design-law.md` |
-| soften, retarget, or rewrite a shipped lesson | a copy with the same id | `~/.jevis/wiki/<same id>.md` |
-| drop a shipped lesson | a file whose frontmatter is only `off: true` | `~/.jevis/wiki/<same id>.md` |
-| give everyone working in one repository a lesson | an entry in the repository's lessons; the user then runs `jevis trust <repo>` | `<repo>/.jevis/wiki/<area>/<name>.md` |
-| make a lesson fire more or less often | its `ask`, `yes`, and `no` wording first, `min` second | the entry; measure with `jevis stats --near` |
-| use another decision model, act only in some folders, go quiet, change the reviewer | configuration | `~/.jevis/config.json` (README, Configuration) |
-| judge a fact the state doesn't carry, such as a count or an exact character | code: compute it as a fact | `src/context.mjs` or `src/hooks.mjs`, then WIKI.md, "The state the decision model reads" |
-| gate many entries on one new shared question | code: a new axis | `src/axes.mjs`, then WIKI.md, "Axes" |
-| change how pages or films are reviewed when a turn ends | code | `src/review.mjs` (`criticPrompt`, `REVIEW_ROUNDS`) |
+| say something at session start, on every message, on vague feedback, or at another fixed moment | a tip with that `hook:` | `~/.jevis/nudges/<name>.md` |
+| reword a shipped tip | a copy with the same file name | `~/.jevis/nudges/<same name>.md` |
+| stop a shipped tip | that copy with `off: true` in its frontmatter | `~/.jevis/nudges/<same name>.md` |
+| tell the agent something only when a command or edit matches a pattern | a `tool` lesson, `action: context` | `~/.jevis/wiki/<area>/<name>.md` |
+| retune, replace, or turn off a shipped lesson | a file with the same id | `~/.jevis/wiki/<same id>.md` |
+| give everyone in one repository a lesson | a lesson in the repository; the user runs `jevis trust <repo>` | `<repo>/.jevis/wiki/<area>/<name>.md` |
+| have the design reviewer judge by the user's own rules | the design law | `~/.jevis/design-law.md` |
+| change the reviewer, act only in some folders, go quiet, switch decision model | configuration | `~/.jevis/config.json` (README, Configuration) |
+| show a tip at a moment no `hook:` covers | code: a new hook value | `src/nudges.mjs` (`HOOKS`) and the call site in `src/hooks.mjs` |
+| judge a fact the state doesn't carry, such as a count | code: a new fact | `src/context.mjs` or `src/hooks.mjs`, then WIKI.md |
+| change how pages or films are reviewed | code | `src/review.mjs` (`criticPrompt`, `REVIEW_ROUNDS`) |
 
-`~/.jevis/wiki/` is the user's own wiki. It loads after the shipped `wiki/`, survives `git pull`, and wins on a shared id. Edit the repo's `wiki/` only when the change is meant for every Jevis user, as a contribution.
+Tip hooks: `session` (start, resume, and after compaction), `prompt` (every message), `feedback` and `feedback-repeat` (short vague feedback, first and later), `worker` (every message in a session another agent started), `search` (first `grep`/`find`, again after compaction), `repeat-failure` (a command about to rerun after its last two runs failed), `repeat-check` (a check about to rerun with no edit since; shell-written changes aren't tracked), `port-in-use` (the next tool call after a port clash), `ui-edit` (first interface edit of a turn). `family:` is `claude`, `gpt`, or `other`; leave it out for every model.
 
-A repository's `.jevis/wiki/` loads last, only inside that repository, and only after the user runs `jevis trust <repo>`. Trusting is the user's decision, since it lets the repository's text into every session there: write the entry, lint it from inside the repository, and ask the user to run `trust` once they have read it. Trusted repository lessons can replace or turn off any earlier entry.
+Edit the repo's `nudges/` or `wiki/` only when the change is meant for every Jevis user, as a contribution.
 
-**When the user asks for lessons from their own history**, or whether Jevis is worth its cost, follow `skills/jevis-improve/SKILL.md` instead. It reads the records and transcripts and writes proposals for the user to review. A habit that repeats across sessions usually belongs in the user's AGENTS.md or CLAUDE.md, which costs nothing at runtime, rather than in a new lesson.
+A repository's `.jevis/wiki/` loads only after the user trusts it, because trusting lets the repository's text into every session there. Write the lesson, lint it from inside the repository, and ask the user to run `trust` once they've read it.
 
-## 2. Write the entry
+**When the user asks what Jevis should change based on their history,** or whether it's worth its cost, follow `skills/jevis-improve/SKILL.md` instead. A habit that repeats across sessions often belongs in the user's AGENTS.md or CLAUDE.md, which costs nothing at runtime.
 
-Read `WIKI.md` in full first. It defines every field, the state each moment sees, the axes, and the conditions. The steps below are the judgment it asks for.
+## 2. Write it
 
-1. **Check what exists.** List `wiki/*/` and `~/.jevis/wiki/*/` and read any entry near the new behavior. If one covers it, replace that entry by id instead of adding a second that fires alongside it.
-2. **Choose the moment by where the evidence is.** A `prompt` entry sees the request. A `tool` entry sees the command, or only the lines an edit adds. A `stop` entry sees the final message and facts about what the turn did (`evidence.*`).
-3. **Ask one literal question.** Name the state field in backticks. Describe the pattern the way code or a command would spell it (`background-clip: text`, `git push --force`), because the model answers the words, not the intent. Put boundary cases in `yes:` and `no:`. Leave arithmetic to code, as a fact.
-4. **Gate with `when`,** using axes (`visual: ">=0.6"`) or facts (`"evidence.edited": true`), instead of folding those conditions into the question. A `tool` entry that applies to `Bash` and is about what a command writes, runs, or opens takes `marks.plain_read: false`, so `ls`, `rg`, and `git log` skip it without a call.
-5. **Jevis is not a gate.** Tool lessons only add context; never refuse calls, manage permissions, or filter data. The code-decided pass-claim Stop check and opt-in design review are the only send-backs.
-6. **Write the body for a capable colleague.** Name the failure in a sentence or two, then write `Instead:` and the concrete alternative. Give the reason, because agents rightly distrust unexplained instructions injected mid-session. Keep it under 900 characters.
-7. **Cite the source:** the user's own words, the date, the session or incident. An entry without evidence is an opinion.
+**A tip.** Read the shipped tips in `nudges/` first, and replace one by name rather than adding a second that says the same thing.
 
-A custom tool context tip (shipped design tips live in `nudges/design-*.md`, given at session start):
+- Write for a capable colleague: name what goes wrong, why, and what to do instead, in a few lines. Agents rightly distrust unexplained instructions injected mid-session.
+- A tip may restate one of the user's instruction-file rules in fewer words. It never contradicts them.
+- Keep it short. Tips on `prompt` are paid on every message; the body is cut at 1,500 characters.
 
 ```markdown
 ---
-event: tool
-tools: [Write, Edit, MultiEdit, apply_patch, Bash]
-when: { marks.plain_read: false }
-ask: Does `input` write user-interface code that <the pattern, as code spells it>?
-yes: <what counts>
-no: <look-alikes that must pass>. The pattern is only named in prose, comments, documentation, a lint rule, a test, or a list of things to avoid; the command only reads or searches files; or the file is not part of a user interface.
-unless: Does `request` explicitly ask for <the pattern>?
-min: 0.85
-action: context
-title: <a few words>
-source: <where it came from>
+hook: prompt
+family: gpt
 ---
-<Why it reads as generated, in one or two sentences.>
-
-Instead: <the concrete alternative.>
+<What to do, and why, in one to three sentences.>
 ```
 
-Retired design checks are archived and do not teach the critic. Use the design law for review guidance.
+**A lesson.** Read WIKI.md in full first. It defines every field, what each event can read, and the axes. Then:
 
-**The design law** is a different tool. It is a free-form Markdown file of the user's rules, as long as they like. When it exists, agents are told to read it before visual work, and the end-of-turn reviewer judges against it. It advises and never refuses. Edits are never refused; use a context tip for edit-time guidance.
+1. **Check what exists** in `wiki/` and `~/.jevis/wiki/`. Replace a nearby lesson by id instead of adding one that fires alongside it.
+2. **Ask one literal question** that names the state field in backticks and spells the pattern the way code would (`git push --force`, `background-clip: text`). Put boundary cases in `yes:` and `no:`. Leave arithmetic to code.
+3. **Gate with `when`** rather than folding conditions into the question. A Bash lesson about what a command writes, runs, or opens takes `when: { marks.plain_read: false }`.
+4. **Add `unless`** when the user may have asked for exactly this ("Does `request` ask for it?").
+5. **Use `action: context`.** Lessons only add tips. Jevis never refuses calls, manages permissions, or filters data; the code-decided pass-claim check is the only shipped send-back.
+6. **Cite the source:** the user's words, the date, the session. A lesson without evidence is an opinion.
+
+**The design law** is a free-form Markdown file of the user's design rules, as long as they like. The end-of-turn reviewer judges against it. Add a line to the user's AGENTS.md or CLAUDE.md if agents should also read it before visual work.
 
 ## 3. Prove it
 
-The change is live on the next hook call. Nothing needs reinstalling.
+Changes are live on the next hook call. Nothing needs reinstalling.
 
-1. Run `jevis lint`. It must print no `BROKEN` line, and its `replaced` and `off` lines must match what you intended. A broken replacement leaves the shipped entry in force.
-2. Dry-run at least one case that should fire and two look-alikes that should not:
+1. Run `jevis lint`. It must print no `BROKEN` line, and its tip counts and `replaced`/`off` lines must match what you intended.
+2. **For a tip,** run the hook by hand and check the text appears, with a model from the right family:
 
    ```sh
-   node bin/jevis.mjs ask "make me a landing page for my bakery"
+   echo '{"session_id":"check-tip","model":"gpt-6-sol"}' | node bin/jevis.mjs hook session
+   echo '{"session_id":"check-tip","model":"gpt-6-sol","prompt":"add a settings page"}' | node bin/jevis.mjs hook prompt
+   ```
+
+3. **For a lesson,** dry-run one case that should fire and two look-alikes that shouldn't:
+
+   ```sh
    node bin/jevis.mjs ask --event tool --tool Bash --request "tidy the repo" "git clean -fdx"
    node bin/jevis.mjs ask --event tool --tool Write --request "build our pricing page" "Write app/pricing.tsx
    <the lines the edit adds>"
-   node bin/jevis.mjs ask --event stop --request "fix the signup bug" \
-     --evidence '{"edited":true,"files_changed":["src/signup.ts"],"files_changed_count":1,"ui_files_changed":[],"actions_after_last_edit":[],"recent_actions":[],"commands_run":0,"used_subagents":false}' \
-     "Fixed and tested."
    ```
 
-   For an entry with a `family:`, add a model from that family, such as `--model gpt-6-sol` or `--model claude-opus-5-5`. Without `--model`, entries of both families are asked, as they are for Gemini, Grok, and other models. The output shows each firing entry's probability and the closest ones that did not fire. The hit should clear `min` with room to spare, and each look-alike should sit well below it, ideally under 0.5. When a case lands near the line, rewrite `ask`, `yes`, and `no` rather than moving `min`. Check the cases on the decider the user runs: Jev and GPT-6 Luna place the same case differently.
-3. Replay real history when the user has it: `jevis replay <session file or id>` on a session where the failure happened and on one where it didn't.
-   When you change an existing lesson, `jevis stats --near` shows it against every recorded answer to its current question: how often it would fire today, how often it landed within 0.1 of `min`, and how often `unless` or `when` stood it down. A reworded `ask` starts from zero there, since the old answers were to a different question.
-4. For code changes, add a test beside the existing ones and run `npm test`. Document any new fact or axis in `WIKI.md`.
-5. For a design tip, verify it appears in the session-start context for that model family.
+   Add `--model gpt-6-sol` or `--model claude-opus-5-5` for a family lesson. The hit should clear `min` comfortably and the look-alikes should sit under 0.5. If a case lands near the line, reword `ask`, `yes`, and `no` rather than moving `min`. `jevis ask` calls the configured decision model; if it errors, say the lesson is untested. Test on the decider the user runs (`JEVIS_DECIDER=luna` for Luna).
+4. **With history,** `jevis replay <session>` on a session where the failure happened and one where it didn't. For an existing lesson, `jevis stats --near` shows how it fares against every recorded answer.
+5. **For code,** add a test beside the existing ones and run `npm test`.
 
-`jevis ask` calls the configured decision model, so it needs a TypeSafe key, an OpenAI key with `JEVIS_DECIDER=luna`, or a running self-hosted server. Thresholds were tuned on Jev: when the user runs Luna, test with `JEVIS_DECIDER=luna jevis ask ...` too, and report both probabilities. If it reports an error, say the change is untested rather than implying it works. If Jevis itself seems not to run, `jevis doctor` checks the installation end to end. For changes to the Stop check, suggest the user run Jevis in shadow mode (`node bin/install.mjs --shadow`, then `--live`) for a few days and read `jevis stats`.
+If Jevis seems not to run at all, `jevis doctor` checks the installation end to end.
 
 ## 4. Report back
 
-Tell the user:
-- which files you added or changed, with full paths;
-- the dry-run probability for each case, hits and look-alikes;
-- what you couldn't test.
-
-Remind them that every entry adds one question to each event of its kind. The questions run in parallel, so the delay stays flat while the token cost grows.
+Tell the user which files you added or changed (full paths), what the dry runs showed, and what you couldn't test. For a lesson, say what it costs: each matching event that its `when` facts and code don't settle asks the decision model its question, plus `unless` and any axes it gates on.
