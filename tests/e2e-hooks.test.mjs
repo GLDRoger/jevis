@@ -114,7 +114,8 @@ async function checkInstalledHooks(t, { nodeWithSpaces = false, selectedEvents =
   });
   t.after(async () => {
     await new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); });
-    rmSync(root, { recursive: true, force: true });
+    // Windows keeps a just-exited node.exe locked for a moment; retry on EBUSY.
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   const url = `http://127.0.0.1:${server.address().port}/v1/systemone`;
