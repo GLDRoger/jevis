@@ -1,12 +1,14 @@
 # Jevis
 
-Every good role-playing game teaches you how to play it while you play: a tip when you reach a new area, a hint when you're stuck, a guide you can open whenever you want. Jevis does that for coding agents. It's a set of hooks that gives each agent the right short tip at the moment it matters, tuned to that model's known habits, plus a few safety guards.
+Every good role-playing game teaches you how to play it while you play: a tip when you reach a new area, a hint when you're stuck, a guide you can open whenever you want. Jevis does that for coding agents. It's a set of hooks that gives each agent the right short tip at the moment it matters, tuned to that model's known habits. Its one goal is better work from the models.
 
-Tips never take the controller away. They add a line of context and the agent carries on. Only the guards refuse anything: safety guards (force-pushing, a machine-wide Docker wipe, deleting more than the task needs) and checks for telltale generated-design patterns in file edits. When the agent tells you why it was stopped and you reply "go ahead", that guard stands down for the rest of the session.
+Tips never take the controller away. They add a line of context and the agent carries on. Only the design-pattern checks refuse anything: file edits that add telltale generated-design patterns. When the agent tells you why it was stopped and you reply "go ahead", that check stands down for the rest of the session.
+
+> **Jevis is not a safety tool.** It does not protect your machine, data, repositories, or accounts, and its authors accept no liability for what your agents do while it runs. You are responsible for how you use your agents. If you need protection from destructive or outward-facing actions, use your coding tool's own permission modes (manual or automatic review) rather than full-access or bypass-permissions mode. Jevis ships a few optional guards (force pushes, machine-wide Docker deletes, browser security flags, wide deletes); they are off by default and are a convenience, not a safeguard.
 
 It's built to be hackable. Every tip is a short Markdown file you can read, edit, or switch off. Everything Jevis does is logged as plain JSON lines on your machine. `jevis cost` shows what the hooks cost from day one, and [`skills/jevis-improve`](skills/jevis-improve/SKILL.md) is a guide any agent can follow to review that history and propose changes for you to approve.
 
-It supports **Codex**, **Claude Code**, and other harnesses through adapters. Tips are chosen by code and make no decision-model call; their only cost is the few lines they add to the agent's context. The safety guards and design-pattern checks ask a decision model only when code can't settle the case: TypeSafe's hosted [Jev](https://typesafe.ai), GPT-6 Luna through OpenAI's Decisions API, or any Jev-compatible server such as a self-hosted [Laya](https://github.com/NandhaKishorM/laya) (with caveats, [below](#laya-self-hosted)).
+It supports **Codex**, **Claude Code**, and other harnesses through adapters. Tips are chosen by code and make no decision-model call; their only cost is the few lines they add to the agent's context. The design-pattern checks ask a decision model only when code can't settle the case: TypeSafe's hosted [Jev](https://typesafe.ai), GPT-6 Luna through OpenAI's Decisions API, or any Jev-compatible server such as a self-hosted [Laya](https://github.com/NandhaKishorM/laya) (with caveats, [below](#laya-self-hosted)).
 
 <img src="docs/media/before-after.jpg" width="560" alt="The same pottery-studio prompt given to Codex (GPT-6 Sol) twice. Bare, it made a plain two-column page with a grey 'Studio photo to add' placeholder. With Jevis, it made a full-bleed photo of hands throwing a pot with the headline 'Clock off. Clay on.'">
 
@@ -33,7 +35,7 @@ It supports **Codex**, **Claude Code**, and other harnesses through adapters. Ti
 |---|---|---|
 | A session starts, or its context is compacted | `SessionStart` | Gives the model its session tips: how to read for intent, handle ambiguity, check how the project works, and finish the outcome rather than the words. |
 | You send a message | `UserPromptSubmit` | Adds a one-line tip for the model's known habits, where it has one. Short, vague feedback ("not good", "try again") gets its own tip on working out what missed. Remembers the request for the other hooks. No decision-model call. |
-| The agent is about to run a command or edit a file | `PreToolUse` | The first interface edit of a turn gets a design tip naming that model's usual defaults. Safety guards and design-pattern checks can refuse a call; code settles most cases, and the decision model is asked only when it can't. |
+| The agent is about to run a command or edit a file | `PreToolUse` | The first interface edit of a turn gets a design tip naming that model's usual defaults. Design-pattern checks can refuse a file edit; code settles some cases, and the decision model is asked for the rest. |
 | A tool finishes | `PostToolUse` | Records exit codes and changed files locally, with no model call. |
 | The agent is about to end its turn | `Stop` | Runs code-decided checks, such as a final message saying tests pass when the last test run after an edit failed. With the design review on, renders the page (1440 and 390 px) and has Claude or Codex review it as a director who didn't make it, sending it back at most twice. |
 
@@ -47,7 +49,7 @@ A tip earns its place only if it teaches the model something it doesn't already 
 
 ### Guards
 
-The shipped `wiki/` has **36 tool lessons**: 30 design-pattern refusals on file edits, 4 safety guards, the visible-window/sound guard, and the weakened-tests advisory. Exact code rules settle supported cases; ambiguous inputs and permission exceptions may still need the decision model. The 61 retired v1 lessons (38 prompt, 15 Stop, 8 tool notes) live in `archive/wiki-v1/` and are not loaded.
+The shipped `wiki/` has **36 tool lessons**: 30 design-pattern refusals on file edits, 4 optional guards that are off unless `JEVIS_ENABLE` turns them on, the visible-window/sound guard, and the weakened-tests advisory. Exact code rules settle supported cases; ambiguous inputs and permission exceptions may still need the decision model. The 61 retired v1 lessons (38 prompt, 15 Stop, 8 tool notes) live in `archive/wiki-v1/` and are not loaded.
 
 Jevis always fails open. With no key, a timeout, an error, or the decision model down, the agent carries on as if Jevis weren't there.
 
@@ -346,7 +348,7 @@ The environment wins over the file, so `JEVIS_DISABLE=1` in one terminal still t
 | `JEVIS_MODE=shadow` | off | Log what would have happened and change nothing |
 | `JEVIS_DISABLE=1` | off | Turn Jevis off (for one session, if set there) |
 | `JEVIS_SCOPE` | everywhere | Folders separated by `:` on macOS/Linux or `;` on Windows; Jevis only acts inside them |
-| `JEVIS_ENABLE` | none | Turn on optional entries: `safety`, `all`, or entry ids. Off by default: force pushes, machine-wide Docker deletes, browser security flags, wide deletes. The harnesses already guard these. |
+| `JEVIS_ENABLE` | none | Turn on optional entries: `safety`, `all`, or entry ids. Off by default: force pushes, machine-wide Docker deletes, browser security flags, wide deletes. Jevis is not a safety tool; the harnesses' permission modes are the real guard. |
 | `JEVIS_CRITIC` | `claude` | Who reviews visual work: `claude`, `codex`, or `off`. The installer's `--critic` sets it. |
 | `JEVIS_CRITIC_MODEL` | the CLI's default | The model the critic uses |
 | `JEVIS_DESIGN_LAW` | `~/.jevis/design-law.md`, else `~/.claude/slop.md` or `~/.codex/slop.md`, if present | A Markdown file of your own design rules. When it exists, the critic judges against it; add any instruction to read it to your AGENTS.md/CLAUDE.md. |
