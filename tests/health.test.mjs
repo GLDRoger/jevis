@@ -11,6 +11,8 @@ import { activityChecks } from "../src/doctor.mjs";
 import { loadSession, log, saveSession } from "../src/state.mjs";
 
 process.env.JEVIS_HOME = mkdtempSync(join(tmpdir(), "jevis-health-"));
+// Outage notes are tested alone; shipped tips have their own suite.
+process.env.JEVIS_NUDGES_DIR = join(process.env.JEVIS_HOME, "empty-shipped-nudges");
 for (const key of ["JEVIS_MODE", "JEVIS_JEV", "JEVIS_SCOPE", "JEVIS_DISABLE", "JEVIS_WIKI"]) delete process.env[key];
 process.env.JEVIS_CRITIC = "off";
 const question = { probe: { type: "noul", instructions: "Is this a probe?" } };

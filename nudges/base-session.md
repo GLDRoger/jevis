@@ -1,6 +1,5 @@
 ---
 hook: session
-family: gpt
 ---
 How to work in this session: as a partner who understands the goal, not a tool that executes the words.
 

@@ -31,8 +31,8 @@ It supports **Codex**, **Claude Code**, and other harnesses through adapters. Ti
 
 | Moment | Hook | What Jevis does |
 |---|---|---|
-| A session starts, or its context is compacted | `SessionStart` | Gives the model its session tips: for GPT models, how to read for intent, handle ambiguity, and finish the outcome rather than the words. |
-| You send a message | `UserPromptSubmit` | Adds a one-line tip for the model's known habits. Short, vague feedback ("not good", "try again") gets its own tip on working out what missed. Remembers the request for the other hooks. No decision-model call. |
+| A session starts, or its context is compacted | `SessionStart` | Gives the model its session tips: how to read for intent, handle ambiguity, check how the project works, and finish the outcome rather than the words. |
+| You send a message | `UserPromptSubmit` | Adds a one-line tip for the model's known habits, where it has one. Short, vague feedback ("not good", "try again") gets its own tip on working out what missed. Remembers the request for the other hooks. No decision-model call. |
 | The agent is about to run a command or edit a file | `PreToolUse` | The first interface edit of a turn gets a design tip naming that model's usual defaults. Safety guards and design-pattern checks can refuse a call; code settles most cases, and the decision model is asked only when it can't. |
 | A tool finishes | `PostToolUse` | Records exit codes and changed files locally, with no model call. |
 | The agent is about to end its turn | `Stop` | Runs code-decided checks, such as a final message saying tests pass when the last test run after an edit failed. With the design review on, renders the page (1440 and 390 px) and has Claude or Codex review it as a director who didn't make it, sending it back at most twice. |
@@ -41,7 +41,7 @@ It supports **Codex**, **Claude Code**, and other harnesses through adapters. Ti
 
 Tips live in [`nudges/`](nudges/), one Markdown file each. The frontmatter says when the tip is shown (`hook: session`, `prompt`, `feedback`, or `ui-edit`) and, optionally, which model family sees it (`family: gpt` or `claude`). The body is the text the agent reads. A file with the same name in `~/.jevis/nudges/` replaces a shipped tip, `off: true` in that file switches it off, and `JEVIS_NUDGES=off` switches them all off.
 
-The shipped tips target GPT models, whose habits are the best documented here: they take the words literally, assume the standard pattern instead of checking how the project works, retry the same idea after vague feedback, and fall back on a recognisable set of interface defaults. Claude models currently get no tips.
+Every model gets the base tips (`base-*.md`): how to work in a session, what to do with short vague feedback, and where to take design direction from. Each model family also gets lines naming its own documented habits. GPT models (`gpt-*.md`) take words literally and assume the standard pattern, so they get a one-line tip on every message. Each family's design tip lists the generated-looking defaults it reached for most in the maintainer's logs. Models outside both families get the base tips only.
 
 A tip earns its place only if it teaches the model something it doesn't already do, at the moment it matters. Generic advice repeated on every message changed nothing in a month of real use. That is why v1's 38 prompt-time notes were retired. Check each tip against your own logs (`jevis-improve` shows how), and cut the ones that change nothing.
 
