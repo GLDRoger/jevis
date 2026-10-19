@@ -78,6 +78,8 @@ function nudgeContext(hook, sessionId, harness, model, session, key = null) {
       const now = loadSession(sessionId);
       if (now.nudged?.[flag]) return "";
       now.nudged = { ...now.nudged, [flag]: true };
+      // A port error is shown once; only a new one brings the tip back after a compaction.
+      if (hook === "port-in-use") now.portInUse = false;
       if (!saveSession(sessionId, now)) return "";
     }
     if (hook === "repeat-failure") {
