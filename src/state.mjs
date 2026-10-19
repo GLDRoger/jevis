@@ -68,7 +68,7 @@ export function saveSession(id, state, { platform = process.platform, rename = r
   }
 }
 
-export const freshSession = () => ({ turn: 0, request: null, previousRequest: null, earlierRequests: [], firstRequest: null, turnStartedAt: null, model: null, shown: {}, stop: { turn: -1, blocked: [], reviews: 0 } });
+export const freshSession = () => ({ turn: 0, request: null, previousRequest: null, earlierRequests: [], firstRequest: null, turnStartedAt: null, model: null, shown: {}, allowed: [], denied: null, stop: { turn: -1, blocked: [], reviews: 0 } });
 
 export function log(event) {
   try {

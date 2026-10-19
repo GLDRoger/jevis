@@ -383,7 +383,7 @@ function gh(args) {
  * unless given --record, and the sample they judge is test data, not work:
  * judging it would refuse the very dry runs the Jevis skill asks for.
  */
-const JEVIS_READS = ["ask", "lint", "stats", "replay", "gate-replay", "doctor", "mine"];
+const JEVIS_READS = ["ask", "lint", "stats", "replay", "gate-replay", "doctor", "cost"];
 const jevisCli = (args) => JEVIS_READS.includes(args[0]) && !args.includes("--record");
 /** This checkout's own CLI: by absolute or ~ path, or bin/jevis.mjs from a Jevis checkout's root. */
 const OWN_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "jevis.mjs");

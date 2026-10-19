@@ -497,7 +497,8 @@ ln -s ~/code/jevis/skills/jevis ~/.codex/skills/jevis
 
 The best lessons come from your own sessions:
 
-- `node bin/jevis.mjs mine` finds corrections in historical records that include correction-axis scores. V2 prompt bookkeeping does not produce those scores; put recurring standing advice in AGENTS.md/CLAUDE.md.
+- `skills/jevis-improve/SKILL.md` is a guide any agent can read: where Jevis keeps its history, how to measure cost and whether each check helped, and how to find the corrections you keep repeating. The agent writes a report and a diff to `~/.jevis/proposals/<date>/`. Nothing is applied until you apply it. Run it the day after any change, then weekly: `Read ~/code/jevis/skills/jevis-improve/SKILL.md and review the last 7 days.`
+- `node bin/jevis.mjs cost [--since 7d]` shows decision-model calls and tokens per day and per hook, with a 30-day projection. Set `JEVIS_PRICE_IN` and `JEVIS_PRICE_OUT` (USD per million tokens) in `~/.jevis/config.json` to see dollars.
 - `node bin/jevis.mjs stats --near` scores each lesson against every recorded answer to its current question. It shows how often the lesson would fire under today's rules, how often it came within 0.1 of its threshold, and how often `unless` or a condition stood it down. Set `min` from that rather than a guess.
 - `node bin/jevis.mjs replay <session file>` dry-runs a recorded Codex or Claude Code session through the current wiki, which shows what would have fired.
 

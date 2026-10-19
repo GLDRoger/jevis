@@ -74,6 +74,18 @@ function pickNotes(fired, session, limit = MAX_NOTES) {
 
 const formatNotes = (notes, lead) => [lead, ...notes.map((e) => `**${e.title}.** ${e.body}`)].join("\n\n");
 
+/**
+ * A brief, explicit reply to the immediately preceding turn's refusals. No model call.
+ * The approval phrase leads, and at most four words follow it ("go ahead and open it"),
+ * so "go back to the old design" or "continue with the headless run" lift nothing.
+ */
+const APPROVAL = /^(?:go ahead|go for it|do it|yes|yep|yeah|y|ok|okay|sure|proceed|run it|approved|approve|allowed|that's fine|thats fine|fine|please do|you can|it's fine|its fine)\b(.*)$/;
+export function isApproval(text) {
+  const request = text.trim().toLowerCase().replaceAll("’", "'").replace(/[\s\p{P}\p{S}\p{M}\u200d]+$/gu, "");
+  const m = request.length <= 60 && !/\b(?:no|don't|dont|not|stop|wait|never|but|instead)\b/.test(request) && APPROVAL.exec(request);
+  return Boolean(m) && m[1].replace(/^[\s,.!]+/, "").split(/\s+/).filter(Boolean).length <= 4;
+}
+
 /** UserPromptSubmit: profile the request and hand over the lessons that match it. */
 export async function onPrompt(input) {
   const { session_id: sessionId, cwd, prompt } = input;
@@ -83,6 +95,9 @@ export async function onPrompt(input) {
   const outage = sessionOutage(session);
   // Stored masked: session files sit on disk, and everything downstream reads the request from here.
   const request = clip(redact(requestText(prompt)), 2000);
+  const lifted = session.denied?.turn === session.turn && isApproval(request) ? session.denied.ids : [];
+  if (lifted.length) session.allowed = [...new Set([...(session.allowed ?? []), ...lifted])];
+  session.denied = null;
   Object.assign(session, {
     previousRequest: session.request,
     // Permission given a few messages back ("commit whenever it makes sense") still holds: tool checks read these.
@@ -103,6 +118,7 @@ export async function onPrompt(input) {
     model: model ?? session.model ?? (harness === "Claude Code" ? CLAUDE_UNKNOWN : null),
   });
   if (!saveSession(sessionId, session)) return null;
+  if (lifted.length) log({ event: "approve", sessionId, harness, turn: session.turn, lifted, request: clip(request, 200) });
   // v2: no lesson notes and no decision-model call on prompts. A month of
   // real use (Sep 28 - Oct 18 2026) showed 0 of 60 sampled notes changed an
   // outcome the agent's own instruction files would not have produced; the
@@ -117,7 +133,7 @@ function denyReason(denies) {
   const lines = denies.length === 1
     ? [`Jevis stopped this call. ${denies[0].title}: ${denies[0].body}`]
     : ["Jevis stopped this call:", ...denies.map((e) => `- ${e.title}: ${e.body}`)];
-  lines.push("Redo the call without this. If the user explicitly asked for exactly this, tell them why it was stopped and let them run it.");
+  lines.push('Redo the call without this. If the user explicitly asked for exactly this, tell them why Jevis stopped it; if they reply with a short approval such as "go ahead", Jevis allows this check\'s calls for the rest of the session.');
   return lines.join("\n");
 }
 
@@ -178,7 +194,10 @@ export async function onTool(input) {
   const key = tool === "Bash" ? commandKey(shown) : null;
   const commands = session.commands ?? [];
   const state = { request: session.request ?? "", earlier_requests: session.earlierRequests ?? [], tool, input: shown, marks: inputMarks(shown, { tool, ranBefore: key !== null && commands.includes(key) }), workspace: workspaceOf(cwd) };
-  const result = await evaluate({ event: "tool", state, tool, model: session.model, harness, sessionId, timeoutMs: timeout("tool"), wiki: wikiFor(cwd) });
+  const lifted = new Set(session.allowed ?? []);
+  const wiki = wikiFor(cwd);
+  const scoped = lifted.size ? { ...wiki, entries: wiki.entries.filter((e) => !lifted.has(e.id)) } : wiki;
+  const result = await evaluate({ event: "tool", state, tool, model: session.model, harness, sessionId, timeoutMs: timeout("tool"), wiki: scoped });
   if (result.skipped) {
     rememberAllowedTool(input, tool, rawInput, key);
     // Logged without the input: a skipped call is counted by `jevis stats`, not judged.
@@ -194,6 +213,9 @@ export async function onTool(input) {
     return null;
   }
   if (denies.length) {
+    const now = loadSession(sessionId);
+    now.denied = { turn: session.turn, ids: [...new Set([...(now.denied?.turn === session.turn ? now.denied.ids : []), ...denies.map((e) => e.id)])] };
+    saveSession(sessionId, now);
     return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: denyReason(denies) } };
   }
   rememberAllowedTool(input, tool, rawInput, key);
@@ -303,6 +325,10 @@ export function onSession(input) {
   const session = loadSession(sessionId);
   if (source === "compact" || source === "clear") {
     session.shown = {};
+    if (source === "clear") {
+      session.allowed = [];
+      session.denied = null;
+    }
     log({ event: "session", sessionId, source, reset: true });
   }
   const outage = input.hook_event_name === "PostCompact" ? null : sessionOutage(session);

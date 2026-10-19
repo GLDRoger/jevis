@@ -3,12 +3,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { applyConfig } from "../src/config.mjs";
 import { workspaceOf } from "../src/context.mjs";
+import { cost, formatCost } from "../src/cost.mjs";
 import { doctor, formatDoctor } from "../src/doctor.mjs";
 import { evaluate } from "../src/engine.mjs";
 import { formatGateReplay, gateReplay } from "../src/gate-replay.mjs";
 import { exportDataset, formatExport, TEST_SHARE } from "../src/export.mjs";
 import { onPost, onPrompt, onSession, onStop, onTool } from "../src/hooks.mjs";
-import { CORRECTION_MIN, formatMine, mine } from "../src/mine.mjs";
 import { findSession, replay } from "../src/replay.mjs";
 import { eachLog, jevisHome, log } from "../src/state.mjs";
 import { formatTune, sinceTime, tune } from "../src/tune.mjs";
@@ -23,7 +23,7 @@ const flag = (name) => {
   return i > -1 ? args[i + 1] : undefined;
 };
 /** Flags that take no value. */
-const SWITCHES = ["--json", "--record", "--remove", "--offline", "--agents", "--near"];
+const SWITCHES = ["--json", "--record", "--remove", "--offline", "--near"];
 const positional = () => {
   const out = [];
   for (let i = 0; i < args.length; i += 1) {
@@ -123,10 +123,10 @@ const commands = {
     process.exit(checks.some((c) => c.status === "fail") ? 1 : 0);
   },
 
-  // Turns a person corrected, as material for new lessons: jevis mine [--since 7d] [--min 0.6] [--agents] [--limit 30] [--json]
-  mine() {
-    const result = mine({ since: sinceTime(flag("since")), min: Number(flag("min") ?? CORRECTION_MIN), agents: args.includes("--agents"), limit: Number(flag("limit") ?? 30) });
-    console.log(args.includes("--json") ? JSON.stringify(result, null, 2) : formatMine(result));
+  // Recorded token usage, with a log-only call count even when recording is off.
+  cost() {
+    const result = cost({ since: sinceTime(flag("since") ?? "30d") });
+    console.log(args.includes("--json") ? JSON.stringify(result, null, 2) : formatCost(result));
   },
 
   // The call record as a Laya training set: jevis export [--out dir] [--events prompt,tool,stop] [--since 7d] [--test 0.1]
@@ -225,7 +225,7 @@ function trustWord(project) {
 }
 
 if (!commands[command]) {
-  console.error("usage: jevis <hook prompt|tool|post|stop|session | ask | doctor | lint | trust | replay | gate-replay [--file path] | stats [--near] | mine | export>");
+  console.error("usage: jevis <hook prompt|tool|post|stop|session | ask | doctor | lint | trust | replay | gate-replay [--file path] | stats [--near] | cost [--since 30d] [--json] | export>");
   process.exit(2);
 }
 await commands[command]();

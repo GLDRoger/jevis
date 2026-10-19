@@ -20,6 +20,7 @@ import { isQualifiedPath, splitFolders } from "./paths.mjs";
 const text = (v) => typeof v === "string" && v.trim() !== "";
 const oneOf = (...values) => (v) => values.includes(v);
 const number = (v) => (typeof v === "number" && v > 0) || (typeof v === "string" && Number(v) > 0);
+const price = (v) => (typeof v === "number" || text(v)) && Number.isFinite(Number(v)) && Number(v) >= 0;
 const list = (v) => text(v) || (Array.isArray(v) && v.length > 0 && v.every(text));
 export const absolutePaths = (v, platform = process.platform) => list(v) && [v].flat().flatMap((x) => splitFolders(x, platform === "win32" ? win32.delimiter : posix.delimiter)).every((x) => isQualifiedPath(x, platform));
 const httpUrl = (v) => typeof v === "string" && /^https?:\/\/[^\s'"`$;&|<>]+$/.test(v);
@@ -42,6 +43,8 @@ export const SETTINGS = {
   JEVIS_JEV_CHUNK: { ok: number, env: String, help: "questions per request" },
   JEVIS_TIMEOUT_MS: { ok: number, env: String, help: "how long a hook waits for the decision model" },
   JEVIS_RECORD: { ok: oneOf("on", "off", true, false), env: (v) => (v === false || v === "off" ? "off" : "on"), help: "off keeps no record of decision-model calls" },
+  JEVIS_PRICE_IN: { ok: price, help: "USD per million recorded input tokens, including zero" },
+  JEVIS_PRICE_OUT: { ok: price, help: "USD per million recorded output tokens, including zero" },
 };
 
 const REFUSED = {

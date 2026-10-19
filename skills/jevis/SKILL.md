@@ -44,7 +44,7 @@ Then find the row:
 
 A repository's `.jevis/wiki/` loads last, only inside that repository, and only after the user runs `jevis trust <repo>`. Trusting is the user's decision, since it lets the repository's text into every session there: write the entry, lint it from inside the repository, and ask the user to run `trust` once they have read it. A repository's lessons can't turn off or replace a `safety/` entry; that change belongs in `~/.jevis/wiki/`.
 
-**When the user asks for lessons from their own history** rather than one specific change, run `jevis mine` (add `--since 14d` or `--limit 60` for more). It lists the turns where they corrected the agent: what they asked, what the agent answered, what they said next. Look for a habit that repeats across sessions, name it in one sentence as above, and confirm it with the user before writing anything. One annoyed message is not a lesson.
+**When the user asks for lessons from their own history**, or whether Jevis is worth its cost, follow `skills/jevis-improve/SKILL.md` instead. It reads the records and transcripts and writes proposals for the user to review. A habit that repeats across sessions usually belongs in the user's AGENTS.md or CLAUDE.md, which costs nothing at runtime, rather than in a new lesson.
 
 ## 2. Write the entry
 
