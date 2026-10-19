@@ -70,6 +70,13 @@ function nudgeContext(hook, sessionId, harness, model, session) {
       now.nudged = { ...now.nudged, uiEdit: session.turn };
       if (!saveSession(sessionId, now)) return "";
     }
+    if (hook === "search") {
+      // Once per session; a compaction or clear resets it, since the earlier tip is gone from context.
+      const now = loadSession(sessionId);
+      if (now.nudged?.search) return "";
+      now.nudged = { ...now.nudged, search: true };
+      if (!saveSession(sessionId, now)) return "";
+    }
     log({ event: "nudge", sessionId, harness, model, hook, ids, turn: session.turn });
     return text;
   } catch { return ""; }
@@ -80,6 +87,15 @@ function uiEditNudge(tool, rawInput, sessionId, harness, session) {
     const item = hookItem(tool, rawInput ?? {});
     if (item?.type !== "FileChange" || !item.changes.some(({ path }) => UI_FILE.test(path) && !TEST_PATH.test(path.replaceAll("\\", "/")))) return "";
     return nudgeContext("ui-edit", sessionId, harness, session.model, session);
+  } catch { return ""; }
+}
+
+/** A shell command that searches with grep or find, as a command word (not `git grep`, not an argument). */
+export const LEGACY_SEARCH = /(?:^|[;&|(`]|\$\(|\bxargs(?:\s+-\S+)*)\s*(?:sudo\s+)?(?:[ef]?grep|find)\s/;
+function searchNudge(tool, shown, sessionId, harness, session) {
+  try {
+    if (tool !== "Bash" || !LEGACY_SEARCH.test(shown)) return "";
+    return nudgeContext("search", sessionId, harness, session.model, session);
   } catch { return ""; }
 }
 
@@ -236,7 +252,7 @@ export async function onTool(input) {
     for (const e of notes) now.shown[e.id] = session.turn;
     if (!saveSession(sessionId, now)) return null;
   }
-  const additionalContext = [notes.length ? formatNotes(notes, "Jevis, before this call:") : "", uiEditNudge(tool, rawInput, sessionId, harness, session)].filter(Boolean).join("\n\n");
+  const additionalContext = [notes.length ? formatNotes(notes, "Jevis, before this call:") : "", uiEditNudge(tool, rawInput, sessionId, harness, session), searchNudge(tool, shown, sessionId, harness, session)].filter(Boolean).join("\n\n");
   return additionalContext ? { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext } } : null;
 }
 
@@ -338,6 +354,7 @@ export function onSession(input) {
   const session = loadSession(sessionId);
   if (source === "compact" || source === "clear") {
     session.shown = {};
+    if (session.nudged) session.nudged.search = false;
     if (source === "clear") {
       session.vagueFeedback = 0;
     }
