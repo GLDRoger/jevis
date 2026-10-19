@@ -289,6 +289,18 @@ test("nudges: config accepts on and off, rejects unknown values", () => {
 test("feedback: short vague dissatisfaction matches; clear instructions and long messages do not", () => {
   for (const t of ["not good", "It's not good.", "this doesn't fit what I had in mind", "try again", "nope", "meh", "still wrong", "that\u2019s not it", "not what I wanted", "hmm no, doesn't feel right"]) assert.equal(isVagueFeedback(t), true, t);
   for (const t of ["", "make the header blue", "add a logout button to the nav", "great, ship it", "turn off the dark mode toggle", `not good ${"x".repeat(150)}`]) assert.equal(isVagueFeedback(t), false, t);
+  // Real prompts the old rule matched (Oct 2026 log replay): negative words inside clear instructions, questions and conditionals.
+  for (const t of [
+    "Of course, this doesn't work for system pump, so the entire system pump beast should always be there, but if needed, we can split the user MD.",
+    "Yeah, I think the hook is wrong in this case. You can go ahead.",
+    "what else is most likely to be wrong? lets try fixing that",
+    "Can you fix and finish all the still broken parts?",
+    "the key is in the zsh already if i'm not wrong",
+    "[Image #51] Mail-based automation triggered AI action did not work on its own.",
+    "it doesn't work for mobile",
+    "Is the Azure CLI that much worse?",
+  ]) assert.equal(isVagueFeedback(t), false, t);
+  for (const t of ["[Image #2] still ugly", "not like this", "nope, try something else", "this isn't it", "worse."]) assert.equal(isVagueFeedback(t), true, t);
 });
 
 test("feedback: the first vague correction gets the feedback tip, later ones the stronger tip; GPT only", async () => {

@@ -117,13 +117,19 @@ const formatNotes = (notes, lead) => [lead, ...notes.map((e) => `**${e.title}.**
 
 /**
  * Short feedback that says something missed without saying what: "not good",
- * "try again", "doesn't fit what I had in mind". Code only; every match is
+ * "try again", "doesn't fit what I had in mind". The whole message has to be
+ * the complaint: a negative word inside a longer instruction ("this doesn't
+ * work for X, so do Y"), a question, or a conditional ("if I'm not wrong") is
+ * not vague feedback. A replay over 4,637 logged prompts (Oct 2026) found 9
+ * matches under the old rule, 8 of them false. Code only; every match is
  * logged as a feedback nudge, so misses and false matches show up in review.
  */
-const VAGUE = /\b(?:not (?:good|great|right|it|quite|there|what i (?:wanted|meant|asked for|had in mind))|(?:doesn'?t|does not|didn'?t|did not) (?:fit|work|look right|feel right|match|land)|try again|start over|redo it|do it again|still (?:wrong|broken|bad|not)|that'?s not it|no+pe|meh|nah|wrong|worse|ugly|hate it|not a fan|missed the point)\b/;
+const VAGUE = /\b(?:not (?:good|great|right|it|quite|there|like (?:this|that)|what i (?:wanted|meant|asked for|had in mind))|(?:doesn'?t|does not|didn'?t|did not|isn'?t|is not) (?:fit|work|look right|feel right|match|land|it|right)(?! (?:for|on|with|in|when|if|because|since|unless|at|yet)\b)|try again|try something else|start over|redo it|do it again|still (?:wrong|broken|bad|not (?:it|right|good))|that'?s not it|no+pe|meh|nah|(?<!not )wrong|worse|ugly|hate it|not a fan|missed the point)\b/;
+const VAGUE_MAX_WORDS = 8;
 export function isVagueFeedback(text) {
-  const t = String(text ?? "").trim().toLowerCase().replaceAll("\u2019", "'");
-  return t.length > 0 && t.length <= 150 && VAGUE.test(t);
+  const t = String(text ?? "").replace(/\[image #\d+\]/gi, "").trim().toLowerCase().replaceAll("\u2019", "'");
+  if (!t || t.length > 150 || t.includes("?")) return false;
+  return t.split(/\s+/).length <= VAGUE_MAX_WORDS && VAGUE.test(t);
 }
 
 /** UserPromptSubmit: profile the request and hand over the lessons that match it. */
