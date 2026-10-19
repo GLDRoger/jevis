@@ -65,14 +65,14 @@ test("worker marker is a configurable text setting", () => {
   assert.equal(readConfig(file).errors.length, 1);
 });
 
-test("workers keep session and UI tips, suppress prompt and both feedback tips, and never call Jev on tools", async () => {
+test("workers get session, UI and per-message worker tips, suppress prompt and both feedback tips, and never call Jev on tools", async () => {
   const id = "worker";
   assert.equal(context(onSession({ session_id: id, cwd, model: "gpt-6.1-sol", source: "startup" })), "session tip.");
-  assert.equal(context(await prompt(id, `${WORKER_MARKER} Fix x.`)), "worker tip.", "the worker tip arrives once, on the first prompt");
+  assert.equal(context(await prompt(id, `${WORKER_MARKER} Fix x.`)), "worker tip.", "the worker tip arrives on the first prompt");
   assert.equal(loadSession(id).worker, true);
   assert.equal(context(await tool(id)), "ui-edit tip.");
   assert.equal(await tool(id), null, "UI tip is still once per turn");
-  for (const text of ["not good", "try again"]) assert.equal(await prompt(id, text), null);
+  for (const text of ["not good", "try again"]) assert.equal(context(await prompt(id, text)), "worker tip.", "every worker message gets the worker tip, never the prompt or feedback tips");
   assert.equal(context(await tool(id)), "ui-edit tip.");
   assert.equal(loadSession(id).hookItems.length, 1, "attempted tool evidence is retained");
   await onTool({ session_id: id, cwd, tool_name: "Bash", tool_input: { command: "npm test" } });
@@ -81,7 +81,7 @@ test("workers keep session and UI tips, suppress prompt and both feedback tips, 
   const rows = readLog().filter((r) => ["prompt", "tool"].includes(r.event));
   assert.ok(rows.every((r) => r.worker === true));
   assert.ok(rows.filter((r) => r.event === "tool").every((r) => r.skipped === "worker"));
-  assert.deepEqual(readLog().filter((r) => r.event === "nudge").map((r) => r.hook), ["session", "worker", "ui-edit", "ui-edit"]);
+  assert.deepEqual(readLog().filter((r) => r.event === "nudge").map((r) => r.hook), ["session", "worker", "ui-edit", "worker", "worker", "ui-edit"]);
   assert.equal(existsSync(join(process.env.JEVIS_HOME, "jev")), false);
   onSession({ session_id: id, cwd, source: "clear" });
   assert.equal(loadSession(id).worker, true, "worker status is sticky even across a clear");
@@ -96,7 +96,7 @@ test("marker is first-prompt only; env markers on later prompts become sticky", 
   process.env.AGENT_CALL_DEPTH = "1";
   assert.equal(context(await prompt("person", "not good")), "worker tip.", "a session that becomes a worker later gets the tip then");
   delete process.env.AGENT_CALL_DEPTH;
-  assert.equal(await prompt("person", "try again"), null);
+  assert.equal(context(await prompt("person", "try again")), "worker tip.", "worker status stays once set");
   const before = calls.length;
   await tool("person");
   assert.equal(calls.length, before);

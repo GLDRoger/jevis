@@ -120,7 +120,7 @@ The engine still supports prompt axes for old records and offline evaluations, b
 
 ## Design tips
 
-Generated-design guidance lives in `nudges/*-ui-edit.md`. The retired tool checks in `archive/wiki-v2-refusals/` are not loaded. Tool entries may add context only; Jevis never refuses calls or manages permissions.
+Generated-design guidance lives in `nudges/design-*.md`, given at session start. The retired tool checks in `archive/wiki-v2-refusals/` are not loaded. Tool entries may add context only; Jevis never refuses calls or manages permissions.
 
 ## Writing a good entry
 

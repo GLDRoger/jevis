@@ -17,9 +17,11 @@ import { commandText, readSession } from "./transcript.mjs";
 export function harnessOf(input, { withModel = true } = {}) {
   if (input.model_provider === "gemini-cli" || input.model_provider === "antigravity") return { harness: input.model_provider === "gemini-cli" ? "Gemini CLI" : "Antigravity CLI", model: input.model ? String(input.model) : null };
   if (input.model_provider === "meta") return { harness: "Muse Code", model: input.model ? String(input.model) : null };
-  if (input.model) return { harness: "Codex", model: String(input.model) };
+  // Claude Code now names the model on some events too, so its transcript path decides first.
   const claude = /[\\/]\.claude[\\/]projects[\\/]/.test(input.transcript_path ?? "") || "permission_mode" in input;
-  return { harness: claude ? "Claude Code" : "Codex", model: claude && withModel ? tailModel(input.transcript_path) : null };
+  if (claude) return { harness: "Claude Code", model: input.model ? String(input.model) : withModel ? tailModel(input.transcript_path) : null };
+  if (input.model) return { harness: "Codex", model: String(input.model) };
+  return { harness: "Codex", model: null };
 }
 
 /** The model from the end of a Claude Code transcript, without reading a long file whole. */

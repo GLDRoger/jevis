@@ -112,6 +112,8 @@ test("project lessons: a hostile repository can neither stall a hook nor get aro
 
 test("project lessons: a hook in a trusted repo gives the project's tool note", async () => {
   setTrust(lessons);
+  // Shipped tips are tested in nudges.test.mjs; here they would only mask the bookkeeping-only prompt.
+  process.env.JEVIS_NUDGES = "off";
   setJevTransport(async (body) => ({ answers: Object.fromEntries(Object.keys(body.questions).map((k) => [k, { type: "noul", noul: k === "team/billing" ? 0.95 : 0.02 }])) }));
   const out = await onPrompt({ session_id: "p1", cwd: join(repo, "src"), prompt: "change the invoice rounding in billing.ts" });
   assert.equal(out, null, "prompts do bookkeeping only, even with trusted project lessons");
@@ -121,6 +123,7 @@ test("project lessons: a hook in a trusted repo gives the project's tool note", 
   const elsewhere = await onPrompt({ session_id: "p2", cwd: base, prompt: "change the invoice rounding in billing.ts" });
   assert.equal(elsewhere, null);
   assert.equal(await onTool({ session_id: "p2", cwd: base, ...edit }), null, "outside the repo the project's lessons do not apply");
+  delete process.env.JEVIS_NUDGES;
 });
 
 test("project lessons: wide trees charge folders and non-Markdown entries, and hashing and loading share one bounded walk", { timeout: 10_000 }, (t) => {

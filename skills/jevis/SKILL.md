@@ -55,7 +55,7 @@ Read `WIKI.md` in full first. It defines every field, the state each moment sees
 6. **Write the body for a capable colleague.** Name the failure in a sentence or two, then write `Instead:` and the concrete alternative. Give the reason, because agents rightly distrust unexplained instructions injected mid-session. Keep it under 900 characters.
 7. **Cite the source:** the user's own words, the date, the session or incident. An entry without evidence is an opinion.
 
-A custom tool context tip (shipped design tips live in `nudges/*-ui-edit.md`):
+A custom tool context tip (shipped design tips live in `nudges/design-*.md`, given at session start):
 
 ```markdown
 ---
@@ -101,7 +101,7 @@ The change is live on the next hook call. Nothing needs reinstalling.
 3. Replay real history when the user has it: `jevis replay <session file or id>` on a session where the failure happened and on one where it didn't.
    When you change an existing lesson, `jevis stats --near` shows it against every recorded answer to its current question: how often it would fire today, how often it landed within 0.1 of `min`, and how often `unless` or `when` stood it down. A reworded `ask` starts from zero there, since the old answers were to a different question.
 4. For code changes, add a test beside the existing ones and run `npm test`. Document any new fact or axis in `WIKI.md`.
-5. For a design tip, verify its context appears at the first UI edit without changing the call.
+5. For a design tip, verify it appears in the session-start context for that model family.
 
 `jevis ask` calls the configured decision model, so it needs a TypeSafe key, an OpenAI key with `JEVIS_DECIDER=luna`, or a running self-hosted server. Thresholds were tuned on Jev: when the user runs Luna, test with `JEVIS_DECIDER=luna jevis ask ...` too, and report both probabilities. If it reports an error, say the change is untested rather than implying it works. If Jevis itself seems not to run, `jevis doctor` checks the installation end to end. For changes to the Stop check, suggest the user run Jevis in shadow mode (`node bin/install.mjs --shadow`, then `--live`) for a few days and read `jevis stats`.
 

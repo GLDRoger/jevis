@@ -71,7 +71,8 @@ test("settings: writing keeps other settings, removes a null one, and the file i
 
 test("settings: a hook honors the file, and a broken file leaves Jevis running", () => {
   const home = mkdtempSync(join(tmpdir(), "jevis-config-hook-"));
-  const env = { ...process.env, JEVIS_HOME: home, JEVIS_JEV: "off" };
+  // Tips off: this test counts prompt rows, and tip rows would add to them.
+  const env = { ...process.env, JEVIS_HOME: home, JEVIS_JEV: "off", JEVIS_NUDGES: "off" };
   delete env.JEVIS_DISABLE;
   const prompt = JSON.stringify({ session_id: "s", cwd: tmpdir(), prompt: "make a page" });
   const rows = () => (existsSync(join(home, "log.jsonl")) ? readFileSync(join(home, "log.jsonl"), "utf8").trim().split("\n").filter(Boolean).length : 0);
