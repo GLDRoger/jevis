@@ -100,11 +100,14 @@ test("nudges: broken files are reported and a broken override does not resurrect
   assert.ok(broken.every((b) => typeof b.error === "string" && b.error.length));
 });
 
-test("nudges: family filtering never gives unknown models family-specific context", () => {
+test("nudges: family filtering: gpt, claude, and other for every model outside both", () => {
   put(shipped, "all", "hook: prompt", "Universal.");
   put(shipped, "gpt", "hook: prompt\nfamily: gpt", "GPT context.");
   put(shipped, "claude", "hook: prompt\nfamily: claude", "Claude context.");
+  put(shipped, "rest", "hook: session\nfamily: other", "Other models.");
   put(shipped, "other-hook", "hook: session", "Session only.");
+  for (const model of [null, undefined, "gemini-3"]) assert.deepEqual(nudgeText("session", model, { roots }).ids, ["other-hook", "rest"]);
+  for (const model of ["gpt-6.1-sol", "claude-opus-5-5"]) assert.deepEqual(nudgeText("session", model, { roots }).ids, ["other-hook"]);
   assert.deepEqual(nudgeText("prompt", "gpt-6.1-sol", { roots }), { ids: ["all", "gpt"], text: "Universal.\n\nGPT context." });
   assert.deepEqual(nudgeText("prompt", "claude-opus-5-5", { roots }), { ids: ["all", "claude"], text: "Universal.\n\nClaude context." });
   for (const model of [null, undefined, "gemini-3"]) assert.deepEqual(nudgeText("prompt", model, { roots }), { ids: ["all"], text: "Universal." });
