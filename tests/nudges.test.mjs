@@ -266,7 +266,7 @@ test("nudges: lint reports counts and broken nudges cause exit 1 even when nudge
   const run = () => spawnSync(process.execPath, [cli, "lint"], { env: process.env, cwd, encoding: "utf8" });
   const good = run();
   assert.equal(good.status, 0, good.stderr);
-  assert.match(good.stdout, /nudges: 3 \(session 1, prompt 1, feedback 0, feedback-repeat 0, ui-edit 1, worker 0, search 0\)/);
+  assert.match(good.stdout, /nudges: 3 \(session 1, prompt 1, feedback 0, feedback-repeat 0, ui-edit 1, worker 0, search 0, repeat-failure 0, repeat-check 0, port-in-use 0\)/);
   const broken = put(user, "broken", "hook: unknown");
   process.env.JEVIS_NUDGES = "off";
   const bad = run();

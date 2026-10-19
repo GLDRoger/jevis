@@ -7,6 +7,7 @@ import { insideFolder, splitFolders } from "./paths.mjs";
 import { errorMessage, outageLine } from "./health.mjs";
 import { RESULT_MEMORY, toolResult } from "./post.mjs";
 import { nudgeText } from "./nudges.mjs";
+import { isCheckCommand } from "./bash-facts.mjs";
 
 /**
  * The hooks. Every one fails open: no Jev, no key, a timeout, or a bug
@@ -59,22 +60,30 @@ function sessionOutage(session) {
 }
 
 /** Nudges never judge or block; even their loading and bookkeeping fail open. */
-function nudgeContext(hook, sessionId, harness, model, session) {
+function nudgeContext(hook, sessionId, harness, model, session, key = null) {
   try {
     if (shadow()) return "";
     const { ids, text } = nudgeText(hook, model);
     if (!text) return "";
-    if (hook === "ui-edit") {
+    if (hook === "ui-edit" || hook === "repeat-check") {
+      const flag = hook === "ui-edit" ? "uiEdit" : "repeatCheck";
       const now = loadSession(sessionId);
-      if (now.turn !== session.turn || now.nudged?.uiEdit === session.turn) return "";
-      now.nudged = { ...now.nudged, uiEdit: session.turn };
+      if (now.turn !== session.turn || now.nudged?.[flag] === session.turn) return "";
+      now.nudged = { ...now.nudged, [flag]: session.turn };
       if (!saveSession(sessionId, now)) return "";
     }
-    if (hook === "search") {
+    if (hook === "search" || hook === "port-in-use") {
+      const flag = hook === "search" ? "search" : "portInUse";
       // Once per session; a compaction or clear resets it, since the earlier tip is gone from context.
       const now = loadSession(sessionId);
-      if (now.nudged?.search) return "";
-      now.nudged = { ...now.nudged, search: true };
+      if (now.nudged?.[flag]) return "";
+      now.nudged = { ...now.nudged, [flag]: true };
+      if (!saveSession(sessionId, now)) return "";
+    }
+    if (hook === "repeat-failure") {
+      const now = loadSession(sessionId);
+      if (!key || now.nudged?.repeatFailure?.[key]) return "";
+      now.nudged = { ...now.nudged, repeatFailure: { ...now.nudged?.repeatFailure, [key]: true } };
       if (!saveSession(sessionId, now)) return "";
     }
     log({ event: "nudge", sessionId, harness, model, hook, ids, turn: session.turn });
@@ -96,6 +105,17 @@ function searchNudge(tool, shown, sessionId, harness, session) {
   try {
     if (tool !== "Bash" || !LEGACY_SEARCH.test(shown)) return "";
     return nudgeContext("search", sessionId, harness, session.model, session);
+  } catch { return ""; }
+}
+
+const PORT_IN_USE = /EADDRINUSE|address already in use|port \d+ is already in use/i;
+function midSessionNudges(key, check, sessionId, harness, session) {
+  try {
+    const hooks = [];
+    if (key && session.commandFailures?.[key] >= 2) hooks.push("repeat-failure");
+    if (key && check && session.checkEdits?.[key] === (session.editVersion ?? 0)) hooks.push("repeat-check");
+    if (session.portInUse) hooks.push("port-in-use");
+    return hooks.map((hook) => nudgeContext(hook, sessionId, harness, session.model, session, key)).filter(Boolean).join("\n\n");
   } catch { return ""; }
 }
 
@@ -184,11 +204,19 @@ export async function onPrompt(input) {
 /** Pre-tool hooks record attempts, not execution success. Keep bounded
  * calls as fallback evidence, independently of RECORD.
  */
-function rememberTool(input, tool, rawInput, key) {
+function rememberTool(input, tool, rawInput, key, check) {
   const now = loadSession(input.session_id);
   let changed = false;
+  const item = hookItem(tool, rawInput ?? {});
+  if (item?.type === "FileChange") {
+    now.editVersion = (now.editVersion ?? 0) + 1;
+    changed = true;
+  }
+  if (key && check) {
+    now.checkEdits = { ...now.checkEdits, [key]: now.editVersion ?? 0 };
+    changed = true;
+  }
   if (!input.transcript_path) {
-    const item = hookItem(tool, rawInput ?? {});
     if (item) {
       if (item.type === "CommandExecution") item.command = clip(item.command, HOOK_ITEM_CLIP);
       if (item.type === "FileChange") item.changes = item.changes.slice(0, 20).map((c) => ({ path: clip(c.path, 200) }));
@@ -216,12 +244,25 @@ function rememberTool(input, tool, rawInput, key) {
 export function onPost(input) {
   try {
     if (!input.session_id || !inScope(input.cwd)) return null;
-    const row = toolResult(input);
-    if (!row) return null;
     const session = loadSession(input.session_id);
-    if (row.turnId && session.turnId && row.turnId !== session.turnId) return null;
+    if (input.turn_id && session.turnId && input.turn_id !== session.turnId) return null;
+    // Inspect the result, never the command/arguments. Keep only the fact, not tool output.
+    const port = PORT_IN_USE.test(typeof input.tool_response === "string" ? input.tool_response : JSON.stringify(input.tool_response) ?? "") || PORT_IN_USE.test(input.error ?? "");
+    const row = toolResult(input);
+    if (!row && !port) return null;
+    if (port) session.portInUse = true;
     const prior = session.hookResults ?? [];
-    session.hookResults = mergeToolResults(prior, [row]).slice(-RESULT_MEMORY);
+    if (row) {
+      const it = row.it;
+      const duplicate = it.id && prior.some(({ it: old }) => old.id === it.id && old.completed !== false && old.success === it.success && old.exit_code === it.exit_code);
+      if (it.type === "CommandExecution" && it.completed !== false && !duplicate) {
+        const key = commandKey(it.command);
+        // Persist across prompts, which clear turn-local hookResults. Unknown outcomes break the streak.
+        session.commandFailures = { ...session.commandFailures, [key]: it.success === false ? Math.min(2, (session.commandFailures?.[key] ?? 0) + 1) : 0 };
+      }
+      if (it.type === "FileChange" && it.success === true && !duplicate) session.editVersion = (session.editVersion ?? 0) + 1;
+      session.hookResults = mergeToolResults(prior, [row]).slice(-RESULT_MEMORY);
+    }
     saveSession(input.session_id, session);
   } catch { /* post hooks always fail open */ }
   return null;
@@ -236,6 +277,7 @@ export async function onTool(input) {
   const session = loadSession(sessionId);
   const shown = toolInput(tool, rawInput);
   const key = tool === "Bash" ? commandKey(shown) : null;
+  const check = tool === "Bash" && isCheckCommand(shown);
   const commands = session.commands ?? [];
   const state = { request: session.request ?? "", earlier_requests: session.earlierRequests ?? [], tool, input: shown, marks: inputMarks(shown, { tool, ranBefore: key !== null && commands.includes(key) }), workspace: workspaceOf(cwd) };
   const result = session.worker
@@ -248,17 +290,17 @@ export async function onTool(input) {
   const notes = pickNotes(result.fired, session, 2);
   if (!result.skipped) log({ event: "tool", worker: session.worker || undefined, sessionId, harness, turn: session.turn, tool, input: clip(state.input, 200), subagent: input.agent_id ? true : undefined, ...summary(result), acted: notes.map((e) => e.id), mode: shadow() ? "shadow" : "live" });
   if (shadow()) {
-    rememberTool(input, tool, rawInput, key);
+    rememberTool(input, tool, rawInput, key, check);
     return null;
   }
-  rememberTool(input, tool, rawInput, key);
+  rememberTool(input, tool, rawInput, key, check);
   if (notes.length) {
     // Re-read before writing: other hooks of this session (parallel tool calls, subagents) may have saved while Jev answered.
     const now = loadSession(sessionId);
     for (const e of notes) now.shown[e.id] = session.turn;
     if (!saveSession(sessionId, now)) return null;
   }
-  const additionalContext = [notes.length ? formatNotes(notes, "Jevis, before this call:") : "", uiEditNudge(tool, rawInput, sessionId, harness, session), searchNudge(tool, shown, sessionId, harness, session)].filter(Boolean).join("\n\n");
+  const additionalContext = [notes.length ? formatNotes(notes, "Jevis, before this call:") : "", uiEditNudge(tool, rawInput, sessionId, harness, session), searchNudge(tool, shown, sessionId, harness, session), midSessionNudges(key, check, sessionId, harness, session)].filter(Boolean).join("\n\n");
   return additionalContext ? { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext } } : null;
 }
 
@@ -360,7 +402,7 @@ export function onSession(input) {
   const session = loadSession(sessionId);
   if (source === "compact" || source === "clear") {
     session.shown = {};
-    if (session.nudged) session.nudged.search = false;
+    if (session.nudged) Object.assign(session.nudged, { search: false, repeatFailure: {}, repeatCheck: null, portInUse: false });
     if (source === "clear") {
       session.vagueFeedback = 0;
     }

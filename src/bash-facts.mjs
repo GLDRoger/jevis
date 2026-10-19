@@ -9,6 +9,9 @@ const unknown = () => Object.fromEntries(BASH_FACTS.map((key) => [key, null]));
 const WRITERS = new Set(["tee", "cp", "mv", "install", "touch", "truncate"]);
 const OPENERS = new Set(["open", "say", "afplay", "osascript", "ffplay", "xdg-open"]);
 const RUNNERS = new Set(["npm", "pnpm", "yarn", "bun", "npx", "pytest", "jest", "vitest", "playwright", "tsc", "eslint", "cargo", "go", "make", "cmake", "ctest", "mvn", "gradle", "dotnet"]);
+const checkWords = ([program, ...args]) => RUNNERS.has(program) && args.some((a) => /(?:^|[:/.-])(?:test|tests|spec|check|typecheck|lint|build|jest|vitest|playwright|tsc|eslint)(?:$|[:/.-])/.test(a)) || ["pytest", "jest", "vitest", "playwright", "tsc", "eslint", "ctest"].includes(program) || program === "node" && args.includes("--test");
+/** Recognize check runners even with options outside the effect-proof grammar. */
+export const isCheckCommand = (command) => !String(command).endsWith("…") && Boolean(segments(String(command))?.some(checkWords));
 // These utilities neither execute arbitrary programs nor consume/set
 // credentials. Path/option words naming secrets still leave that lesson in.
 const LOCAL = new Set(["mkdir", "rmdir", "rm", "chmod", "chown", "kill", "pkill", "wait"]);
@@ -164,8 +167,7 @@ export function bashFacts(command) {
     const gitWrite = program === "git" && GIT_WRITES.has(sub);
     merge("git_write", gitWrite ? true : local || simpleWriter || simpleOpener || reader ? false : null);
     merge("writes_file", effects.writes || writer || program === "sed" && args.some((a) => a === "-i" || /^--in-place(?:=|$)/.test(a)) ? true : local || simpleOpener || reader ? false : null);
-    const runner = RUNNERS.has(program) && args.some((a) => /(?:^|[:/.-])(?:test|tests|spec|check|typecheck|lint|build|jest|vitest|playwright|tsc|eslint)(?:$|[:/.-])/.test(a));
-    merge("runs_tests", runner || ["pytest", "jest", "vitest", "playwright", "tsc", "eslint", "ctest"].includes(program) || program === "node" && args.includes("--test") ? true : local || simpleWriter || simpleOpener || reader ? false : null);
+    merge("runs_tests", checkWords([program, ...args]) ? true : local || simpleWriter || simpleOpener || reader ? false : null);
     // Script runners, git hooks, drivers and downloaded binaries can open
     // windows even when the executable's name doesn't look like an opener.
     merge("opens_app", opener ? true : local || reader || simpleWriter ? false : null);
