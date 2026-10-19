@@ -59,7 +59,8 @@ Read ~/code/jevis/skills/jevis/SKILL.md, then add a tip that tells the agent to 
 - [Configuration](docs/configuration.md): the design review, the decision model, every setting, and the commands that show what Jevis is doing.
 - [Other harnesses](docs/harnesses.md): Gemini CLI, Antigravity, Muse Code, the Codex plugin, manual setup, and Windows.
 - [Writing lessons](WIKI.md): checks that depend on what a command or edit contains.
-- [Evidence and model choice](docs/evidence.md): what the v1 evaluation measured, and which coding models to use.
+- [Evidence](docs/evidence.md): what a month of real use and the simulated sessions showed.
+- [Coding models](docs/models.md): the tier list, and what each top model is good for.
 
 ## Privacy
 
