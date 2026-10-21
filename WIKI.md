@@ -4,7 +4,9 @@ A lesson is a check you add to Jevis: a yes/no question that a decision model (o
 
 Each lesson is one Markdown file, `wiki/<area>/<name>.md`. Its id is the path without `wiki/` and `.md`, such as `verification/claim-contradicted`.
 
-Jevis ships one lesson: `verification/claim-contradicted`, decided in code, which sends the agent back when its final message says checks pass and the last check after an edit failed. Retired lessons live in `archive/` and are never loaded.
+Jevis ships one lesson: `verification/claim-contradicted`, decided in code, which sends the agent back when its final message says checks pass while a check run after the last edit has failed on its latest run. Retired lessons live in `archive/` and are never loaded.
+
+A lesson that code can't decide needs a [decision model](docs/configuration.md#the-decision-model), and each check sends the state listed under [What each event can read](#what-each-event-can-read) to it ([cost and privacy](docs/configuration.md#cost-and-privacy)). Commands here are written `jevis <command>`: run them as `node bin/jevis.mjs <command>` from your clone, or run `npm link` once to put `jevis` on your PATH.
 
 ## Where lessons live
 

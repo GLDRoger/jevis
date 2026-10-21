@@ -1,71 +1,38 @@
 # Jevis
 
-Every good role-playing game teaches you how to play it while you play: a tip when you reach a new area, a hint when you're stuck. Jevis does that for coding agents. It's a set of hooks that gives each agent the right short tip at the moment it matters, tuned to that model's known habits.
+Jevis is a set of hooks for coding agents. At set moments in a session, it adds a short tip to what the agent reads: when the session starts, with each message, and before certain commands. Code picks each tip from a Markdown file you can read, edit, or switch off. Tips need no API key, and Jevis makes no network calls for them. The tip text joins the agent's context, which the harness sends to its model provider along with the rest of the conversation.
 
-Tips are short Markdown files you can read, edit, or switch off. Code picks them, so they need no API key and cost only the lines they add to the agent's context. Jevis works with Claude Code and Codex out of the box, and with Gemini CLI, Antigravity, and Muse Code [by hand](docs/harnesses.md).
+For example, an agent is about to run `grep -rn TODO src`:
 
-> **Jevis is not a gate.** It never refuses a tool call or an edit, never manages permissions, and never filters anything. It sends an agent back in only two cases: a final message claiming checks pass when the last run failed, and the optional design review.
+- **Without Jevis**, the command just runs.
+- **With Jevis**, the command still runs unchanged, and the agent also reads: "Search with `rg` instead of `grep` and `fd` instead of `find`: they are installed here, faster, and respect `.gitignore`."
 
-<img src="docs/media/before-after.jpg" width="560" alt="The same pottery-studio prompt given to Codex (GPT-6 Sol) twice. Bare, it made a plain two-column page with a grey 'Studio photo to add' placeholder. With Jevis, it made a full-bleed photo of hands throwing a pot with the headline 'Clock off. Clay on.'">
+Jevis never refuses a tool call or an edit. It sends the agent back in only two cases: a final message that says checks pass while a check run after the last edit failed on its latest run, and an optional design review. [Tips and hooks](docs/tips.md) covers every moment and every tip.
 
-*The same prompt to Codex, bare and with Jevis v1 ([evidence](docs/evidence.md)). There's also a [73-second explainer video](docs/media/jevis-explainer.mp4).*
-
-## What it does
-
-| Moment | Hook | What the agent gets |
-|---|---|---|
-| A session starts, resumes, or is compacted | `SessionStart` | The session guide: read for intent, handle ambiguity, check how the project already works, finish the outcome rather than the words. Concrete judgment examples. Design guidance, including the generated-looking defaults that model's family reaches for. |
-| You send a message | `UserPromptSubmit` | A short reminder of the session guide and a line on interface copy. GPT models also get a line on reading words literally. Short, vague feedback ("not good", "try again") gets a tip on working out what missed, and a second one gets a stronger tip. |
-| The agent is about to run a command or edit | `PreToolUse` | A tip when it fits the moment ([all tips](docs/tips.md)). The call itself is never changed. |
-| A tool finishes | `PostToolUse` | Nothing visible. Jevis records exit codes and changed files for the other hooks. |
-| The agent is about to end its turn | `Stop` | Sent back if its final message says checks pass when the last check after an edit failed. With the design review on, visual work is rendered and reviewed first. |
+**Evidence:** the current tips haven't been measured. They replaced an earlier version that a month-long audit found costly and mostly ineffective. [Evidence](docs/evidence.md) separates what was measured from what is only expected, and explains how to judge Jevis on your own work.
 
 ## Install
 
-You need Node 22 or newer.
+You need Node 22 or newer. Jevis installs into Claude Code and Codex. Gemini CLI, Antigravity, and Muse Code are [set up by hand](docs/harnesses.md).
 
 ```sh
 git clone https://github.com/GLDRoger/jevis.git ~/code/jevis
 cd ~/code/jevis && npm install
-node bin/install.mjs --dry-run   # show what changes in ~/.claude/settings.json and ~/.codex/hooks.json
-node bin/install.mjs             # install for both; old configs are backed up in ~/.jevis/backups/
-node bin/jevis.mjs doctor        # check the setup
+node bin/install.mjs --critic off --dry-run   # shows the changes to ~/.claude/settings.json and ~/.codex/hooks.json
+node bin/install.mjs --critic off             # installs; old configs are backed up in ~/.jevis/backups/
+node bin/jevis.mjs doctor                     # checks the setup
 ```
 
-Hooks take effect in new sessions; Codex asks you to approve them once. Useful flags: `--harness codex` (one harness), `--shadow` (log only, change nothing), `--critic off` (no design review), `--uninstall`. Jevis fails open: if anything breaks, the agent carries on as if it weren't there.
-
-The optional design review renders visual work and has a second model critique it. It needs a working decision model (a key, for the hosted ones), Chrome, and the `claude` or `codex` CLI; without them it's skipped. See [Configuration](docs/configuration.md).
-
-## Make it yours
-
-Your changes live in `~/.jevis/`, so `git pull` never touches them, and they take effect on the next hook call.
-
-- **Change a tip:** copy it from `nudges/` to `~/.jevis/nudges/` with the same name, and edit the copy.
-- **Turn a tip off:** put `off: true` in that copy's frontmatter. `JEVIS_NUDGES=off` turns all tips off.
-- **Add a tip:** a new file in `~/.jevis/nudges/` with one of the [`hook:` values](docs/tips.md).
-- **Add a design rulebook:** write your design rules as Markdown in `~/.jevis/design-law.md`. The design review judges against it.
-- **Add a check:** a lesson in `~/.jevis/wiki/`. Lessons are yes/no questions a decision model answers about a command, an edit, or a final message, and they add a tip when the answer is yes. They need a decision-model key. [WIKI.md](WIKI.md) is the guide.
-- **Share lessons with a repository:** put them in its `.jevis/wiki/`. They load only inside that repository, and only after you run `node bin/jevis.mjs trust <repo>`. Trust is pinned to the files' contents, so any change needs trusting again.
-
-Or have your agent do it. [`skills/jevis/SKILL.md`](skills/jevis/SKILL.md) teaches any coding agent how to change Jevis and prove the change works:
-
-```text
-Read ~/code/jevis/skills/jevis/SKILL.md, then add a tip that tells the agent to run the linter before committing.
-```
+With only the shipped tips and lesson, `--critic off` gives the simplest setup: tips and the end-of-turn check, with no key or decision-model calls. Custom lessons can still make calls. Without the flag, the design review is on, with Claude as the reviewer ([the design review](docs/configuration.md#the-design-review)). Hooks take effect in new sessions, and Codex asks you to approve them once. Other flags, removal, and settings are in [Configuration](docs/configuration.md).
 
 ## Docs
 
-- [Tips](docs/tips.md): every tip, when it shows, and worker sessions.
-- [Configuration](docs/configuration.md): the design review, the decision model, every setting, and the commands that show what Jevis is doing.
+- [Tips and hooks](docs/tips.md): what happens at each moment, every tip, changing or adding tips, and worker sessions.
+- [Configuration](docs/configuration.md): installer flags, the design review, the decision model, settings, files, cost and privacy, and commands that show what Jevis is doing.
 - [Other harnesses](docs/harnesses.md): Gemini CLI, Antigravity, Muse Code, the Codex plugin, manual setup, and Windows.
-- [Writing lessons](WIKI.md): checks that depend on what a command or edit contains.
-- [Evidence](docs/evidence.md): what a month of real use and the simulated sessions showed.
-- [Coding models](docs/models.md): the tier list, and what each top model is good for.
+- [Writing lessons](WIKI.md): checks that depend on what a command, an edit, or a final message contains.
+- [Evidence](docs/evidence.md): what has and hasn't been measured.
+- [Beast and Jevis](https://github.com/GLDRoger/beast/blob/main/docs/layers.md): how Jevis fits with the Beast instruction files.
+- [Overview page](https://github.com/GLDRoger/jevis/blob/main/docs/index.html): a one-page summary with every shipped tip. Open `docs/index.html` from your clone in a browser.
 
-## Privacy
-
-Tips send nothing anywhere. The decision model (only for the design review and your own lessons) receives the user's message, the command or edit, the final message, and file names, as written; the reviewer CLI receives screenshots. Everything else stays in `~/.jevis`, readable only by you.
-
-## Contributing and license
-
-[CONTRIBUTING.md](CONTRIBUTING.md) covers setup and what a change needs to be merged. MIT, see [LICENSE](LICENSE).
+[CONTRIBUTING.md](CONTRIBUTING.md) covers development, and [SECURITY.md](SECURITY.md) covers reporting vulnerabilities. MIT, see [LICENSE](LICENSE).

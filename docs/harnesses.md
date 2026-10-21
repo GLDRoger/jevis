@@ -27,7 +27,7 @@ Muse Code sends the same hook payloads with its own tool names. Use the commands
 
 ## Gemini CLI and Antigravity CLI
 
-These use an adapter, `bin/google-hook.mjs`. Replace `<repo>` with the absolute path to your checkout, and merge these into your existing config. Gemini CLI timeouts are in milliseconds; Antigravity's are in seconds.
+These use an adapter, `bin/google-hook.mjs`. Replace `<repo>` with the absolute path to your checkout, and merge these into your existing config rather than replacing it (Beast, for example, keeps `context.fileName` in the same Gemini file). Gemini CLI timeouts are in milliseconds; Antigravity's are in seconds.
 
 Gemini CLI, under `hooks` in `~/.gemini/settings.json`:
 
@@ -73,7 +73,7 @@ codex plugin marketplace add ~/code/jevis
 codex plugin add jevis@jevis-local
 ```
 
-Then open `/hooks` in a new Codex session and trust Jevis's six hooks. `doctor` doesn't check plugin installs; `jevis stats` shows whether they're firing. The plugin's commands are quoted for macOS and Linux only, so use the installer on Windows.
+Then open `/hooks` in a new Codex session and trust Jevis's six hooks. `doctor` doesn't check plugin installs; `node bin/jevis.mjs stats` counts hook events, so it shows whether they're firing. The plugin's commands are quoted for macOS and Linux only, so use the installer on Windows.
 
 ## Windows
 
