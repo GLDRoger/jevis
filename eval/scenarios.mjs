@@ -1,9 +1,9 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { evaluate } from "../src/engine.mjs";
 import { loadWiki } from "../src/wiki.mjs";
 import { AXES } from "../src/axes.mjs";
 
-/** Real Jev answers for the scenarios the data-flow page shows. The states are written by hand; every answer is a live call. */
+/** Capture current-engine answers to synthetic scenarios (paid calls), never overwrite the archived v1 answers. */
 const wiki = loadWiki();
 const ws = (files, git) => ({ git, files, empty: files.length === 0 });
 const S = [
@@ -55,4 +55,5 @@ for (const s of S) {
 }
 const counts = { entries: wiki.entries.length, byEvent: Object.fromEntries(["prompt", "tool", "stop"].map((e) => [e, wiki.entries.filter((x) => x.event === e).length])), byAction: Object.fromEntries(["context", "deny", "block"].map((a) => [a, wiki.entries.filter((x) => x.action === a).length])) };
 const axes = Object.fromEntries(Object.entries(AXES).map(([ev, qs]) => [ev, Object.fromEntries(Object.entries(qs).map(([k, q]) => [k, q.instructions]))]));
-writeFileSync(new URL("../docs/scenarios.json", import.meta.url), JSON.stringify({ captured: new Date().toISOString(), counts, axes, scenarios: out }, null, 1));
+mkdirSync(new URL("./out/", import.meta.url), { recursive: true });
+writeFileSync(new URL("./out/scenarios.json", import.meta.url), JSON.stringify({ captured: new Date().toISOString(), counts, axes, scenarios: out }, null, 1));

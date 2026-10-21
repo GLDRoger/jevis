@@ -3,7 +3,7 @@
 Thanks for helping. The most useful contributions:
 
 1. **Tips** that change what a model does, backed by sessions where it went wrong without them.
-2. **Evidence.** A SWE-bench, Terminal-Bench, or similar run with and without Jevis.
+2. **Evidence.** The current tips are unmeasured ([docs/evidence.md](docs/evidence.md)). A SWE-bench, Terminal-Bench, or similar run with and without them, or a careful comparison on real work, would help most.
 3. **Harness adapters** beyond the ones in [docs/harnesses.md](docs/harnesses.md).
 4. **Bug fixes**, especially anywhere a hook breaks, stalls, or sends an agent back wrongly.
 
@@ -21,7 +21,7 @@ npm test        # offline: a scripted decision model stands in for Jev and Luna
 npm run lint    # every lesson against WIKI.md, plus every tip
 ```
 
-Both run in CI, on Linux, macOS, and Windows, and must pass before merging.
+Both run in CI, on Linux, macOS, and Windows, and must pass before merging. The tests under `eval/` aren't part of `npm test`; some of them depend on retired v1 code.
 
 ## Adding or changing a tip
 
@@ -44,7 +44,7 @@ A tip is a file in `nudges/` (see [docs/tips.md](docs/tips.md)). It gets merged 
 - **Stay inside the time budgets:** 1.5 s for a tool hook and 3 s for a stop hook, before the optional review. Tool hooks run on every command the agent makes.
 - **Add a test** beside the existing ones in `tests/`. A fix comes with a test that fails without it.
 - **Keep dependencies minimal.** The one runtime dependency is `playwright-core`, for the design review. Explain any new one.
-- **Update the docs your change touches:** a new tip moment in docs/tips.md, a new setting in docs/configuration.md, a new state fact or axis in WIKI.md.
+- **Update the docs your change touches:** a new hook moment or tip in docs/tips.md, a new setting or file in docs/configuration.md, a new state fact or axis in WIKI.md. After changing anything in `nudges/` or `docs/page.html`, run `node docs/build.mjs` to regenerate the overview page, `docs/index.html`; `node docs/build.mjs --check` fails when it's stale.
 
 ## Pull requests
 
