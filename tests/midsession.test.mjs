@@ -10,6 +10,7 @@ import { loadNudges, NUDGES_ROOT } from "../src/nudges.mjs";
 import { readLog } from "../src/state.mjs";
 
 const tips = {
+  "check-in": "Long-run check-in: be thorough in your analysis and bold in your recommendations. When the goal is to improve something, a target met is a checkpoint: confirm the gain is real, then go after the next one.",
   "repeat-failure": "This command has failed twice in a row. Running it again unchanged will fail the same way. Read the actual error, form a new hypothesis, and change something (the code, the command, or the approach) before you run it again. If you're stuck after that, say what you've tried and what you'd try next.",
   "repeat-check": "Nothing has changed since you last ran this check, so it will give the same result. Use the output you already have, or change something first.",
   "port-in-use": "A port is already in use. A server you or the user started is probably still running. Check what owns it (`lsof -i :<port>`). If it's your own earlier dev server, reuse it. Don't kill a process you didn't start, and don't silently switch ports; tell the user if it isn't clear whose it is.",
@@ -116,6 +117,45 @@ test("repeat-check: reuses Stop's common check runners", async () => {
   }
 });
 
+test("check-in: after every 20th tool result since the last message and once after a compaction, never for workers", async () => {
+  const run = (n, extra) => { for (let i = 0; i < n; i++) post(`echo ${i}`, { exit_code: 0 }, extra); };
+  run(19);
+  assert.equal(await bash("echo ok"), null, "19 results are not enough");
+  run(1);
+  assert.equal(context(await tool("Read", { file_path: "a.mjs" })), tips["check-in"]);
+  assert.equal(await bash("echo ok"), null, "shown once per interval");
+  onPost({ session_id: "s", cwd, hook_event_name: "PostToolUse", tool_name: "SomeTool", tool_response: {} });
+  run(19);
+  assert.equal(context(await bash("echo ok")), tips["check-in"], "tools Jevis records nothing else about still count");
+  run(5);
+  onSession({ session_id: "s", cwd, hook_event_name: "PostCompact" });
+  assert.equal(context(await bash("echo ok")), tips["check-in"], "once after a compaction");
+  run(19);
+  assert.equal(await bash("echo ok"), null, "a compaction restarts the count");
+  run(1);
+  assert.equal(context(await bash("echo ok")), tips["check-in"]);
+  run(3);
+  onSession({ session_id: "s", cwd, hook_event_name: "SessionStart", source: "clear" });
+  assert.equal(await bash("echo ok"), null, "a clear restarts the count without a tip");
+  run(15);
+  await prompt();
+  run(19);
+  assert.equal(await bash("echo ok"), null, "a person's message restarts the count");
+  run(1);
+  assert.equal(context(await bash("echo ok")), tips["check-in"]);
+  await prompt();
+  run(19);
+  const recorded = `result-${sequence}`;
+  for (let i = 0; i < 3; i++) post("echo 18", { exit_code: 0 }, { tool_use_id: recorded });
+  assert.equal(await bash("echo ok"), null, "a receipt replayed for a recorded result is not counted again");
+  run(1);
+  assert.equal(context(await bash("echo ok")), tips["check-in"]);
+  const worker = { session_id: "w" };
+  await onPrompt({ ...worker, cwd, model: "gpt-6.1-sol", prompt: `${WORKER_MARKER} Fix x.` });
+  run(20, worker);
+  assert.equal(await bash("echo ok", worker), null, "workers get no check-in");
+});
+
 test("port-in-use: next tool, any result tool, each spelling and case, once per session", async () => {
   assert.equal(await tool("Read", { file_path: "a.mjs" }), null, "no error");
   post("npm start", { exit_code: 0, stdout: "ready" });
@@ -145,7 +185,8 @@ test("mid-session tips reset session allowances on compact and clear", async () 
   assert.equal(context(await bash("node broken.mjs")), expected);
   for (const source of ["compact", "clear"]) {
     onSession({ session_id: "s", cwd, source });
-    assert.equal(context(await bash("node broken.mjs")), tips["repeat-failure"], `${source}: the port tip needs a new port error`);
+    const after = source === "compact" ? `${tips["repeat-failure"]}\n\n${tips["check-in"]}` : tips["repeat-failure"];
+    assert.equal(context(await bash("node broken.mjs")), after, `${source}: the port tip needs a new port error, and only a compaction brings a check-in`);
     assert.equal(await bash("node broken.mjs"), null);
   }
 });
