@@ -116,7 +116,8 @@ function searchNudge(tool, shown, sessionId, harness, session) {
   } catch { return ""; }
 }
 
-/** A long run drifts from the session guide; the check-in tip returns after this many tool results since the person's last message, and once after a compaction. */
+/** A long run drifts from the session guide; the check-in tip returns after this many tool results since the person's last message, and once after a compaction.
+ * Only results the installed hooks see are counted: commands, edits, and MCP calls, not file reads or searches. */
 export const CHECK_IN_EVERY = 20;
 const PORT_IN_USE = /EADDRINUSE|address already in use|port \d+ is already in use/i;
 function midSessionNudges(key, check, sessionId, harness, session) {
@@ -266,10 +267,14 @@ export function onPost(input) {
     const response = input.tool_response && typeof input.tool_response === "object" ? input.tool_response : {};
     const failed = row ? row.it.success === false : input.hook_event_name === "PostToolUseFailure" || response.is_error === true || (response.exit_code ?? 0) !== 0;
     const port = failed && (PORT_IN_USE.test(typeof input.tool_response === "string" ? input.tool_response : JSON.stringify(input.tool_response) ?? "") || PORT_IN_USE.test(input.error ?? ""));
-    session.toolResults = (session.toolResults ?? 0) + 1;
-    if (session.toolResults % CHECK_IN_EVERY === 0) session.checkIn = true;
-    if (port) session.portInUse = true;
     const prior = session.hookResults ?? [];
+    // A receipt replayed for a result already recorded (Antigravity refreshes them at Stop) is not a new tool result.
+    const replay = Boolean(row?.it.id) && prior.some(({ it: old }) => old.id === row.it.id && old.completed !== false);
+    if (!replay) {
+      session.toolResults = (session.toolResults ?? 0) + 1;
+      if (session.toolResults % CHECK_IN_EVERY === 0) session.checkIn = true;
+    }
+    if (port) session.portInUse = true;
     if (row) {
       const it = row.it;
       const duplicate = it.id && prior.some(({ it: old }) => old.id === it.id && old.completed !== false && old.success === it.success && old.exit_code === it.exit_code);

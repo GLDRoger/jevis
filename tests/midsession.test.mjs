@@ -143,6 +143,13 @@ test("check-in: after every 20th tool result since the last message and once aft
   assert.equal(await bash("echo ok"), null, "a person's message restarts the count");
   run(1);
   assert.equal(context(await bash("echo ok")), tips["check-in"]);
+  await prompt();
+  run(19);
+  const recorded = `result-${sequence}`;
+  for (let i = 0; i < 3; i++) post("echo 18", { exit_code: 0 }, { tool_use_id: recorded });
+  assert.equal(await bash("echo ok"), null, "a receipt replayed for a recorded result is not counted again");
+  run(1);
+  assert.equal(context(await bash("echo ok")), tips["check-in"]);
   const worker = { session_id: "w" };
   await onPrompt({ ...worker, cwd, model: "gpt-6.1-sol", prompt: `${WORKER_MARKER} Fix x.` });
   run(20, worker);
