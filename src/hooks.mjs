@@ -82,6 +82,12 @@ function nudgeContext(hook, sessionId, harness, model, session, key = null) {
       if (hook === "port-in-use") now.portInUse = false;
       if (!saveSession(sessionId, now)) return "";
     }
+    if (hook === "check-in") {
+      const now = loadSession(sessionId);
+      if (!now.checkIn) return "";
+      now.checkIn = false;
+      if (!saveSession(sessionId, now)) return "";
+    }
     if (hook === "repeat-failure") {
       const now = loadSession(sessionId);
       if (!key || now.nudged?.repeatFailure?.[key]) return "";
@@ -110,6 +116,8 @@ function searchNudge(tool, shown, sessionId, harness, session) {
   } catch { return ""; }
 }
 
+/** A long run drifts from the session guide; the check-in tip returns after this many tool results, and once after a compaction. */
+export const CHECK_IN_EVERY = 20;
 const PORT_IN_USE = /EADDRINUSE|address already in use|port \d+ is already in use/i;
 function midSessionNudges(key, check, sessionId, harness, session) {
   try {
@@ -117,6 +125,8 @@ function midSessionNudges(key, check, sessionId, harness, session) {
     if (key && session.commandFailures?.[key] >= 2) hooks.push("repeat-failure");
     if (key && check && session.checkEdits?.[key] === (session.editVersion ?? 0)) hooks.push("repeat-check");
     if (session.portInUse) hooks.push("port-in-use");
+    // Workers stay inside their brief; the check-in is for the session a person started.
+    if (session.checkIn && !session.worker) hooks.push("check-in");
     return hooks.map((hook) => nudgeContext(hook, sessionId, harness, session.model, session, key)).filter(Boolean).join("\n\n");
   } catch { return ""; }
 }
@@ -254,7 +264,8 @@ export function onPost(input) {
     const response = input.tool_response && typeof input.tool_response === "object" ? input.tool_response : {};
     const failed = row ? row.it.success === false : input.hook_event_name === "PostToolUseFailure" || response.is_error === true || (response.exit_code ?? 0) !== 0;
     const port = failed && (PORT_IN_USE.test(typeof input.tool_response === "string" ? input.tool_response : JSON.stringify(input.tool_response) ?? "") || PORT_IN_USE.test(input.error ?? ""));
-    if (!row && !port) return null;
+    session.toolResults = (session.toolResults ?? 0) + 1;
+    if (session.toolResults % CHECK_IN_EVERY === 0) session.checkIn = true;
     if (port) session.portInUse = true;
     const prior = session.hookResults ?? [];
     if (row) {
@@ -408,6 +419,8 @@ export function onSession(input) {
   if (source === "compact" || source === "clear") {
     session.shown = {};
     if (session.nudged) Object.assign(session.nudged, { search: false, repeatFailure: {}, repeatCheck: null, portInUse: false });
+    session.toolResults = 0;
+    session.checkIn = source === "compact";
     if (source === "clear") {
       session.vagueFeedback = 0;
     }
