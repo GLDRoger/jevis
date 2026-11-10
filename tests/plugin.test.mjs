@@ -99,7 +99,7 @@ test("plugin: bundled hooks run from a spaced installed path with isolated state
     else {
       // The packaged tips reach the agent; everything else stays quiet.
       if (event === "SessionStart") assert.match(JSON.parse(output).hookSpecificOutput.additionalContext, /How to work in this session/);
-      else if (event === "UserPromptSubmit") assert.match(JSON.parse(output).hookSpecificOutput.additionalContext, /^Interface copy:/);
+      else if (event === "UserPromptSubmit") assert.match(JSON.parse(output).hookSpecificOutput.additionalContext, /^Be thorough/);
       else assert.equal(output, "");
       assert.equal(requests.length, before, "only the tool hook calls the decision model");
     }

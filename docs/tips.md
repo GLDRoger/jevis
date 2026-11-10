@@ -27,7 +27,7 @@ A tip is one Markdown file in [`nudges/`](../nudges/). Its frontmatter says when
 | `hook:` | When it shows | Shipped tips |
 |---|---|---|
 | `session` | Session start, resume, and clear, and after a compaction the harness reports as a session start (Claude Code does) | `base-session.md` (the session guide), `base-session-judgment.md` (judgment examples), `design-base.md`, plus one of `design-claude.md`, `design-gpt.md`, or `design-other.md` |
-| `prompt` | Every message | `base-prompt-copy.md` (interface copy), and `gpt-prompt.md` for GPT models |
+| `prompt` | Every message | `base-prompt.md` (thorough analysis, bold recommendations), `base-prompt-copy.md` (interface copy), and `gpt-prompt.md` for GPT models |
 | `feedback` | Short, vague feedback such as "not good" or "try again". The whole message must be the complaint: eight words or fewer, and not a question. | `base-feedback.md` |
 | `feedback-repeat` | The second and later vague feedback in a session | `base-feedback-repeat.md` |
 | `worker` | Every message in a session started by another agent, instead of the `prompt` tips | none; available for your own |
