@@ -116,7 +116,7 @@ function searchNudge(tool, shown, sessionId, harness, session) {
   } catch { return ""; }
 }
 
-/** A long run drifts from the session guide; the check-in tip returns after this many tool results, and once after a compaction. */
+/** A long run drifts from the session guide; the check-in tip returns after this many tool results since the person's last message, and once after a compaction. */
 export const CHECK_IN_EVERY = 20;
 const PORT_IN_USE = /EADDRINUSE|address already in use|port \d+ is already in use/i;
 function midSessionNudges(key, check, sessionId, harness, session) {
@@ -173,6 +173,8 @@ export async function onPrompt(input) {
   const outage = sessionOutage(session);
   const request = clip(requestText(prompt), 2000);
   if ((session.turn === 0 && isWorkerPrompt(prompt)) || originOf("", process.env) === "agent") session.worker = true;
+  // A person's message carries the per-message tips, so the check-in count starts again from it.
+  if (originOf(prompt) === "person") Object.assign(session, { toolResults: 0, checkIn: false });
   Object.assign(session, {
     previousRequest: session.request,
     // Tool notes can read the recent conversation, not just its latest request.

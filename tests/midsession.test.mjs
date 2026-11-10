@@ -117,7 +117,7 @@ test("repeat-check: reuses Stop's common check runners", async () => {
   }
 });
 
-test("check-in: after every 20th tool result and once after a compaction, never for workers", async () => {
+test("check-in: after every 20th tool result since the last message and once after a compaction, never for workers", async () => {
   const run = (n, extra) => { for (let i = 0; i < n; i++) post(`echo ${i}`, { exit_code: 0 }, extra); };
   run(19);
   assert.equal(await bash("echo ok"), null, "19 results are not enough");
@@ -137,6 +137,12 @@ test("check-in: after every 20th tool result and once after a compaction, never 
   run(3);
   onSession({ session_id: "s", cwd, hook_event_name: "SessionStart", source: "clear" });
   assert.equal(await bash("echo ok"), null, "a clear restarts the count without a tip");
+  run(15);
+  await prompt();
+  run(19);
+  assert.equal(await bash("echo ok"), null, "a person's message restarts the count");
+  run(1);
+  assert.equal(context(await bash("echo ok")), tips["check-in"]);
   const worker = { session_id: "w" };
   await onPrompt({ ...worker, cwd, model: "gpt-6.1-sol", prompt: `${WORKER_MARKER} Fix x.` });
   run(20, worker);

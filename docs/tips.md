@@ -35,7 +35,7 @@ A tip is one Markdown file in [`nudges/`](../nudges/). Its frontmatter says when
 | `repeat-failure` | A command about to run again after its last two runs failed (once per command) | `base-repeat-failure.md` |
 | `repeat-check` | A test or build about to rerun with no edit since the last run. Edits made by shell commands aren't tracked. | `base-repeat-check.md` |
 | `port-in-use` | The next tool call after one failed because a port was taken | `base-port-in-use.md` |
-| `check-in` | The next tool call after every 20th tool result, and the first tool call after a compaction. Not shown to workers. | `base-check-in.md` |
+| `check-in` | The next tool call after every 20th tool result since your last message, and the first tool call after a compaction. Not shown to workers. | `base-check-in.md` |
 | `ui-edit` | The first interface edit of a turn | none; available for your own |
 
 The design tips go out at session start so that they reach the first file the agent writes. Each family's list of generated-looking defaults comes from the maintainer's own logs.
