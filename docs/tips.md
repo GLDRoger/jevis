@@ -6,10 +6,10 @@ The harness calls Jevis at five moments. Each call is a short-lived `node bin/je
 
 | Moment | Hook | What Jevis does |
 |---|---|---|
-| A session starts, resumes, is cleared, or is compacted | `SessionStart` (`PostCompact` too) | Adds the `session` tips: the session guide, judgment examples, and design reminders for that model's family. About 3.5 KB. `PostCompact` adds no text; it only lets once-per-session tips show again. |
-| You send a message | `UserPromptSubmit` | Adds the `prompt` tips, about 0.7 KB (about 1 KB for GPT models), plus a `feedback` tip after short, vague feedback. It also records the request and turn number for the other hooks. |
-| The agent is about to run a command or edit | `PreToolUse` | Adds a tip only when one fits the moment (`search`, `repeat-failure`, `repeat-check`, `port-in-use`). The call itself is never changed or refused. |
-| A tool finishes | `PostToolUse` (and Claude Code's `PostToolUseFailure`) | Adds nothing. Records exit codes, failures, and changed files, locally. |
+| A session starts, resumes, is cleared, or is compacted | `SessionStart` (`PostCompact` too) | Adds the `session` tips: the session guide, judgment examples, and design reminders for that model's family. About 3.5 KB. `PostCompact` adds no text; it only lets once-per-session tips show again and queues the `check-in` tip. |
+| You send a message | `UserPromptSubmit` | Adds the `prompt` tips, about 0.1 KB (about 0.3 KB for GPT models), plus a `feedback` tip after short, vague feedback. It also records the request and turn number for the other hooks. |
+| The agent is about to run a command or edit | `PreToolUse` | Adds a tip only when one fits the moment (`search`, `repeat-failure`, `repeat-check`, `port-in-use`, `check-in`). The call itself is never changed or refused. |
+| A tool finishes | `PostToolUse` (and Claude Code's `PostToolUseFailure`) | Adds nothing. Records exit codes, failures, changed files, and the tool-result count for the `check-in` tip, locally. |
 | The agent is about to end its turn | `Stop` | Sends the agent back, at most once a turn, if its final message says checks pass while any check run after the last edit failed on its latest run. Code decides this from the turn's recorded exit codes. If that check doesn't fire and the [design review](configuration.md#the-design-review) is on, finished visual work is rendered and reviewed. |
 
 Jevis never refuses a tool call or an edit, never manages permissions, and never filters anything. Beyond the tips and that one check, it acts only on [lessons](../WIKI.md) you add.

@@ -110,7 +110,7 @@ Everything lives in `~/.jevis/`. On macOS and Linux it's readable only by you (f
 
 ## Cost and privacy
 
-**Tips** are chosen locally, and Jevis makes no network calls for them. Their text joins the agent's context, so it goes to your model provider with the rest of the conversation. Their cost is that context: about 3.5 KB at session start (and again after a compaction or clear), about 0.7 KB on every message (about 1 KB for GPT models), and a sentence or two when a moment-specific tip fires.
+**Tips** are chosen locally, and Jevis makes no network calls for them. Their text joins the agent's context, so it goes to your model provider with the rest of the conversation. Their cost is that context: about 3.5 KB at session start (and again after a compaction or clear), about 0.1 KB on every message (about 0.3 KB for GPT models), and a sentence or two when a moment-specific tip fires.
 
 **The decision model** is called only for the design review's yes/no check and for lessons you add. It receives the user's message, the command or added lines of an edit, the final message, and file names, all as written. Nothing is masked first, so a key typed into a command is sent and recorded in `jev/calls.jsonl` as it is. Prices change, so this page quotes none. Set `JEVIS_PRICE_IN` and `JEVIS_PRICE_OUT` from your provider's current price list, and `node bin/jevis.mjs cost` turns recorded token counts into dollars.
 
