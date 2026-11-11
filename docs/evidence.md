@@ -10,7 +10,7 @@ Statements about Jevis fall into three kinds, and this page keeps them apart:
 
 **Mechanism, tested.** Code picks every tip, with no model call and no network. Each hook fails open. Worker sessions make no external calls, and the end-of-turn check sends an agent back only on a claim its own recorded commands contradict. `npm test` exercises each of these offline, on Linux, macOS, and Windows. Passing tests show that the right text reaches the agent at the right moment. They don't show that the agent works better for it.
 
-**Expected, unmeasured.** The tips are meant to keep selected guidance in front of the agent while it works: the session guide at the start, a short reminder with each message, and a specific tip at moments where agents often go wrong, such as rerunning a failing command unchanged. The current tips started logging on 19 October 2026, and nobody has measured their effect yet.
+**Expected, unmeasured.** The tips are meant to keep selected guidance in front of the agent while it works: the session guide at the start, a check-in during long runs, and a specific tip at moments where agents often go wrong, such as rerunning a failing command unchanged. The current tips started logging on 19 October 2026, and nobody has measured their effect yet.
 
 **Observed after the change.** In the maintainer's log, tool checks that called the decision model fell from about 29,000 on 15 October 2026 to 11 on 19 October, once the v1 lessons were retired.
 
