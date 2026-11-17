@@ -7,7 +7,7 @@ The harness calls Jevis at five moments. Each call is a short-lived `node bin/je
 | Moment | Hook | What Jevis does |
 |---|---|---|
 | A session starts, resumes, is cleared, or is compacted | `SessionStart` (`PostCompact` too) | Adds the `session` tips: the session guide, judgment examples, and design reminders for that model's family. About 3.5 KB. `PostCompact` adds no text; it only lets once-per-session tips show again and queues the `check-in` tip. |
-| You send a message | `UserPromptSubmit` | Adds the `prompt` tips, about 0.1 KB (about 0.3 KB for GPT models), plus a `feedback` tip after short, vague feedback. It also records the request and turn number for the other hooks. |
+| You send a message | `UserPromptSubmit` | Adds the `prompt` tips, about 0.2 KB (about 0.5 KB for GPT models), plus a `feedback` tip after short, vague feedback. It also records the request and turn number for the other hooks. |
 | The agent is about to run a command or edit | `PreToolUse` | Adds a tip only when one fits the moment (`search`, `repeat-failure`, `repeat-check`, `port-in-use`, `check-in`). The call itself is never changed or refused. |
 | A tool finishes | `PostToolUse` (and Claude Code's `PostToolUseFailure`) | Adds nothing. Records exit codes, failures, changed files, and the tool-result count for the `check-in` tip, locally. |
 | The agent is about to end its turn | `Stop` | Sends the agent back, at most once a turn, if its final message says checks pass while any check run after the last edit failed on its latest run. Code decides this from the turn's recorded exit codes. If that check doesn't fire and the [design review](configuration.md#the-design-review) is on, finished visual work is rendered and reviewed. |
@@ -27,7 +27,7 @@ A tip is one Markdown file in [`nudges/`](../nudges/). Its frontmatter says when
 | `hook:` | When it shows | Shipped tips |
 |---|---|---|
 | `session` | Session start, resume, and clear, and after a compaction the harness reports as a session start (Claude Code does) | `base-session.md` (the session guide), `base-session-judgment.md` (judgment examples), `design-base.md`, plus one of `design-claude.md`, `design-gpt.md`, or `design-other.md` |
-| `prompt` | Every message | `base-prompt-copy.md` (interface copy), and `gpt-prompt.md` for GPT models |
+| `prompt` | Every message | `base-prompt-copy.md` (interface copy), `base-prompt-tools.md` (search the web for the latest free tools first), and `gpt-prompt.md` for GPT models |
 | `feedback` | Short, vague feedback such as "not good" or "try again". The whole message must be the complaint: eight words or fewer, and not a question. | `base-feedback.md` |
 | `feedback-repeat` | The second and later vague feedback in a session | `base-feedback-repeat.md` |
 | `worker` | Every message in a session started by another agent, instead of the `prompt` tips | none; available for your own |
