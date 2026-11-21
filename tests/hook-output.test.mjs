@@ -54,7 +54,7 @@ test("hook stdout: Google adapters pass only the generic outage and keep the onc
     const output = JSON.parse(await run(GOOGLE, [provider, "SessionStart"], input, env));
     assert.deepEqual(output, provider === "gemini-cli"
       ? { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: OUTAGE } }
-      : { injectSteps: [{ ephemeralMessage: OUTAGE }] });
+      : { injectSteps: [{ systemMessage: { systemMessage: OUTAGE } }] });
     assert.equal(await run(GOOGLE, [provider, "SessionStart"], input, env), "{}");
   }
 });

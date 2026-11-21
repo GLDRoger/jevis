@@ -44,7 +44,7 @@ test('Google Stop retry outputs preserve the code-decided check', () => {
 test('Context is emitted only in provider-supported shapes', () => {
   const note = { hookSpecificOutput: { additionalContext: 'lesson' } };
   assert.deepEqual(googleOutput('gemini-cli', 'BeforeAgent', note), { hookSpecificOutput: { hookEventName: 'BeforeAgent', additionalContext: 'lesson' } });
-  assert.deepEqual(googleOutput('antigravity', 'PreInvocation', note), { injectSteps: [{ ephemeralMessage: 'lesson' }] });
+  assert.deepEqual(googleOutput('antigravity', 'PreInvocation', note), { injectSteps: [{ systemMessage: { systemMessage: 'lesson' } }] });
   assert.deepEqual(googleOutput('antigravity', 'PreToolUse', note), { decision: 'allow' });
   assert.deepEqual(googleOutput('antigravity', 'PreToolUse', null), { decision: 'allow' });
 });
@@ -52,7 +52,9 @@ test('Successful and failed Antigravity post-tool calls are distinguished', () =
   const raw = { conversationId: 's', workspacePaths: ['/w'], toolCall: { name: 'run_command', args: { CommandLine: 'npm test' } } };
   assert.equal(toolResult(googleInput('antigravity', 'PostToolUse', raw)).it.success, null);
   const rows = [{ type: 'GENERIC', step_index: 3, content: 'Created At: now\nCompleted At: later\n\nThe command exited with code 0.\nOutput:\nhello' }];
+  const liveRow = { type: 'GENERIC', step_index: 4, content: 'Created At: 2026-11-21T16:38:22+05:30\nCompleted At: 2026-11-21T16:38:32+05:30\nCommand exited with code 0.\n\nCommand output:\nhello' };
   assert.equal(antigravityExitCode(rows[0]), 0);
+  assert.equal(antigravityExitCode(liveRow), 0);
   assert.equal(antigravityExitCode({ type: 'USER_INPUT', content: rows[0].content }), undefined);
   assert.equal(toolResult(googleInput('antigravity', 'PostToolUse', { ...raw, stepIdx: 3 }, rows)).it.success, true);
   assert.equal(toolResult(googleInput('antigravity', 'PostToolUse', { ...raw, error: 'exit status 1' })).it.success, false);
@@ -90,6 +92,10 @@ test('Gemini Stop uses the end of cumulative output rather than earlier narratio
 test('Antigravity strips user-request wrappers without absorbing metadata', () => {
   const input = googleInput('antigravity', 'PreInvocation', { conversationId: 's', workspacePaths: ['/w'] }, [{ type: 'USER_INPUT', step_index: 0, content: '<USER_REQUEST>\nhello\n</USER_REQUEST><ADDITIONAL_METADATA>noise</ADDITIONAL_METADATA>' }]);
   assert.equal(input.prompt, 'hello');
+  const t3 = googleInput('antigravity', 'PreInvocation', { conversationId: 's', cwd: '/w' }, [{ type: 'USER_INPUT', step_index: 0, content: '<USER_REQUEST>\n<t3_code_instructions>rules</t3_code_instructions>\n<user_request>\ndone?\n</user_request>\n</USER_REQUEST>' }]);
+  assert.equal(t3.prompt, 'done?');
+  assert.equal(t3.cwd, '/w');
+  assert.equal(validGoogleInput('antigravity', { conversationId: 's', cwd: resolve('/w') }), true);
 });
 test('Gemini MCP metadata produces canonical MCP evidence', () => {
   const input = googleInput('gemini-cli', 'BeforeTool', { session_id: 's', cwd: '/w', tool_name: 'mcp_browser_navigate', tool_input: { url: 'https://example.com' }, mcp_context: { server_name: 'browser', tool_name: 'navigate' } });

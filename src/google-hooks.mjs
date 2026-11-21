@@ -28,7 +28,7 @@ export function antigravityMessages(path) {
 }
 
 function antigravityReceipt(row) {
-  const match = row?.type === 'GENERIC' && row.content?.match(/^Created At: ([^\n]+)\nCompleted At: ([^\n]+)\n\nThe command exited with code (-?\d+)\.\n(?:Output|Stdout):/);
+  const match = row?.type === 'GENERIC' && row.content?.match(/^Created At: ([^\n]+)\nCompleted At: ([^\n]+)\n+(?:The )?[Cc]ommand exited with code (-?\d+)\.\n+(?:Output|Stdout|Command output):/);
   if (!match) return undefined;
   const time = value => {
     const ms = Date.parse(value);
@@ -93,14 +93,19 @@ export function googleInput(provider, event, raw, rows = []) {
   const events = { BeforeAgent: 'UserPromptSubmit', PreInvocation: 'UserPromptSubmit', BeforeTool: 'PreToolUse', PreToolUse: 'PreToolUse', AfterTool: 'PostToolUse', PostToolUse: 'PostToolUse', AfterAgent: 'Stop', Stop: 'Stop', SessionStart: 'SessionStart' };
   // Prefix sessions so identical UUIDs from different harnesses never share state.
   const session = agy ? raw.conversationId : raw.session_id;
+  const agyPrompt = (content) => {
+    if (typeof content !== 'string') return undefined;
+    const outer = content.match(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/)?.[1] ?? content;
+    return outer.match(/<user_request>\s*([\s\S]*?)\s*<\/user_request>/)?.[1] ?? outer;
+  };
   return {
     session_id: `${provider}-${session ?? ''}`,
-    cwd: agy ? raw.workspacePaths?.[0] : raw.cwd,
+    cwd: agy ? raw.workspacePaths?.[0] ?? raw.cwd : raw.cwd,
     model_provider: provider,
     model: agy ? raw.modelName : raw.model,
     transcript_path: null,
     hook_event_name: events[event],
-    prompt: agy ? user?.content?.match(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/)?.[1] ?? user?.content : raw.prompt,
+    prompt: agy ? agyPrompt(user?.content) : raw.prompt,
     turn_id: agy ? user?.step_index?.toString() : raw.turn_id,
     last_assistant_message: agy ? final?.content : typeof raw.prompt_response === 'string' ? raw.prompt_response.slice(-3000) : undefined,
     source: raw.source,
@@ -120,7 +125,7 @@ export function googleOutput(provider, event, output) {
   const reason = output.reason;
   if (provider === 'antigravity') {
     if (blocked) return { decision: 'continue', reason };
-    if (specific.additionalContext && ['SessionStart', 'PreInvocation'].includes(event)) return { injectSteps: [{ ephemeralMessage: specific.additionalContext }] };
+    if (specific.additionalContext && ['SessionStart', 'PreInvocation'].includes(event)) return { injectSteps: [{ systemMessage: { systemMessage: specific.additionalContext } }] };
     // Antigravity PreToolUse has no context-injection output field. Notes have
     // already been selected by Jevis; the adapter runner queues them for the next invocation.
     return event === 'PreToolUse' ? { decision: 'allow' } : {};
@@ -135,6 +140,6 @@ const absoluteResolved = (cwd, platform = process.platform) => cwd === resolve(c
 
 export function validGoogleInput(provider, raw) {
   const session = provider === 'antigravity' ? raw.conversationId : raw.session_id;
-  const cwd = provider === 'antigravity' ? raw.workspacePaths?.[0] : raw.cwd;
+  const cwd = provider === 'antigravity' ? raw.workspacePaths?.[0] ?? raw.cwd : raw.cwd;
   return typeof session === 'string' && session.length > 0 && session.length <= 200 && /^[\w-]+$/.test(session) && typeof cwd === 'string' && absoluteResolved(cwd);
 }
