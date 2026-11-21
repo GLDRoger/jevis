@@ -1,10 +1,10 @@
 # Other harnesses
 
-The installer handles Claude Code and Codex. For anything else, add the hooks by hand.
+The installer handles Claude Code and Codex. Wire any other harness by hand below.
 
-## Claude Code and Codex, by hand
+## Claude Code and Codex (manual)
 
-Claude Code reads the `hooks` key of `~/.claude/settings.json`; Codex reads `~/.codex/hooks.json`. Codex treats `apply_patch` as `Edit`/`Write`.
+Claude Code reads `hooks` in `~/.claude/settings.json`; Codex reads `~/.codex/hooks.json` (Codex treats `apply_patch` like `Edit`/`Write`).
 
 ```json
 {
@@ -19,17 +19,17 @@ Claude Code reads the `hooks` key of `~/.claude/settings.json`; Codex reads `~/.
 }
 ```
 
-Claude Code also takes the `hook post` command under `PostToolUseFailure`, with the same matcher.
+In Claude Code, also add the `hook post` entry under `PostToolUseFailure` with the same matcher.
 
 ## Muse Code
 
-Muse Code sends the same hook payloads with its own tool names. Use the commands above in `~/.config/muse/settings.json`, with the tool matcher `^(bash|edit_file|write_file|apply_patch|mcp__.*)$`.
+Put the same block in `~/.config/muse/settings.json`, changing the tool matcher to `^(bash|edit_file|write_file|apply_patch|mcp__.*)$`.
 
 ## Gemini CLI and Antigravity CLI
 
-These use an adapter, `bin/google-hook.mjs`. Replace `<repo>` with the absolute path to your checkout, and merge these into your existing config rather than replacing it (Beast, for example, keeps `context.fileName` in the same Gemini file). Gemini CLI timeouts are in milliseconds; Antigravity's are in seconds.
+Both go through the `bin/google-hook.mjs` adapter. Replace `<repo>` with your absolute checkout path and merge into your existing config (don't overwrite Beast's `context.fileName` in `~/.gemini/settings.json`). Note: Gemini CLI timeouts are in **ms**; Antigravity's are in **seconds**.
 
-Gemini CLI, under `hooks` in `~/.gemini/settings.json`:
+**Gemini CLI** (`hooks` in `~/.gemini/settings.json`):
 
 ```json
 {
@@ -43,7 +43,7 @@ Gemini CLI, under `hooks` in `~/.gemini/settings.json`:
 }
 ```
 
-Antigravity CLI, in `~/.gemini/config/hooks.json` (or `.agents/hooks.json` for one workspace). This file has no `hooks` wrapper:
+**Antigravity CLI** (`~/.gemini/config/hooks.json` or `.agents/hooks.json`, no outer `hooks` key):
 
 ```json
 {
@@ -57,24 +57,24 @@ Antigravity CLI, in `~/.gemini/config/hooks.json` (or `.agents/hooks.json` for o
 }
 ```
 
-These adapters have protocol tests but haven't been tried in live authenticated sessions. `/hooks panel` (Gemini) and `/hooks` (Antigravity) show what loaded.
+Check what loaded with `/hooks panel` (Gemini) or `/hooks` (Antigravity).
 
-## A new harness
+## Adding another harness
 
-A harness that speaks the same JSON-on-stdin protocol should work as is. One with a different protocol needs an adapter in `src/context.mjs` (`harnessOf` and the transcript reader) and `src/hooks.mjs` (output format).
+Anything speaking the same JSON-on-stdin hook contract works out of the box. Otherwise add a small adapter in `src/context.mjs` (`harnessOf` + transcript reader) and `src/hooks.mjs` (output shape).
 
-## The Codex plugin
+## Codex plugin
 
-This repository is also a Codex plugin (`plugin.json`, `hooks/hooks.json`, marketplace in `.agents/plugins/`). It calls the same CLI. Use it *instead of* the installer for Codex, never both, or every hook runs twice:
+Jevis also ships as a Codex plugin (`plugin.json`, `hooks/hooks.json`, `.agents/plugins/`). Use **either** the plugin or the installer for Codex, never both (otherwise every hook fires twice):
 
 ```sh
-node bin/install.mjs --harness codex --uninstall   # if you installed the standard way first
+node bin/install.mjs --harness codex --uninstall
 codex plugin marketplace add ~/code/jevis
 codex plugin add jevis@jevis-local
 ```
 
-Then open `/hooks` in a new Codex session and trust Jevis's six hooks. `doctor` doesn't check plugin installs; `node bin/jevis.mjs stats` counts hook events, so it shows whether they're firing. The plugin's commands are quoted for macOS and Linux only, so use the installer on Windows.
+Then run `/hooks` in a new Codex session and trust Jevis's six hooks. `doctor` doesn't detect plugin installs — check `node bin/jevis.mjs stats` instead. Plugin quoting is macOS/Linux only; use the installer on Windows.
 
 ## Windows
 
-The installer writes commands that work in Git Bash, Windows PowerShell 5.1, PowerShell 7, and cmd. Install Node in a folder without spaces: otherwise it may fall back to `node` on PATH, and `doctor` warns about that. CI runs every hook through each of these shells, but nobody has run a live Claude Code or Codex session on Windows or Linux yet. On Windows the design review can't discover a running dev server, so it reviews a localhost URL mentioned in the turn, or else the changed HTML files.
+The installer works across Git Bash, Windows PowerShell 5.1, PowerShell 7, and cmd. Install Node in a path without spaces (otherwise it falls back to `node` on PATH and `doctor` warns). CI runs the full suite on Windows, Linux, and macOS. On Windows, the design review can't auto-discover running dev servers, so it renders localhost URLs mentioned in the turn or changed HTML files instead.
