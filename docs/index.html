@@ -110,7 +110,7 @@ footer p { margin: 0 0 8px; color: var(--muted); }
   <section class="band" aria-labelledby="moments">
     <h2 id="moments">At each moment</h2>
     <p class="sub">What the harness calls Jevis for, and what Jevis does then.</p>
-<table><thead><tr><th scope="col">Moment</th><th scope="col">Hook</th><th scope="col">What Jevis does</th></tr></thead><tbody><tr><td data-label="Moment">A session starts, resumes, is cleared, or is compacted</td><td data-label="Hook"><code>SessionStart</code> (<code>PostCompact</code> too)</td><td data-label="What Jevis does">Adds the <code>session</code> tips: the session guide, judgment examples, and design reminders for that model's family. About 3.5 KB. <code>PostCompact</code> adds no text; it only lets once-per-session tips show again.</td></tr><tr><td data-label="Moment">You send a message</td><td data-label="Hook"><code>UserPromptSubmit</code></td><td data-label="What Jevis does">Adds the <code>prompt</code> tips, about 0.7 KB (about 1 KB for GPT models), plus a <code>feedback</code> tip after short, vague feedback. It also records the request and turn number for the other hooks.</td></tr><tr><td data-label="Moment">The agent is about to run a command or edit</td><td data-label="Hook"><code>PreToolUse</code></td><td data-label="What Jevis does">Adds a tip only when one fits the moment (<code>search</code>, <code>repeat-failure</code>, <code>repeat-check</code>, <code>port-in-use</code>). The call itself is never changed or refused.</td></tr><tr><td data-label="Moment">A tool finishes</td><td data-label="Hook"><code>PostToolUse</code> (and Claude Code's <code>PostToolUseFailure</code>)</td><td data-label="What Jevis does">Adds nothing. Records exit codes, failures, and changed files, locally.</td></tr><tr><td data-label="Moment">The agent is about to end its turn</td><td data-label="Hook"><code>Stop</code></td><td data-label="What Jevis does">Sends the agent back, at most once a turn, if its final message says checks pass while any check run after the last edit failed on its latest run. Code decides this from the turn's recorded exit codes. If that check doesn't fire and the <a href="https://github.com/GLDRoger/jevis/blob/main/docs/configuration.md#the-design-review">design review</a> is on, finished visual work is rendered and reviewed.</td></tr></tbody></table>
+<table><thead><tr><th scope="col">Moment</th><th scope="col">Hook</th><th scope="col">What Jevis does</th></tr></thead><tbody><tr><td data-label="Moment">A session starts, resumes, is cleared, or is compacted</td><td data-label="Hook"><code>SessionStart</code> (<code>PostCompact</code> too)</td><td data-label="What Jevis does">Adds the <code>session</code> tips: the session guide, judgment examples, and design reminders for that model's family. About 3.5 KB. <code>PostCompact</code> adds no text; it only lets once-per-session tips show again and queues the <code>check-in</code> tip.</td></tr><tr><td data-label="Moment">You send a message</td><td data-label="Hook"><code>UserPromptSubmit</code></td><td data-label="What Jevis does">Adds the <code>prompt</code> tips, about 0.2 KB (about 0.5 KB for GPT models), plus a <code>feedback</code> tip after short, vague feedback. It also records the request and turn number for the other hooks.</td></tr><tr><td data-label="Moment">The agent is about to run a command or edit</td><td data-label="Hook"><code>PreToolUse</code></td><td data-label="What Jevis does">Adds a tip only when one fits the moment (<code>search</code>, <code>repeat-failure</code>, <code>repeat-check</code>, <code>port-in-use</code>, <code>check-in</code>). The call itself is never changed or refused.</td></tr><tr><td data-label="Moment">A tool finishes</td><td data-label="Hook"><code>PostToolUse</code> (and Claude Code's <code>PostToolUseFailure</code>)</td><td data-label="What Jevis does">Adds nothing. Records exit codes, failures, changed files, and the tool-result count for the <code>check-in</code> tip, locally.</td></tr><tr><td data-label="Moment">The agent is about to end its turn</td><td data-label="Hook"><code>Stop</code></td><td data-label="What Jevis does">Sends the agent back, at most once a turn, if its final message says checks pass while any check run after the last edit failed on its latest run. Code decides this from the turn's recorded exit codes. If that check doesn't fire and the <a href="https://github.com/GLDRoger/jevis/blob/main/docs/configuration.md#the-design-review">design review</a> is on, finished visual work is rendered and reviewed.</td></tr></tbody></table>
   </section>
 
   <section class="band" aria-labelledby="tips">
@@ -152,12 +152,12 @@ footer p { margin: 0 0 8px; color: var(--muted); }
 <h3 id="hook-prompt"><code>prompt</code></h3>
 <div class="tips">
 <article class="tip">
-<p class="tip-meta"><a href="https://github.com/GLDRoger/jevis/blob/main/nudges/base-prompt.md">base-prompt.md</a> <span>every model</span></p>
-<p>Reminder: work out what the user actually wants and do what that goal needs, not only what the words say. Make the calls yourself and keep going until the outcome is reached, instead of stopping to offer or ask. Be brave and ambitious: you have the power to do almost anything here. A target met is not the stopping point; when the goal is to improve something, keep driving it and find the next gain. Make weird and wacky suggestions, and don't avoid the better path just because it feels risky; when a proven, standard part does the job, use it. Keep size in proportion to payoff: never make a huge change for a small win.</p>
-</article>
-<article class="tip">
 <p class="tip-meta"><a href="https://github.com/GLDRoger/jevis/blob/main/nudges/base-prompt-copy.md">base-prompt-copy.md</a> <span>every model</span></p>
 <p>Interface copy: short, plain, written from the user's side, with no self-praise.</p>
+</article>
+<article class="tip">
+<p class="tip-meta"><a href="https://github.com/GLDRoger/jevis/blob/main/nudges/base-prompt-web.md">base-prompt-web.md</a> <span>every model</span></p>
+<p>Web: your training is out of date. Before you settle on an approach to this request, search the web for an easier, better, or faster way to do it.</p>
 </article>
 <article class="tip">
 <p class="tip-meta"><a href="https://github.com/GLDRoger/jevis/blob/main/nudges/gpt-prompt.md">gpt-prompt.md</a> <span>GPT models</span></p>
@@ -180,15 +180,6 @@ footer p { margin: 0 0 8px; color: var(--muted); }
 <article class="tip">
 <p class="tip-meta"><a href="https://github.com/GLDRoger/jevis/blob/main/nudges/base-feedback-repeat.md">base-feedback-repeat.md</a> <span>every model</span></p>
 <p>This is not the first vague correction in this session, so the earlier attempts are missing something basic. Stop iterating on the current version. Restate in one line what you now think the user actually wants and why the previous attempts missed it, then rebuild from that understanding. If you genuinely can't tell, ask one short question that offers two concrete directions.</p>
-</article>
-</div>
-</section>
-<section class="hook" aria-labelledby="hook-worker">
-<h3 id="hook-worker"><code>worker</code></h3>
-<div class="tips">
-<article class="tip">
-<p class="tip-meta"><a href="https://github.com/GLDRoger/jevis/blob/main/nudges/base-worker.md">base-worker.md</a> <span>every model</span></p>
-<p>You are working for another agent, not a person, and nobody can answer questions mid-task. Stay inside the brief, make the reasonable call where it is unclear, and list those assumptions in your result. Stop early only when a missing fact or access blocks the task. Report what you did, what you verified, and what you couldn't do.</p>
 </article>
 </div>
 </section>
@@ -225,6 +216,15 @@ footer p { margin: 0 0 8px; color: var(--muted); }
 <article class="tip">
 <p class="tip-meta"><a href="https://github.com/GLDRoger/jevis/blob/main/nudges/base-port-in-use.md">base-port-in-use.md</a> <span>every model</span></p>
 <p>A port is already in use. A server you or the user started is probably still running. Check what owns it (<code>lsof -i :&lt;port&gt;</code>). If it's your own earlier dev server, reuse it. Don't kill a process you didn't start, and don't silently switch ports; tell the user if it isn't clear whose it is.</p>
+</article>
+</div>
+</section>
+<section class="hook" aria-labelledby="hook-check-in">
+<h3 id="hook-check-in"><code>check-in</code></h3>
+<div class="tips">
+<article class="tip">
+<p class="tip-meta"><a href="https://github.com/GLDRoger/jevis/blob/main/nudges/base-check-in.md">base-check-in.md</a> <span>every model</span></p>
+<p>Long-run check-in: be thorough in your analysis and bold in your recommendations. When the goal is to improve something, a target met is a checkpoint: confirm the gain is real, then go after the next one. This codebase is yours: what it's for and how it's built are your call, and you'll keep building on it.</p>
 </article>
 </div>
 </section>

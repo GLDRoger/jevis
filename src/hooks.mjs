@@ -82,6 +82,12 @@ function nudgeContext(hook, sessionId, harness, model, session, key = null) {
       if (hook === "port-in-use") now.portInUse = false;
       if (!saveSession(sessionId, now)) return "";
     }
+    if (hook === "check-in") {
+      const now = loadSession(sessionId);
+      if (!now.checkIn) return "";
+      now.checkIn = false;
+      if (!saveSession(sessionId, now)) return "";
+    }
     if (hook === "repeat-failure") {
       const now = loadSession(sessionId);
       if (!key || now.nudged?.repeatFailure?.[key]) return "";
@@ -110,6 +116,9 @@ function searchNudge(tool, shown, sessionId, harness, session) {
   } catch { return ""; }
 }
 
+/** A long run drifts from the session guide; the check-in tip returns after this many tool results since the person's last message, and once after a compaction.
+ * Only results the installed hooks see are counted: commands, edits, and MCP calls, not file reads or searches. */
+export const CHECK_IN_EVERY = 20;
 const PORT_IN_USE = /EADDRINUSE|address already in use|port \d+ is already in use/i;
 function midSessionNudges(key, check, sessionId, harness, session) {
   try {
@@ -117,6 +126,8 @@ function midSessionNudges(key, check, sessionId, harness, session) {
     if (key && session.commandFailures?.[key] >= 2) hooks.push("repeat-failure");
     if (key && check && session.checkEdits?.[key] === (session.editVersion ?? 0)) hooks.push("repeat-check");
     if (session.portInUse) hooks.push("port-in-use");
+    // Workers stay inside their brief; the check-in is for the session a person started.
+    if (session.checkIn && !session.worker) hooks.push("check-in");
     return hooks.map((hook) => nudgeContext(hook, sessionId, harness, session.model, session, key)).filter(Boolean).join("\n\n");
   } catch { return ""; }
 }
@@ -163,6 +174,8 @@ export async function onPrompt(input) {
   const outage = sessionOutage(session);
   const request = clip(requestText(prompt), 2000);
   if ((session.turn === 0 && isWorkerPrompt(prompt)) || originOf("", process.env) === "agent") session.worker = true;
+  // A person's message carries the per-message tips, so the check-in count starts again from it.
+  if (originOf(prompt) === "person") Object.assign(session, { toolResults: 0, checkIn: false });
   Object.assign(session, {
     previousRequest: session.request,
     // Tool notes can read the recent conversation, not just its latest request.
@@ -254,9 +267,14 @@ export function onPost(input) {
     const response = input.tool_response && typeof input.tool_response === "object" ? input.tool_response : {};
     const failed = row ? row.it.success === false : input.hook_event_name === "PostToolUseFailure" || response.is_error === true || (response.exit_code ?? 0) !== 0;
     const port = failed && (PORT_IN_USE.test(typeof input.tool_response === "string" ? input.tool_response : JSON.stringify(input.tool_response) ?? "") || PORT_IN_USE.test(input.error ?? ""));
-    if (!row && !port) return null;
-    if (port) session.portInUse = true;
     const prior = session.hookResults ?? [];
+    // A receipt replayed for a result already recorded (Antigravity refreshes them at Stop) is not a new tool result.
+    const replay = Boolean(row?.it.id) && prior.some(({ it: old }) => old.id === row.it.id && old.completed !== false);
+    if (!replay) {
+      session.toolResults = (session.toolResults ?? 0) + 1;
+      if (session.toolResults % CHECK_IN_EVERY === 0) session.checkIn = true;
+    }
+    if (port) session.portInUse = true;
     if (row) {
       const it = row.it;
       const duplicate = it.id && prior.some(({ it: old }) => old.id === it.id && old.completed !== false && old.success === it.success && old.exit_code === it.exit_code);
@@ -408,6 +426,8 @@ export function onSession(input) {
   if (source === "compact" || source === "clear") {
     session.shown = {};
     if (session.nudged) Object.assign(session.nudged, { search: false, repeatFailure: {}, repeatCheck: null, portInUse: false });
+    session.toolResults = 0;
+    session.checkIn = source === "compact";
     if (source === "clear") {
       session.vagueFeedback = 0;
     }
