@@ -2,75 +2,70 @@
 
 ## What happens at each moment
 
-The harness calls Jevis at five moments. Each call is a short-lived `node bin/jevis.mjs hook <name>` process that reads JSON on stdin and, at most, adds text to the agent's context or sends the agent back.
+The harness calls `node bin/jevis.mjs hook <name>` at five points, passing JSON on stdin. Each call either adds short text to context or (at `Stop`) sends the agent back.
 
 | Moment | Hook | What Jevis does |
-|---|---|---|
-| A session starts, resumes, is cleared, or is compacted | `SessionStart` (`PostCompact` too) | Adds the `session` tips: the session guide, judgment examples, and design reminders for that model's family. About 3.5 KB. `PostCompact` adds no text; it only lets once-per-session tips show again and queues the `check-in` tip. |
-| You send a message | `UserPromptSubmit` | Adds the `prompt` tips, about 0.2 KB (about 0.5 KB for GPT models), plus a `feedback` tip after short, vague feedback. It also records the request and turn number for the other hooks. |
-| The agent is about to run a command or edit | `PreToolUse` | Adds a tip only when one fits the moment (`search`, `repeat-failure`, `repeat-check`, `port-in-use`, `check-in`). The call itself is never changed or refused. |
-| A tool finishes | `PostToolUse` (and Claude Code's `PostToolUseFailure`) | Adds nothing. Records exit codes, failures, changed files, and the tool-result count for the `check-in` tip, locally. |
-| The agent is about to end its turn | `Stop` | Sends the agent back, at most once a turn, if its final message says checks pass while any check run after the last edit failed on its latest run. Code decides this from the turn's recorded exit codes. If that check doesn't fire and the [design review](configuration.md#the-design-review) is on, finished visual work is rendered and reviewed. |
+| --- | --- | --- |
+| Session starts, resumes, clears, or compacts | `SessionStart` (`PostCompact` too) | Injects `session` tips (session guide, judgment examples, model-family design defaults) — ~3.5 KB. `PostCompact` adds no text; it resets once-per-session tips and queues `check-in`. |
+| You send a message | `UserPromptSubmit` | Injects `prompt` tips (~0.2 KB; ~0.5 KB for GPT) plus a `feedback` tip after short vague complaints. Records the request and turn number locally. |
+| Before a command or edit | `PreToolUse` | Injects a moment tip when triggered (`search`, `repeat-failure`, `repeat-check`, `port-in-use`, `check-in`). Never alters or blocks the call. |
+| After a tool runs | `PostToolUse` (and Claude's `PostToolUseFailure`) | Adds nothing. Logs exit codes, failures, edited files, and tool counts locally. |
+| Before ending a turn | `Stop` | Sends the agent back (max once per turn) if it claims checks pass while a check run after the last edit failed. If that's clean and the [design review](configuration.md#the-design-review) is on, renders finished visual work and reviews it. |
 
-Jevis never refuses a tool call or an edit, never manages permissions, and never filters anything. Beyond the tips and that one check, it acts only on [lessons](../WIKI.md) you add.
+Jevis never blocks a tool call, manages permissions, or filters output. Outside tips and that single pass-claim check, it only acts on [lessons](../WIKI.md) you add.
 
-To see exactly what a hook sends, run it by hand:
+Preview what a hook outputs anytime:
 
 ```sh
-echo '{"session_id":"try","model":"gpt-6-sol"}' | node bin/jevis.mjs hook session
+echo '{"session_id":"try","model":"gpt-6.2-sol"}' | node bin/jevis.mjs hook session
 ```
 
 ## The tips
 
-A tip is one Markdown file in [`nudges/`](../nudges/). Its frontmatter says when the tip is shown (`hook:`) and, optionally, which model family sees it: `family: claude`, `gpt`, or `other`, meaning every model outside those two. The body is what the agent reads, cut at 1,500 characters. Code picks the tips: no model is asked, and Jevis makes no network call. The chosen text joins the agent's context like any other.
+Each tip is a Markdown file in [`nudges/`](../nudges/). Frontmatter sets when it fires (`hook:`) and optionally which model family sees it (`family: claude`, `gpt`, or `other`). Bodies cap at 1,500 characters. Pure local code picks them — zero model calls, zero network.
 
-| `hook:` | When it shows | Shipped tips |
-|---|---|---|
-| `session` | Session start, resume, and clear, and after a compaction the harness reports as a session start (Claude Code does) | `base-session.md` (the session guide), `base-session-judgment.md` (judgment examples), `design-base.md`, plus one of `design-claude.md`, `design-gpt.md`, or `design-other.md` |
-| `prompt` | Every message | `base-prompt-copy.md` (interface copy), `base-prompt-web.md` (search the web for a better way first), and `gpt-prompt.md` for GPT models |
-| `feedback` | Short, vague feedback such as "not good" or "try again". The whole message must be the complaint: eight words or fewer, and not a question. | `base-feedback.md` |
-| `feedback-repeat` | The second and later vague feedback in a session | `base-feedback-repeat.md` |
-| `worker` | Every message in a session started by another agent, instead of the `prompt` tips | none; available for your own |
-| `search` | The first `grep` or `find` command, and again after a compaction | `base-search.md` |
-| `repeat-failure` | A command about to run again after its last two runs failed (once per command) | `base-repeat-failure.md` |
-| `repeat-check` | A test or build about to rerun with no edit since the last run. Edits made by shell commands aren't tracked. | `base-repeat-check.md` |
-| `port-in-use` | The next tool call after one failed because a port was taken | `base-port-in-use.md` |
-| `check-in` | The next tool call after every 20th tool result since your last message, and the first tool call after a compaction. Commands, edits, and MCP calls are counted; file reads and searches are not, because the installed hooks don't see them. Not shown to workers. | `base-check-in.md` |
-| `ui-edit` | The first interface edit of a turn | none; available for your own |
+| `hook:` | When it fires | Shipped tips |
+| --- | --- | --- |
+| `session` | Session start, resume, clear, and compaction-restarts | `base-session.md`, `base-session-judgment.md`, `design-base.md`, plus one of `design-claude.md`, `design-gpt.md`, or `design-other.md` |
+| `prompt` | Every message | `base-prompt-copy.md` (UI copy), `base-prompt-web.md` (check the web for a better approach), and `gpt-prompt.md` for GPT |
+| `feedback` | Short vague pushback ("not good", "try again") — ≤8 words, not a question | `base-feedback.md` |
+| `feedback-repeat` | Second and later vague pushback in a session | `base-feedback-repeat.md` |
+| `worker` | Every message in a worker session (replaces `prompt` tips) | none shipped; add your own |
+| `search` | First `grep` or `find` command (resets after compaction) | `base-search.md` |
+| `repeat-failure` | Re-running a command whose last two runs failed (once per command) | `base-repeat-failure.md` |
+| `repeat-check` | Re-running a test/build with no file edit in between (shell edits aren't tracked) | `base-repeat-check.md` |
+| `port-in-use` | Next tool call after a port-conflict failure | `base-port-in-use.md` |
+| `check-in` | Every 20th tool result since your last message, and first tool call after compaction (skipped for workers) | `base-check-in.md` |
+| `ui-edit` | First UI file edit in a turn | none shipped; add your own |
 
-The design tips go out at session start so that they reach the first file the agent writes. Each family's list of generated-looking defaults comes from the maintainer's own logs.
-
-The shipped tips carry the maintainer's preferences. For example, `base-session.md` describes how the maintainer wants agents to work, and `base-search.md` assumes `rg` and `fd` are installed. Change or switch off any tip that doesn't fit you.
+Design tips go out at session start so they shape the first file written; each family's list of generated-looking tells comes straight from my own logs. Shipped tips reflect my setup (like `rg` and `fd` being installed) — swap or disable anything that doesn't fit yours.
 
 ## Changing tips
 
-Your changes live in `~/.jevis/nudges/`, so `git pull` never touches them. They take effect at the next hook call.
+Put overrides in `~/.jevis/nudges/` so `git pull` never clobbers them. Changes take effect on the next hook call:
 
-- **Change a tip:** copy it from `nudges/` to `~/.jevis/nudges/` under the same name, and edit the copy. It replaces the shipped file.
-- **Switch a tip off:** put `off: true` in the copy's frontmatter. `JEVIS_NUDGES=off` switches every tip off.
-- **Add a tip:** create a new file in `~/.jevis/nudges/` with one of the `hook:` values above.
-- **Check them:** `npm run lint` reports any tip that doesn't load.
+- **Edit a tip:** copy `nudges/<name>.md` to `~/.jevis/nudges/<name>.md` and change it.
+- **Disable a tip:** put `off: true` in that copy's frontmatter (or set `JEVIS_NUDGES=off` to kill all tips).
+- **Add a tip:** drop a new `.md` file in `~/.jevis/nudges/` with any `hook:` above.
+- **Validate:** `npm run lint` catches broken frontmatter or empty bodies.
 
-For checks that depend on what a command or message contains, write a [lesson](../WIKI.md) instead. Lessons need a decision model.
-
-You can also have your agent make the change. [`skills/jevis/SKILL.md`](../skills/jevis/SKILL.md) teaches a coding agent how to change Jevis and check the change:
+If firing depends on what a command or edit actually contains, write a [lesson](../WIKI.md) instead. You can also hand changes to an agent via [`skills/jevis/SKILL.md`](../skills/jevis/SKILL.md):
 
 ```text
 Read ~/code/jevis/skills/jevis/SKILL.md, then add a tip that tells the agent to run the linter before committing.
 ```
 
-A tip earns its place only if it changes what the model does at the moment it shows. It may restate a rule from the agent's instruction files in fewer words, but it must never add a rule those files would contradict. Tips that only repeat what models already do are noise on every send. [Evidence](evidence.md) covers what is and isn't known about whether the current tips change behaviour.
+A tip only earns its context if it changes behavior at that moment. Keep it consistent with your instruction files, and kill anything models already do on their own ([Evidence](evidence.md)).
 
 ## Worker sessions
 
-A session started by another agent is a worker session. Jevis recognises one by any of these signs:
+Jevis treats a session as a worker when it sees any of:
+- `"You were called by another agent. Do this task yourself."` in the first prompt (`JEVIS_WORKER_MARKER` overrides it);
+- a leading bracket tag like `[agent]` or `[broker-job]`;
+- `AGENT_CALL_DEPTH > 0`, `BROKER_JOB_ID`, or `BROKER_DEPTH` in the environment.
 
-- the phrase "You were called by another agent. Do this task yourself." in the first prompt (case-insensitive; `JEVIS_WORKER_MARKER` changes it);
-- a prompt that starts with a bracketed agent tag, such as `[agent]` or `[broker-job]`;
-- `AGENT_CALL_DEPTH` above 0, or `BROKER_JOB_ID` or `BROKER_DEPTH` set, in the environment.
+Workers keep `session` tips and get `worker` tips instead of `prompt` tips. They skip feedback tips, design reviews, and all decision-model calls. Their rows in `log.jsonl` carry `worker: true`.
 
-Workers keep the session tips and get `worker` tips on every message in place of the `prompt` tips; none ships, because the worker rules belong in your agent's instruction file. They get no feedback tips, no design review, and no decision-model or other external calls. Their log rows carry `worker: true`.
+## Fails open
 
-## It fails open
-
-With no key, a timeout, a broken settings file, or a moved checkout, the agent carries on as if Jevis weren't there. `node bin/jevis.mjs doctor` tells that apart from "nothing applied".
+Missing key, timeout, corrupt config, or moved checkout — Jevis gets out of the way and lets the agent keep working. Run `node bin/jevis.mjs doctor` to check what's actually active.

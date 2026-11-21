@@ -7,131 +7,120 @@ node bin/install.mjs [flags]
 ```
 
 | Flag | Effect |
-|---|---|
-| `--dry-run` | Print the changes, write nothing |
-| `--harness claude` or `--harness codex` | One harness; the default is both (`~/.claude/settings.json`, `~/.codex/hooks.json`) |
-| `--critic off`, `--critic codex`, `--critic claude` | Choose the [design review](#the-design-review) reviewer; `claude` is the default |
-| `--shadow`, `--live` | Log decisions without changing sessions, or go back ([limits](evidence.md#judging-it-on-your-own-work)) |
-| `--decider luna`, `--decider jev` | Choose the [decision model](#the-decision-model) |
-| `--jev-url <url>`, `--jev-url typesafe` | Use a self-hosted decision model, or go back to TypeSafe |
+| --- | --- |
+| `--dry-run` | Print planned edits without writing |
+| `--harness claude` / `--harness codex` | Install one harness (default: both `~/.claude/settings.json` and `~/.codex/hooks.json`) |
+| `--critic off` / `--critic codex` / `--critic claude` | Pick the [design review](#the-design-review) reviewer (`claude` default) |
+| `--shadow` / `--live` | Log decisions without injecting anything, or go back live ([limits](evidence.md#judging-it-on-your-own-work)) |
+| `--decider luna` / `--decider jev` | Choose the [decision model](#the-decision-model) |
+| `--jev-url <url>` / `--jev-url typesafe` | Point at a self-hosted decision server, or back to TypeSafe |
 | `--uninstall` | Remove Jevis's hooks |
 
-The installer saves its options in `~/.jevis/config.json`, so they last until you change them. It backs up each file it changes to `~/.jevis/backups/<time>/`, leaves other hooks as they are, and gives the same result when run twice. Hooks take effect in new sessions, and Codex asks you to approve new hooks once. `--uninstall` leaves `~/.jevis` in place, including keys, logs, and backups.
+Flags persist in `~/.jevis/config.json`. Modified files are backed up to `~/.jevis/backups/<time>/`, unrelated hooks stay untouched, and running install twice is idempotent. `--uninstall` keeps `~/.jevis` (keys, logs, backups).
 
-Keep the checkout: hooks call its absolute path. To update, run `git pull` and `npm ci` there; the next hook uses the updated code. If you move the checkout, rerun the installer from its new location. Your settings and overrides in `~/.jevis` stay separate.
+Keep this checkout where you installed it — hooks invoke its absolute path. Update with `git pull && npm ci`; if you move the clone, rerun the installer.
 
 ## The design review
 
-The design review is optional, and on by default. Turn it off with `node bin/install.mjs --critic off` unless you want it.
+On by default; turn it off with `node bin/install.mjs --critic off` if you just want tips.
 
-After a turn of visual work (a page, a component, or a film) that says it's finished, Jevis renders the result in headless Chrome at 1440 and 390 px, plus dark mode if the page has one. For a film, it samples frames: across the whole runtime when the film exposes a render hook, otherwise from the first 40 seconds of playback. If there's a rendered video and `ffmpeg` is installed, it adds a spectrogram and loudness figures, and warns when the video is older than its source. A second model then reviews the screenshots as a designer who didn't make the work. It answers "ship", or gives up to five fixes in the form "Now: A. Instead: X.", and the agent is sent back with them. The first reviewed turn of a session gets two rounds, and later turns get one.
+When a visual turn (page, component, or canvas film) claims it's done, Jevis renders it in headless Chrome at 1440px and 390px (plus dark mode if defined). For films, it samples frames across the runtime (via `renderAt(t)` / `FILM.draw`, or real-time up to 40s) and checks soundtrack loudness/spectrogram if `ffmpeg` is present. A second model reviews the screenshots cold and either says `"ship"` or returns up to 5 `"Now: A. Instead: X."` fixes, sending the agent back (up to 2 rounds on the first reviewed turn, 1 after).
 
-| Install with | Who reviews | Needs |
-|---|---|---|
-| nothing (default) | Claude, through the `claude` CLI | Chrome, `claude` signed in, a decision model |
-| `--critic codex` | Codex, through the `codex` CLI | Chrome, `codex` signed in, a decision model |
-| `--critic off` | nobody | nothing |
+| Flag | Reviewer | Needs |
+| --- | --- | --- |
+| default | Claude (`claude` CLI) | Chrome, signed-in `claude`, decision model |
+| `--critic codex` | Codex (`codex` CLI) | Chrome, signed-in `codex`, decision model |
+| `--critic off` | none | nothing |
 
-Two models take part:
+Two models participate:
+- **Decision model:** checks whether the turn actually finished visual work (skips progress updates). Runs whenever review is on and files changed, so having a key enables it.
+- **Reviewer:** runs via your local CLI (240s per round, 420s Stop timeout; usually 30–90s). Override the model with `JEVIS_CRITIC_MODEL`.
 
-- **The decision model** decides whether a turn should be reviewed at all: was work requested, does the final message say it's done, and is it visual. Progress reports ("the workers are still rendering") aren't reviewed. Jevis asks this whenever the review is on and the turn changed files, before it checks for Chrome or the reviewer CLI. So a key alone is enough to start these calls.
-- **The reviewer** runs on your own plan through its CLI, one invocation per round, with up to 240 s each. The Stop hook's timeout is 420 s, and a round usually takes 30 to 90 s. `JEVIS_CRITIC_MODEL` picks the reviewer's model.
+**What the reviewer sees:** your latest and opening prompts, changed filenames, rendered URLs/paths, render facts (like mobile overflow), and screenshots from `~/.jevis/reviews/`. Claude runs `claude -p` read-only with access to the screenshot dir and your design-rules dir (if your rules live at `~/.jevis/design-law.md`, that grants read access to `~/.jevis` — move the file and point `JEVIS_DESIGN_LAW` at it if you'd rather isolate it from your keys/logs). Codex runs `codex exec` in its read-only sandbox with screenshots attached.
 
-**What the reviewer gets.** The user's latest request and the first request of the conversation, the names of the changed files, the rendered URLs or paths, facts from rendering (such as sideways overflow on a phone), and the screenshots, which are saved in `~/.jevis/reviews/`. The Claude reviewer runs `claude -p` in the project folder with only the Read tool, and with access added to the screenshot folder and to the folder that holds your design rules. If those rules live in `~/.jevis/design-law.md`, that folder is `~/.jevis`, which also holds your keys and logs. If that matters to you, keep the rules file in a folder of its own and point `JEVIS_DESIGN_LAW` at it. The Codex reviewer runs `codex exec` in its read-only sandbox, with the screenshots attached.
-
-**Your design rules.** The reviewer judges against the first of these that exists: `JEVIS_DESIGN_LAW`, `~/.jevis/design-law.md`, `~/.claude/slop.md`, or `~/.codex/slop.md`.
+**Design rules lookup order:** `JEVIS_DESIGN_LAW`, `~/.jevis/design-law.md`, `~/.claude/slop.md`, `~/.codex/slop.md`.
 
 ## The decision model
 
-Tips and the end-of-turn check are decided by code and need no decision model. You need one only for the design review and for any [lessons](../WIKI.md) you add. Jevis asks it yes/no questions and reads back a probability for each.
+Fixed tips and the pass-claim Stop check are pure code and need no decision model. You only need one for the design review or custom [lessons](../WIKI.md).
 
-**TypeSafe Jev** is the default (`jev-1.14.0`). Get a key from the [TypeSafe console](https://console.typesafe.ai), and save it where only you can read it:
+- **TypeSafe Jev (default, `jev-1.14.0`):** grab a key at [console.typesafe.ai](https://console.typesafe.ai) and save it with `chmod 600` (or export `TYPESAFE_API_KEY`):
+  ```sh
+  mkdir -p ~/.jevis/secrets && chmod 700 ~/.jevis ~/.jevis/secrets
+  printf '%s' 'YOUR_KEY' > ~/.jevis/secrets/typesafe_api_key && chmod 600 ~/.jevis/secrets/typesafe_api_key
+  ```
+- **GPT-6 Luna:** uses OpenAI's [Decisions API](https://developers.openai.com/api/docs/guides/decisions). Save your key to `~/.jevis/secrets/openai_api_key` (or `JEVIS_LUNA_KEY` / `OPENAI_API_KEY`) and install with `--decider luna`. Thresholds were tuned on Jev (on the old tool battery Luna caught 24/34 vs Jev's 30/34), so test in shadow mode with `node bin/jevis.mjs stats --near` if switching.
+- **Self-hosted:** any server implementing TypeSafe's `POST /v1/systemone` works (e.g. [Laya](https://github.com/NandhaKishorM/laya)): `node bin/install.mjs --jev-url http://127.0.0.1:8000/v1/systemone`. Stock Laya checkpoints didn't separate my questions (0/35 catches, 4.2s/call on laptop), so fine-tune first using `node bin/jevis.mjs export` and Laya's [fine-tuning notebook](https://github.com/NandhaKishorM/laya/blob/main/notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb). Keep exported datasets private — they contain raw prompts and commands.
 
-```sh
-mkdir -p ~/.jevis/secrets && chmod 700 ~/.jevis ~/.jevis/secrets
-printf '%s' 'YOUR_KEY' > ~/.jevis/secrets/typesafe_api_key && chmod 600 ~/.jevis/secrets/typesafe_api_key
-```
-
-You can set `TYPESAFE_API_KEY` in the agent's environment instead.
-
-**GPT-6 Luna** runs through OpenAI's [Decisions API](https://developers.openai.com/api/docs/guides/decisions). Save the key as `~/.jevis/secrets/openai_api_key` the same way, or set `JEVIS_LUNA_KEY` or `OPENAI_API_KEY`, then install with `--decider luna`. Lesson thresholds were tuned on Jev, and Luna spreads its probabilities differently: on the old tool battery, it caught 24 of 34 cases to Jev's 30. If you switch, start in shadow mode and check `node bin/jevis.mjs stats --near`.
-
-**Self-hosted.** Any server that speaks TypeSafe's `POST /v1/systemone` works, with or without a key, such as [Laya](https://github.com/NandhaKishorM/laya): `node bin/install.mjs --jev-url http://127.0.0.1:8000/v1/systemone`. In the maintainer's tests, Laya's checkpoints of the time didn't separate Jevis's questions (0 of 35 catches, 4.2 s per call on a laptop), so fine-tune it first. `node bin/jevis.mjs export` turns your recorded Jev calls into a training set for Laya's [fine-tuning notebook](https://github.com/NandhaKishorM/laya/blob/main/notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb). The rows hold your prompts and commands as written, so keep the dataset private.
-
-To cut the latency tail, hosted calls send one duplicate request at 1000 ms (or at once, after a fast failure) and use whichever answer arrives first. Self-hosted calls aren't duplicated. A hook waits at most 1.5 s for an answer before a tool call and 3 s at the end of a turn, then carries on without it.
-
-If the decision model fails three times in a row within ten minutes, the agent sees "Jevis is unavailable right now." once per session. Other errors never reach the agent. They stay in the log, and `doctor` reports them.
+Hosted calls hedge after 1000ms (or immediately on fast error) to cut tail latency; self-hosted calls don't hedge. Hooks wait at most 1.5s on tool calls and 3s on stop, then fail open. Three failures in a row within 10 minutes surface `"Jevis is unavailable right now."` once per session; everything else stays in the log.
 
 ## Settings
 
-Every setting except `JEVIS_HOME` can live in `~/.jevis/config.json`, keyed by its name, as in `{ "JEVIS_CRITIC": "off" }`. The environment wins over the file, so `JEVIS_DISABLE=1` in one terminal turns Jevis off there. Keys belong in `~/.jevis/secrets/`, not in the config file. A file that isn't valid JSON is ignored whole, and an invalid setting is ignored on its own. `doctor` names either problem. The installer saves its flags (`--shadow`, `--critic`, `--decider`, `--jev-url`) in this file.
+Any variable except `JEVIS_HOME` can go in `~/.jevis/config.json` (e.g. `{ "JEVIS_CRITIC": "off" }`). Environment variables override the file. Keep keys in `~/.jevis/secrets/`, not in `config.json`. Invalid JSON or values are ignored and flagged by `doctor`.
 
-| Variable | Default | What it does |
-|---|---|---|
-| `JEVIS_MODE=shadow` | off | Log decisions and send the agent nothing ([limits](evidence.md#judging-it-on-your-own-work)) |
-| `JEVIS_DISABLE=1` | off | Turn Jevis off |
-| `JEVIS_NUDGES=off` | on | Turn all tips off |
-| `JEVIS_SCOPE` | everywhere | Folders (`:`-separated; `;` on Windows) Jevis acts in |
-| `JEVIS_CRITIC` | `claude` | Who reviews visual work: `claude`, `codex`, or `off` |
-| `JEVIS_CRITIC_MODEL` | the CLI's default | The reviewer's model |
-| `JEVIS_DESIGN_LAW` | `~/.jevis/design-law.md` | Your design rules for the reviewer |
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `JEVIS_MODE=shadow` | off | Log decisions without sending anything to the agent ([limits](evidence.md#judging-it-on-your-own-work)) |
+| `JEVIS_DISABLE=1` | off | Disable Jevis completely |
+| `JEVIS_NUDGES=off` | on | Disable all tips |
+| `JEVIS_SCOPE` | everywhere | `:`-separated (`;` on Windows) folder allowlist |
+| `JEVIS_CRITIC` | `claude` | Visual reviewer: `claude`, `codex`, or `off` |
+| `JEVIS_CRITIC_MODEL` | CLI default | Reviewer model override |
+| `JEVIS_DESIGN_LAW` | `~/.jevis/design-law.md` | Design rules file for the reviewer |
 | `JEVIS_DECIDER` | `jev` | `jev` or `luna` |
-| `JEVIS_JEV_URL` | TypeSafe | Any `/v1/systemone` server |
-| `JEVIS_JEV_KEY` / `TYPESAFE_API_KEY` | `~/.jevis/secrets/typesafe_api_key` | Jev key; optional for a self-hosted server |
-| `JEVIS_JEV_MODEL` | `jev-1.14.0` on TypeSafe | Model sent with each Jev call |
-| `JEVIS_LUNA_KEY` / `OPENAI_API_KEY` | `~/.jevis/secrets/openai_api_key` | Luna key |
+| `JEVIS_JEV_URL` | TypeSafe | Any `/v1/systemone` endpoint |
+| `JEVIS_JEV_KEY` / `TYPESAFE_API_KEY` | `~/.jevis/secrets/typesafe_api_key` | Jev API key (optional for self-hosted) |
+| `JEVIS_JEV_MODEL` | `jev-1.14.0` on TypeSafe | Jev model name |
+| `JEVIS_LUNA_KEY` / `OPENAI_API_KEY` | `~/.jevis/secrets/openai_api_key` | OpenAI key for Luna |
 | `JEVIS_LUNA_MODEL` | `gpt-6-luna` | Model sent to OpenAI Decisions |
-| `JEVIS_JEV=off` | on | No decision-model calls or new call records; session state and event logs still run |
-| `JEVIS_JEV_CHUNK` | 200; 64 self-hosted | Questions per request |
-| `JEVIS_TIMEOUT_MS` | 1500 tool, 3000 stop | How long a hook waits for the decision model |
-| `JEVIS_WIKI` | Jevis's `wiki/`, `~/.jevis/wiki`, trusted `.jevis/wiki` | Absolute lesson folders, later ones winning; replaces the defaults |
-| `JEVIS_WORKER_MARKER` | `You were called by another agent. Do this task yourself.` | Phrase that marks a worker session |
-| `JEVIS_RECORD=off` | on | Don't keep the decision-model call record (`~/.jevis/jev/`); `log.jsonl` is still written |
-| `JEVIS_PRICE_IN`, `JEVIS_PRICE_OUT` | unset | USD per million tokens, so `cost` shows dollars |
-| `JEVIS_HOME` | `~/.jevis` | Where state, logs, backups, and keys live (environment only) |
+| `JEVIS_JEV=off` | on | Skip decision-model calls (state + event logs still run) |
+| `JEVIS_JEV_CHUNK` | 200 (64 self-hosted) | Questions per request |
+| `JEVIS_TIMEOUT_MS` | 1500 tool / 3000 stop | Decision-model hook timeout |
+| `JEVIS_WIKI` | `wiki/`, `~/.jevis/wiki`, trusted `.jevis/wiki` | Replace default lesson folders (`:` / `;` separated) |
+| `JEVIS_WORKER_MARKER` | `You were called by another agent. Do this task yourself.` | Worker session phrase |
+| `JEVIS_RECORD=off` | on | Stop recording full call payloads in `~/.jevis/jev/` (`log.jsonl` still writes) |
+| `JEVIS_PRICE_IN`, `JEVIS_PRICE_OUT` | unset | USD per 1M tokens for `cost` |
+| `JEVIS_HOME` | `~/.jevis` | State/logs/keys root (env only) |
 
 ## Files Jevis keeps
 
-Everything lives in `~/.jevis/`. On macOS and Linux it's readable only by you (folders 700, files 600). On Windows, Jevis doesn't change permissions, so the folder has whatever access your user profile gives it. `--uninstall` leaves this folder, so delete it yourself to remove keys, logs, and backups.
+Everything stays under `~/.jevis/` (`700` dirs, `600` files on macOS/Linux). `--uninstall` leaves it alone so you keep your logs and backups; delete it manually if you want a clean wipe.
 
 | Path | Holds |
-|---|---|
-| `config.json` | Your settings |
+| --- | --- |
+| `config.json` | Saved settings |
 | `secrets/` | API keys |
-| `nudges/`, `wiki/`, `design-law.md` | Your tips, lessons, and design rules |
-| `trusted.json` | Repositories whose `.jevis/wiki` you trusted, pinned to the files' contents |
-| `sessions/` | Per-session memory: the current request, turn, which tips were shown, command results |
-| `log.jsonl` | One row per hook event, including up to 200 characters of the request, command, or final message, and which tips fired. Always written, and it grows by megabytes a day under heavy use. |
-| `jev/calls.jsonl`, `jev/questions/` | Every decision-model call: the state sent, the answers, timing, and token use. `JEVIS_RECORD=off` stops these, and only these. |
+| `nudges/`, `wiki/`, `design-law.md` | Your tip overrides, custom lessons, and design rules |
+| `trusted.json` | Trusted repo `.jevis/wiki` content hashes |
+| `sessions/` | Per-session state (current prompt, turn, shown tips, command exits) |
+| `log.jsonl` | Hook event log (up to 200 chars of prompt/command/message + fired tip ids; grows fast under heavy use) |
+| `jev/calls.jsonl`, `jev/questions/` | Decision-model payloads, scores, latency, and tokens (`JEVIS_RECORD=off` stops these) |
 | `reviews/` | Design-review screenshots |
-| `backups/` | Harness and config files from before each install |
-| `jev-health.json` | Recent decision-model failures, for the outage line |
-| `proposals/`, `export/` | Output of the `jevis-improve` skill and of `export` |
+| `backups/` | Pre-install backups of harness configs |
+| `jev-health.json` | Recent decision-model failure streak |
+| `proposals/`, `export/` | Output of `jevis-improve` and `export` |
 
 ## Cost and privacy
 
-**Tips** are chosen locally, and Jevis makes no network calls for them. Their text joins the agent's context, so it goes to your model provider with the rest of the conversation. Their cost is that context: about 3.5 KB at session start (and again after a compaction or clear), about 0.2 KB on every message (about 0.5 KB for GPT models), and a sentence or two when a moment-specific tip fires.
-
-**The decision model** is called only for the design review's yes/no check and for lessons you add. It receives the user's message, the command or added lines of an edit, the final message, and file names, all as written. Nothing is masked first, so a key typed into a command is sent and recorded in `jev/calls.jsonl` as it is. Prices change, so this page quotes none. Set `JEVIS_PRICE_IN` and `JEVIS_PRICE_OUT` from your provider's current price list, and `node bin/jevis.mjs cost` turns recorded token counts into dollars.
-
-**The reviewer** runs through your own `claude` or `codex` CLI and plan, so it's billed and governed like any other session with that CLI. It receives what's listed under [the design review](#the-design-review).
-
-**Worker sessions** (started by another agent) make no decision-model or reviewer calls at all.
+- **Tips:** chosen locally, zero network calls. Context cost is ~3.5 KB at session start/compaction, ~0.2 KB per message (~0.5 KB for GPT), and a line or two on tool triggers.
+- **Decision model:** only called for the design review gate and custom lessons. Sends raw prompts, commands/added lines, filenames, and final messages without redaction — so anything typed into a command goes to the decider and `jev/calls.jsonl`. Set `JEVIS_PRICE_IN`/`JEVIS_PRICE_OUT` to have `node bin/jevis.mjs cost` print dollar totals.
+- **Reviewer:** runs on your local `claude` or `codex` CLI plan.
+- **Workers:** zero decision-model or reviewer calls.
 
 ## See what it's doing
 
 ```sh
-node bin/jevis.mjs doctor              # the installation, end to end, with a fix for anything wrong
-node bin/jevis.mjs stats               # decision-model events, latency, and which lessons acted
-node bin/jevis.mjs stats --near        # each lesson against recorded answers: fires and near misses
-node bin/jevis.mjs cost --since 7d     # decision-model calls and tokens per day and hook
-node bin/jevis.mjs replay <session>    # dry-run lessons over a recorded Claude Code or Codex session
+node bin/jevis.mjs doctor              # end-to-end health check with fixes
+node bin/jevis.mjs stats               # decision-model volume, latency, and fired lessons
+node bin/jevis.mjs stats --near        # fires vs near-misses across recorded answers
+node bin/jevis.mjs cost --since 7d     # decision-model calls and tokens per day
+node bin/jevis.mjs replay <session>    # dry-run lessons over a recorded session
 ```
 
-None of these count tips. `stats` reads only lesson and decision-model events, and `cost` covers only decision-model calls, not the context your tips add or what the reviewer CLI spends. Tips are logged as `"event":"nudge"` rows in `log.jsonl`, with the hook and tip ids. To count them:
+`stats` and `cost` track only decision-model/lesson activity. Count tips directly from `log.jsonl`:
 
 ```sh
 jq -r 'select(.event == "nudge") | .ids[]' ~/.jevis/log.jsonl | sort | uniq -c | sort -rn
 ```
 
-To review whether each tip earns its place, ask an agent to follow [`skills/jevis-improve/SKILL.md`](../skills/jevis-improve/SKILL.md): `Read ~/code/jevis/skills/jevis-improve/SKILL.md and review the last 7 days.` It reads your logs and transcripts, writes a report and a proposed diff to `~/.jevis/proposals/<date>/`, and applies nothing.
+To audit whether your tips are actually earning their keep, ask an agent: `Read ~/code/jevis/skills/jevis-improve/SKILL.md and review the last 7 days.` It inspects logs and transcripts, writes a proposal to `~/.jevis/proposals/<date>/`, and edits nothing itself.

@@ -74,8 +74,8 @@ Changes are live on the next hook call. Nothing needs reinstalling.
 2. **For a tip,** run the hook by hand and check the text appears, with a model from the right family:
 
    ```sh
-   echo '{"session_id":"check-tip","model":"gpt-6-sol"}' | node bin/jevis.mjs hook session
-   echo '{"session_id":"check-tip","model":"gpt-6-sol","prompt":"add a settings page"}' | node bin/jevis.mjs hook prompt
+   echo '{"session_id":"check-tip","model":"gpt-6.2-sol"}' | node bin/jevis.mjs hook session
+   echo '{"session_id":"check-tip","model":"gpt-6.2-sol","prompt":"add a settings page"}' | node bin/jevis.mjs hook prompt
    ```
 
 3. **For a lesson,** dry-run one case that should fire and two look-alikes that shouldn't:
@@ -86,7 +86,7 @@ Changes are live on the next hook call. Nothing needs reinstalling.
    <the lines the edit adds>"
    ```
 
-   Add `--model gpt-6-sol` or `--model claude-opus-5-5` for a family lesson. The hit should clear `min` comfortably and the look-alikes should sit under 0.5. If a case lands near the line, reword `ask`, `yes`, and `no` rather than moving `min`. `jevis ask` calls the configured decision model; if it errors, say the lesson is untested. Test on the decider the user runs (`JEVIS_DECIDER=luna` for Luna).
+   Add `--model gpt-6.2-sol` or `--model claude-opus-5-5` for a family lesson. The hit should clear `min` comfortably and the look-alikes should sit under 0.5. If a case lands near the line, reword `ask`, `yes`, and `no` rather than moving `min`. `jevis ask` calls the configured decision model; if it errors, say the lesson is untested. Test on the decider the user runs (`JEVIS_DECIDER=luna` for Luna).
 4. **With history,** `jevis replay <session>` on a session where the failure happened and one where it didn't. For an existing lesson, `jevis stats --near` shows how it fares against every recorded answer.
 5. **For code,** add a test beside the existing ones and run `npm test`.
 
