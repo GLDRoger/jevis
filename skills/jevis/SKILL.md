@@ -31,7 +31,7 @@ Then find the row:
 | judge a fact the state doesn't carry, such as a count | code: a new fact | `src/context.mjs` or `src/hooks.mjs`, then WIKI.md |
 | change how pages or films are reviewed | code | `src/review.mjs` (`criticPrompt`, `REVIEW_ROUNDS`) |
 
-Tip hooks: `session` (start, resume, and after compaction), `prompt` (every message), `feedback` and `feedback-repeat` (short vague feedback, first and later), `worker` (every message in a session another agent started), `search` (first `grep`/`find`, again after compaction), `repeat-failure` (a command about to rerun after its last two runs failed), `repeat-check` (a check about to rerun with no edit since; shell-written changes aren't tracked), `port-in-use` (the next tool call after a port clash), `ui-edit` (first interface edit of a turn). `family:` is `claude`, `gpt`, or `other`; leave it out for every model.
+Tip hooks: `session` (start, resume, and after compaction), `prompt` (every message), `feedback` and `feedback-repeat` (short vague feedback, first and later), `worker` (every message in a session another agent started), `search` (first `grep`/`find`, again after compaction), `repeat-failure` (a command about to rerun after its last two runs failed), `repeat-check` (a check about to rerun with no edit since; shell-written changes aren't tracked), `port-in-use` (the next tool call after a port clash), `check-in` (the next tool call after every 20th tool result since the person's last message, and after compaction; not for workers), `ui-edit` (first interface edit of a turn). `family:` is `claude`, `gpt`, or `other`; leave it out for every model.
 
 Edit the repo's `nudges/` or `wiki/` only when the change is meant for every Jevis user, as a contribution.
 

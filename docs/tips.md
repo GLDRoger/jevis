@@ -6,10 +6,10 @@ The harness calls Jevis at five moments. Each call is a short-lived `node bin/je
 
 | Moment | Hook | What Jevis does |
 |---|---|---|
-| A session starts, resumes, is cleared, or is compacted | `SessionStart` (`PostCompact` too) | Adds the `session` tips: the session guide, judgment examples, and design reminders for that model's family. About 3.5 KB. `PostCompact` adds no text; it only lets once-per-session tips show again. |
-| You send a message | `UserPromptSubmit` | Adds the `prompt` tips, about 0.7 KB (about 1 KB for GPT models), plus a `feedback` tip after short, vague feedback. It also records the request and turn number for the other hooks. |
-| The agent is about to run a command or edit | `PreToolUse` | Adds a tip only when one fits the moment (`search`, `repeat-failure`, `repeat-check`, `port-in-use`). The call itself is never changed or refused. |
-| A tool finishes | `PostToolUse` (and Claude Code's `PostToolUseFailure`) | Adds nothing. Records exit codes, failures, and changed files, locally. |
+| A session starts, resumes, is cleared, or is compacted | `SessionStart` (`PostCompact` too) | Adds the `session` tips: the session guide, judgment examples, and design reminders for that model's family. About 3.5 KB. `PostCompact` adds no text; it only lets once-per-session tips show again and queues the `check-in` tip. |
+| You send a message | `UserPromptSubmit` | Adds the `prompt` tips, about 0.2 KB (about 0.5 KB for GPT models), plus a `feedback` tip after short, vague feedback. It also records the request and turn number for the other hooks. |
+| The agent is about to run a command or edit | `PreToolUse` | Adds a tip only when one fits the moment (`search`, `repeat-failure`, `repeat-check`, `port-in-use`, `check-in`). The call itself is never changed or refused. |
+| A tool finishes | `PostToolUse` (and Claude Code's `PostToolUseFailure`) | Adds nothing. Records exit codes, failures, changed files, and the tool-result count for the `check-in` tip, locally. |
 | The agent is about to end its turn | `Stop` | Sends the agent back, at most once a turn, if its final message says checks pass while any check run after the last edit failed on its latest run. Code decides this from the turn's recorded exit codes. If that check doesn't fire and the [design review](configuration.md#the-design-review) is on, finished visual work is rendered and reviewed. |
 
 Jevis never refuses a tool call or an edit, never manages permissions, and never filters anything. Beyond the tips and that one check, it acts only on [lessons](../WIKI.md) you add.
@@ -27,19 +27,20 @@ A tip is one Markdown file in [`nudges/`](../nudges/). Its frontmatter says when
 | `hook:` | When it shows | Shipped tips |
 |---|---|---|
 | `session` | Session start, resume, and clear, and after a compaction the harness reports as a session start (Claude Code does) | `base-session.md` (the session guide), `base-session-judgment.md` (judgment examples), `design-base.md`, plus one of `design-claude.md`, `design-gpt.md`, or `design-other.md` |
-| `prompt` | Every message | `base-prompt.md` (a short reminder of the guide), `base-prompt-copy.md` (interface copy), and `gpt-prompt.md` for GPT models |
+| `prompt` | Every message | `base-prompt-copy.md` (interface copy), `base-prompt-web.md` (search the web for a better way first), and `gpt-prompt.md` for GPT models |
 | `feedback` | Short, vague feedback such as "not good" or "try again". The whole message must be the complaint: eight words or fewer, and not a question. | `base-feedback.md` |
 | `feedback-repeat` | The second and later vague feedback in a session | `base-feedback-repeat.md` |
-| `worker` | Every message in a session started by another agent, instead of the `prompt` tips | `base-worker.md` |
+| `worker` | Every message in a session started by another agent, instead of the `prompt` tips | none; available for your own |
 | `search` | The first `grep` or `find` command, and again after a compaction | `base-search.md` |
 | `repeat-failure` | A command about to run again after its last two runs failed (once per command) | `base-repeat-failure.md` |
 | `repeat-check` | A test or build about to rerun with no edit since the last run. Edits made by shell commands aren't tracked. | `base-repeat-check.md` |
 | `port-in-use` | The next tool call after one failed because a port was taken | `base-port-in-use.md` |
+| `check-in` | The next tool call after every 20th tool result since your last message, and the first tool call after a compaction. Commands, edits, and MCP calls are counted; file reads and searches are not, because the installed hooks don't see them. Not shown to workers. | `base-check-in.md` |
 | `ui-edit` | The first interface edit of a turn | none; available for your own |
 
 The design tips go out at session start so that they reach the first file the agent writes. Each family's list of generated-looking defaults comes from the maintainer's own logs.
 
-The shipped tips carry the maintainer's preferences. For example, `base-prompt.md` asks for bold, ambitious work, and `base-search.md` assumes `rg` and `fd` are installed. Change or switch off any tip that doesn't fit you.
+The shipped tips carry the maintainer's preferences. For example, `base-session.md` describes how the maintainer wants agents to work, and `base-search.md` assumes `rg` and `fd` are installed. Change or switch off any tip that doesn't fit you.
 
 ## Changing tips
 
@@ -68,7 +69,7 @@ A session started by another agent is a worker session. Jevis recognises one by 
 - a prompt that starts with a bracketed agent tag, such as `[agent]` or `[broker-job]`;
 - `AGENT_CALL_DEPTH` above 0, or `BROKER_JOB_ID` or `BROKER_DEPTH` set, in the environment.
 
-Workers keep the session tips and get the worker tip on every message: no one can answer questions, so make the call and list assumptions. They get no feedback tips, no design review, and no decision-model or other external calls. Their log rows carry `worker: true`.
+Workers keep the session tips and get `worker` tips on every message in place of the `prompt` tips; none ships, because the worker rules belong in your agent's instruction file. They get no feedback tips, no design review, and no decision-model or other external calls. Their log rows carry `worker: true`.
 
 ## It fails open
 
