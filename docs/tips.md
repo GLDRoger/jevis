@@ -61,8 +61,8 @@ A tip only earns its context if it changes behavior at that moment. Keep it cons
 
 Jevis treats a session as a worker when it sees any of:
 - `"You were called by another agent. Do this task yourself."` in the first prompt (`JEVIS_WORKER_MARKER` overrides it);
-- a leading bracket tag like `[agent]` or `[broker-job]`;
-- `AGENT_CALL_DEPTH > 0`, `BROKER_JOB_ID`, or `BROKER_DEPTH` in the environment.
+- a leading `[agent]` bracket tag;
+- `AGENT_CALL_DEPTH > 0` in the environment.
 
 Workers keep `session` tips and get `worker` tips instead of `prompt` tips. They skip feedback tips, design reviews, and all decision-model calls. Their rows in `log.jsonl` carry `worker: true`.
 

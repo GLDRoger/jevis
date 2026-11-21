@@ -71,7 +71,7 @@ try {
       const session = loadSession(input.session_id);
       if (session.googlePendingNotes?.length) {
         const notes = session.googlePendingNotes.join('\n\n');
-        if (provider === 'antigravity') result.injectSteps = [...(result.injectSteps ?? []), { ephemeralMessage: notes }];
+        if (provider === 'antigravity') result.injectSteps = [...(result.injectSteps ?? []), { systemMessage: { systemMessage: notes } }];
         else result.hookSpecificOutput = { hookEventName: event, additionalContext: notes };
         session.googlePendingNotes = [];
         saveSession(input.session_id, session);

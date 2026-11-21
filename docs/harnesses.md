@@ -59,6 +59,8 @@ Both go through the `bin/google-hook.mjs` adapter. Replace `<repo>` with your ab
 
 Check what loaded with `/hooks panel` (Gemini) or `/hooks` (Antigravity).
 
+If you run Antigravity inside **T3 Code**, T3 sets `GEMINI_HOME` to `~/.t3/userdata/providers/antigravity/<id>`, so symlink `~/.gemini/config/hooks.json` into `~/.t3/userdata/providers/antigravity/<id>/config/hooks.json` as well.
+
 ## Adding another harness
 
 Anything speaking the same JSON-on-stdin hook contract works out of the box. Otherwise add a small adapter in `src/context.mjs` (`harnessOf` + transcript reader) and `src/hooks.mjs` (output shape).
